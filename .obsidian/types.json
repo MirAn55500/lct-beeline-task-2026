@@ -1,0 +1,12 @@
+{
+  "types": {
+    "title": "text",
+    "type": "text",
+    "project": "text",
+    "tags": "tags",
+    "aliases": "multitext",
+    "updated": "date",
+    "section": "text",
+    "cssclasses": "multitext"
+  }
+}

@@ -1,0 +1,27 @@
+# macOS and editor temporary files
+.DS_Store
+._*
+*.swp
+*.swo
+*~
+*.bak
+
+# Local Obsidian state and recovery files
+.trash/
+.obsidian/workspace*.json
+.obsidian/backups/
+.obsidian/cache/
+.obsidian/graph.json
+.obsidian/hotkeys.json
+
+# Plugin settings are local unless explicitly shared below
+.obsidian/plugins/*/data.json
+!.obsidian/plugins/dataview/data.json
+!.obsidian/plugins/table-editor-obsidian/data.json
+
+# Credentials and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key

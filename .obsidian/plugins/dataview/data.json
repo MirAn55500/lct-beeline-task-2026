@@ -1,0 +1,6 @@
+{
+  "enableDataviewJs": false,
+  "enableInlineDataviewJs": false,
+  "defaultDateFormat": "dd.MM.yyyy",
+  "tableIdColumnName": "Заметка"
+}
