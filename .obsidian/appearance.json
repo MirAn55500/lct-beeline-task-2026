@@ -1,4 +1,6 @@
 {
-  "enabledCssSnippets": [],
+  "enabledCssSnippets": [
+    "service-map"
+  ],
   "theme": "moonstone"
 }

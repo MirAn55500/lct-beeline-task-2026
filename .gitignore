@@ -25,3 +25,7 @@
 !.env.example
 *.pem
 *.key
+
+!.obsidian/plugins/folder-notes/data.json
+
+!.obsidian/plugins/obsidian-plantuml/data.json

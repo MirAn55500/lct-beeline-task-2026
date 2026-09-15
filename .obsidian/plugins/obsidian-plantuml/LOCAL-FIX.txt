@@ -1,0 +1,1 @@
+PlantUML 1.9.0 local fix: decode internal SVG targets and set data-href/href. This supports spaces and numbered folder paths. Updates may overwrite the patch. The original vault is in the external backup archive.

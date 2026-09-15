@@ -7,6 +7,7 @@
     "aliases": "multitext",
     "updated": "date",
     "section": "text",
-    "cssclasses": "multitext"
+    "cssclasses": "multitext",
+    "related": "multitext"
   }
 }

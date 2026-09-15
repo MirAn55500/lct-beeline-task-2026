@@ -2,7 +2,7 @@
   "readableLineLength": true,
   "defaultViewMode": "preview",
   "showInlineTitle": false,
-  "propertiesInDocument": "visible",
-  "attachmentFolderPath": "Вложения",
+  "propertiesInDocument": "hidden",
+  "attachmentFolderPath": "08 Вложения",
   "alwaysUpdateLinks": true
 }

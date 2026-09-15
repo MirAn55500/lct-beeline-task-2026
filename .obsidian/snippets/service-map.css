@@ -1,0 +1,12 @@
+/* Scroll large PlantUML maps only in the service navigation note. */
+.service-map .block-language-plantuml-svg {
+  overflow: auto;
+  max-height: 75vh;
+  max-width: 100%;
+  padding: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+}
+.service-map .block-language-plantuml-svg > svg {
+  max-width: none;
+}

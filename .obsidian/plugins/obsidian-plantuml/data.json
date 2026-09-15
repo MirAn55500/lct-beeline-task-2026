@@ -1,0 +1,5 @@
+{
+  "server_url": "https://www.plantuml.com/plantuml",
+  "defaultProcessor": "svg",
+  "debounce": 1
+}
