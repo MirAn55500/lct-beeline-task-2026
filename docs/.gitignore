@@ -29,3 +29,6 @@
 !.obsidian/plugins/folder-notes/data.json
 
 !.obsidian/plugins/obsidian-plantuml/data.json
+
+# Generated local Git authentication helper
+.obsidian/plugins/obsidian-git/obsidian_askpass*
