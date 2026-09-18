@@ -1,0 +1,58 @@
+{
+  "version": "1.0",
+  "comment": [
+    "Сопоставление пар «Тип заявки BK» + «Тип заявки HD» из выгрузок с навыком и",
+    "длительностью обслуживания. В исходных файлах этого соответствия нет — база знаний",
+    "прямо указывает, что его нужно задать при настройке справочника. Поэтому оно вынесено",
+    "в данные, а не зашито в код: правило можно поправить, не трогая алгоритм.",
+    "",
+    "Длительность = технические работы + документы, БЕЗ дорожных 20 минут базового",
+    "норматива: перемещение алгоритм считает отдельно, иначе дорога учтётся дважды.",
+    "",
+    "Приоритет правил: точная пара (bk + hd) → только hd → только bk → значение по умолчанию."
+  ],
+  "norms_source": {
+    "file": "Нормативы.xlsx",
+    "rows": [
+      {"name": "Подключение клиентов Базовая", "road": 20, "technical": 60, "documents": 10, "total": 90, "service_only": 70},
+      {"name": "Аварий на ТКД", "road": 20, "technical": 80, "documents": 0, "total": 100, "service_only": 80},
+      {"name": "Дозаказ оборудования", "road": 20, "technical": 10, "documents": 10, "total": 40, "service_only": 20},
+      {"name": "Локальная заявка/ремонт у клиента", "road": 20, "technical": 30, "documents": 0, "total": 50, "service_only": 30}
+    ]
+  },
+  "default": {
+    "category": "Подключение клиентов Базовая",
+    "skill": "connection",
+    "duration_minutes": 70,
+    "equipment": []
+  },
+  "by_hd": {
+    "Заявка на подключение": {"category": "Подключение клиентов Базовая", "skill": "connection", "duration_minutes": 70},
+    "Конвергенция абонента": {"category": "Подключение клиентов Базовая", "skill": "connection", "duration_minutes": 70},
+    "Переключение на Гбит/с": {"category": "Подключение клиентов Базовая", "skill": "connection", "duration_minutes": 70},
+
+    "Дозаказ оборудования": {"category": "Дозаказ оборудования", "skill": "connection", "duration_minutes": 20, "equipment": ["router"]},
+    "Заказ подключения/Дозаказ оборудования": {"category": "Дозаказ оборудования", "skill": "connection", "duration_minutes": 20, "equipment": ["router"]},
+
+    "Авария": {"category": "Аварий на ТКД", "skill": "emergency", "duration_minutes": 80},
+    "Нет линка": {"category": "Аварий на ТКД", "skill": "emergency", "duration_minutes": 80},
+    "Мониторинг": {"category": "Аварий на ТКД", "skill": "emergency", "duration_minutes": 80},
+    "Рост ошибок на порту": {"category": "Аварий на ТКД", "skill": "emergency", "duration_minutes": 80},
+
+    "Разрывы": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "duration_minutes": 30},
+    "Низкая скорость": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "duration_minutes": 30},
+    "IP-адрес 169...": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "duration_minutes": 30},
+    "Работа с кабелем": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "duration_minutes": 30},
+    "Информация": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "duration_minutes": 30},
+    "TVE/ENT. Другие ошибки": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "duration_minutes": 30},
+    "TVE/ENT. Замена приставки техником": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "duration_minutes": 30, "equipment": ["set_top_box"]},
+    "ТВ. Замена приставки техником": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "duration_minutes": 30, "equipment": ["set_top_box"]},
+    "Роутер. Замена техническим специалистом": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "duration_minutes": 30, "equipment": ["router"]}
+  },
+  "by_bk": {
+    "Подключение": {"category": "Подключение клиентов Базовая", "skill": "connection", "duration_minutes": 70},
+    "Дозаказ": {"category": "Дозаказ оборудования", "skill": "connection", "duration_minutes": 20, "equipment": ["router"]},
+    "Локальная заявка": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "duration_minutes": 30},
+    "Глобальная проблема": {"category": "Аварий на ТКД", "skill": "emergency", "duration_minutes": 80}
+  }
+}
