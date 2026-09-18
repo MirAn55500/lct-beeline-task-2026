@@ -6,7 +6,7 @@
 
 * координат нет → геокодирование (кэш + честная детерминированная заглушка);
 * длительности нет → норматив по виду работ (`data/work_types.json`);
-* навыка нет → он же, по паре «Тип заявки BK» + «Тип заявки HD»;
+* навыка нет → только из «Тип заявки BK» (HD описывает работу и навык не подменяет);
 * профилей инженеров нет вовсе → синтезируются по колонке «Бригада» контрольной выгрузки
   либо генерируются по заданным долям.
 
@@ -53,7 +53,7 @@ _OFFICE_MARKERS = ("адрес офиса",)
 
 
 class WorkTypeCatalog:
-    """Пара «Тип заявки BK» + «Тип заявки HD» → навык, длительность, снаряжение."""
+    """«Тип заявки BK» + «Тип заявки HD» → длительность, снаряжение; навык — только из BK."""
 
     def __init__(self, raw: dict[str, Any]) -> None:
         self._default = raw["default"]
@@ -70,13 +70,19 @@ class WorkTypeCatalog:
         return value.strip().rstrip(".").strip()
 
     def resolve(self, bk: str, hd: str) -> dict[str, Any]:
-        """Точная пара → только HD → только BK → значение по умолчанию."""
+        """Норматив: точная пара → HD → BK → default. Навык: только BK, если категория известна.
+
+        HD описывает работу и может задать длительность и снаряжение, но не подменяет
+        требуемый навык: он берётся из BK по таблице базы знаний «Навык».
+        """
         bk_key, hd_key = self._normalize(bk), self._normalize(hd)
         exact = self._by_hd.get(f"{bk_key}|{hd_key}")
-        if exact:
-            return exact
-        found = self._by_hd.get(hd_key) or self._by_bk.get(bk_key) or self._default
-        return found
+        found = exact or self._by_hd.get(hd_key) or self._by_bk.get(bk_key) or self._default
+        result = dict(found)
+        bk_spec = self._by_bk.get(bk_key)
+        if bk_spec is not None and "skill" in bk_spec:
+            result["skill"] = bk_spec["skill"]
+        return result
 
 
 # --------------------------------------------------------------------------------------

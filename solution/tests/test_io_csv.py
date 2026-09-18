@@ -39,6 +39,12 @@ RAW = {
             "duration_minutes": 70,
             "equipment": [],
         },
+        "Глобальная проблема|Заявка на подключение": {
+            "category": "точная пара с чужим навыком",
+            "skill": "connection",
+            "duration_minutes": 70,
+            "equipment": [],
+        },
         "Заявка на подключение": {
             "category": "только HD",
             "skill": "connection",
@@ -65,6 +71,12 @@ RAW = {
             "duration_minutes": 30,
             "equipment": [],
         },
+        "Глобальная проблема": {
+            "category": "только BK авария",
+            "skill": "emergency",
+            "duration_minutes": 80,
+            "equipment": [],
+        },
     },
 }
 
@@ -81,8 +93,35 @@ def test_exact_pair_wins_over_hd_and_bk(catalog):
 
 
 def test_hd_wins_over_bk_when_no_exact_pair(catalog):
-    """Без точной пары выигрывает HD: он описывает работу конкретнее, чем BK."""
+    """Без точной пары HD задаёт вид работ (длительность/категорию), не навык."""
     assert catalog.resolve("Дозаказ", "Заявка на подключение")["category"] == "только HD"
+
+
+def test_known_bk_skill_is_not_overridden_by_hd(catalog):
+    """Навык берётся только из BK: HD «Авария» не делает локальную заявку аварийной."""
+    resolved = catalog.resolve("Локальная заявка", "Авария")
+    assert resolved["skill"] == "local"
+    assert resolved["duration_minutes"] == 80
+
+
+def test_known_bk_skill_is_not_overridden_by_exact_pair(catalog):
+    """Даже точная пара BK|HD не подменяет навык, заданный категорией BK."""
+    resolved = catalog.resolve("Глобальная проблема", "Заявка на подключение")
+    assert resolved["skill"] == "emergency"
+    assert resolved["category"] == "точная пара с чужим навыком"
+
+
+def test_unknown_bk_falls_back_to_hd_skill(catalog):
+    """Неизвестная категория BK: навык взять не из чего — остаётся норматив HD."""
+    resolved = catalog.resolve("Чужая категория", "Авария")
+    assert resolved["skill"] == "emergency"
+
+
+def test_resolve_does_not_mutate_catalog_entries(catalog):
+    """Результат — копия: правка навыка снаружи не портит справочник."""
+    first = catalog.resolve("Локальная заявка", "Авария")
+    first["skill"] = "emergency"
+    assert catalog.resolve("Локальная заявка", "Авария")["skill"] == "local"
 
 
 def test_bk_is_used_when_hd_is_unknown(catalog):
@@ -136,11 +175,51 @@ def test_shipped_catalog_loads_and_covers_defaults():
 
 
 def test_shipped_catalog_maps_known_types_from_real_data():
-    """Типы из реальной выгрузки сопоставляются не только с default."""
+    """Согласованные пары из выгрузки: навык по BK, норматив не скатывается в default."""
     shipped = WorkTypeCatalog.load()
-    emergency = shipped.resolve("Подключение", "Авария")
+    connection = shipped.resolve("Подключение", "Заявка на подключение")
+    assert connection["skill"] == "connection"
+    assert connection["duration_minutes"] == 70
+
+    emergency = shipped.resolve("Глобальная проблема", "Авария")
     assert emergency["skill"] == "emergency"
     assert emergency["duration_minutes"] == 80
+
+    local = shipped.resolve("Локальная заявка", "Разрывы")
+    assert local["skill"] == "local"
+    assert local["duration_minutes"] == 30
+
+    extra = shipped.resolve("Дозаказ", "Дозаказ оборудования")
+    assert extra["skill"] == "connection"
+    assert extra["duration_minutes"] == 20
+
+
+@pytest.mark.parametrize(
+    ("bk", "hd", "skill"),
+    [
+        # Наблюдаемые пары, где HD в каталоге указывает на другой навык, чем BK.
+        ("Глобальная проблема", "Информация", "emergency"),
+        ("Локальная заявка", "Мониторинг", "local"),
+        ("Локальная заявка", "Нет линка", "local"),
+        ("Локальная заявка", "Рост ошибок на порту", "local"),
+        ("Локальная заявка", "Переключение на Гбит/с", "local"),
+        ("Подключение", "Авария", "connection"),
+    ],
+)
+def test_shipped_catalog_skill_follows_bk_not_hd(bk, hd, skill):
+    """БЗ «Навык»: HD не подменяет категорию BK даже на реальном справочнике."""
+    shipped = WorkTypeCatalog.load()
+    assert shipped.resolve(bk, hd)["skill"] == skill
+
+
+def test_shipped_catalog_keeps_hd_equipment_when_skill_comes_from_bk():
+    """Снаряжение описывает работу (HD), навык — категорию (BK)."""
+    shipped = WorkTypeCatalog.load()
+    resolved = shipped.resolve(
+        "Локальная заявка", "Роутер. Замена техническим специалистом"
+    )
+    assert resolved["skill"] == "local"
+    assert "router" in resolved.get("equipment", [])
 
 
 # --------------------------------------------------------------------------
