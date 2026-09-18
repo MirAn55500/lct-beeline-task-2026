@@ -21,7 +21,8 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from planner import Algorithm, EventType, Priority, ReplanEvent, compare, plan, replan, validate_plan
-from planner.io_csv import build_scenario
+from planner.io_csv import build_scenario, find_dataset_dir
+from planner.textutil import plural
 
 SOURCES = {
     "east": ("Восток", "Восток Синтетические данные.csv", "Восток Контрольное распределение..csv"),
@@ -37,7 +38,7 @@ SOURCES = {
     ),
 }
 
-DATASET_DIR = ROOT.parent / "Обезличивание"
+DATASET_DIR = find_dataset_dir() or (ROOT.parent / "Обезличивание")
 LINE = "─" * 92
 
 
@@ -95,7 +96,8 @@ def main() -> int:
     _head("3. МАРШРУТЫ")
     for route in optimized.routes[:4]:
         print(
-            f"  {route.engineer_name:<24} {len(route.visits):>2} заявок | "
+            f"  {route.engineer_name:<24} {len(route.visits):>2} "
+            f"{plural(len(route.visits), 'заявка', 'заявки', 'заявок'):<7}| "
             f"{route.start_at:%H:%M}–{route.end_at:%H:%M} | {route.distance_km:>5.1f} км | "
             f"загрузка {route.utilization * 100:>3.0f}%"
         )

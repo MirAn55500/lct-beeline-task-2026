@@ -39,7 +39,11 @@ def repo_root() -> Path:
 @pytest.fixture(scope="session")
 def anonymized_csv_dir(repo_root: Path) -> Path:
     """Каталог с обезличенными выгрузками (cp1251, разделитель ';')."""
-    return repo_root / "Обезличивание"
+    try:
+        from planner.io_csv import find_dataset_dir
+    except Exception:
+        return repo_root / "Обезличивание"
+    return find_dataset_dir() or (repo_root / "Обезличивание")
 
 
 @pytest.fixture

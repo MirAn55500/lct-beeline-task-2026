@@ -54,6 +54,10 @@ class EventType(StrEnum):      URGENT_REQUEST = "urgent_request"; CANCEL_REQUEST
 | `no_work_time` | 5 | у подходящих инженеров нет рабочих интервалов на дату |
 | `time_conflict` | 6 | подходящие инженеры есть, но заявка не влезает в окно/смену |
 | `not_found` | 7 | исчерпан лимит поиска; глобальная невозможность не доказана |
+| `manual` | 8 | заявка снята с исполнителя вручную диспетчером |
+
+`manual` имеет наивысший ранг намеренно: пересчёт причин по правилу «максимальный ранг»
+не имеет права затереть решение человека машинной догадкой вроде «нет навыка».
 
 `ReasonCode.rank` доступен как свойство. `no_engineers` выдаётся **только** когда
 `scenario.engineers` пуст. Инженер с `active=False` или без рабочих интервалов даёт
@@ -365,8 +369,12 @@ departure_at, arrival_at, service_start_at, service_end_at: datetime
 latest_departure_at: datetime | None
 service_minutes: float             # чистая длительность работ (разность времён
                                    # включала бы перерыв, если работа его пересекла)
-slack_minutes: float               # запас до срыва: на сколько можно задержать начало,
-                                   # не сломав ни окно визита, ни хвост маршрута
+slack_minutes: float               # запас до срыва: на сколько РАБОЧИХ минут можно
+                                   # задержать начало, не сломав ни окно визита,
+                                   # ни один из последующих визитов маршрута.
+                                   # Для последнего визита предел равен
+                                   # min(window_end, sub(shift_end, duration));
+                                   # перерывы в запас не засчитываются
 travel_minutes, distance_km, waiting_minutes: float
 from_point, to_point: GeoPoint
 locked: bool = False
@@ -449,6 +457,17 @@ def reassign(previous: PlanResult, scenario: Scenario, request_id: str,
              engineer_id: str | None, position: int | None = None) -> PlanResult: ...
 def solve(ctx: PlanContext, algorithm: Algorithm = Algorithm.OPTIMIZED, *, deadline: float | None = None) -> Solution: ...
 ```
+
+`reassign` — ручное вмешательство диспетчера. Уточнения контракта:
+
+* `position` отсчитывается по маршруту **после** изъятия заявки из её текущего места.
+  Для маршрута из трёх визитов `position=4` — отказ, а не «в конец». При переносе между
+  инженерами разницы нет, при перестановке внутри одного маршрута — есть.
+* состав заявок ручной ход не меняет, поэтому результат проверяется
+  `validate_plan(result, scenario)` с **исходным** сценарием; `apply_event` здесь не нужен.
+* заявка, снятая вручную, получает `reason = ReasonCode.MANUAL`.
+* `locked`-визит ручным ходом не трогается: признак заморозки хранится в самом плане
+  (`Visit.locked`) и переживает восстановление независимо от того, передан ли момент времени.
 
 `reassign` — ручное вмешательство диспетчера. `engineer_id=None` снимает заявку с
 исполнителя; `position` нумеруется с 1, `None` означает «лучшее место». Жёсткие

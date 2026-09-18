@@ -232,7 +232,13 @@ def seed_from_previous(
             if request is None:
                 touched.add(route.engineer_id)
                 continue  # заявка снята событием
-            frozen = frozen_before is not None and visit.service_start_at < frozen_before
+            # Признак `locked` уже проставлен в предыдущем плане и обязан переживать любое
+            # восстановление: работа, которая началась, не перестаёт быть начатой оттого,
+            # что вызывающий не передал момент времени. Без этого ручное переназначение
+            # уводило визит, по которому инженер уже работает.
+            frozen = visit.locked or (
+                frozen_before is not None and visit.service_start_at < frozen_before
+            )
             if frozen and len(kept) == locked_count:
                 locked_count += 1
             kept.append(request)

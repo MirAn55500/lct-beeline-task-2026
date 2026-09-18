@@ -36,6 +36,7 @@ REASON_TITLES: dict[ReasonCode, str] = {
     ReasonCode.NO_WORK_TIME: "у подходящих исполнителей нет рабочего времени",
     ReasonCode.TIME_CONFLICT: "работа не помещается во временное окно или смену",
     ReasonCode.NOT_FOUND: "подходящий вариант не найден в отведённое время",
+    ReasonCode.MANUAL: "снята с исполнителя вручную диспетчером",
 }
 
 
@@ -97,6 +98,8 @@ def explain_unassigned(request: Request, reason: ReasonCode, details: list[str])
 
     if reason is ReasonCode.NO_ENGINEERS:
         return f"{head}: во входных данных нет ни одного инженера."
+    if reason is ReasonCode.MANUAL:
+        return f"{head}: снята с исполнителя вручную диспетчером и ожидает нового назначения."
     if reason is ReasonCode.NO_REGION:
         body = f"нет ни одного инженера региона «{request.region_key}»"
     elif reason is ReasonCode.NO_SKILL:

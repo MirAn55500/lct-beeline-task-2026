@@ -36,6 +36,14 @@ def compare(baseline: PlanResult, optimized: PlanResult) -> dict[str, Any]:
     """Сравнивает базовый и оптимизированный планы на одних и тех же входных данных."""
     b, o = baseline.metrics, optimized.metrics
 
+    # Пробег «в лоб» сравнивать нельзя, когда планы выполняют разный объём работ:
+    # план, взявший на 20 заявок больше, закономерно наездит больше километров.
+    # Честная величина — километры на одну выполненную заявку.
+    per_request_b = b.total_distance_km / b.assigned_count if b.assigned_count else 0.0
+    per_request_o = o.total_distance_km / o.assigned_count if o.assigned_count else 0.0
+    minutes_per_b = b.total_travel_minutes / b.assigned_count if b.assigned_count else 0.0
+    minutes_per_o = o.total_travel_minutes / o.assigned_count if o.assigned_count else 0.0
+
     comparison = {
         "assigned_count": _delta(False, b.assigned_count, o.assigned_count),
         "unassigned_count": _delta(True, b.unassigned_count, o.unassigned_count),
@@ -45,6 +53,8 @@ def compare(baseline: PlanResult, optimized: PlanResult) -> dict[str, Any]:
         "total_travel_minutes": _delta(True, b.total_travel_minutes, o.total_travel_minutes),
         "total_waiting_minutes": _delta(True, b.total_waiting_minutes, o.total_waiting_minutes),
         "avg_utilization": _delta(False, b.avg_utilization, o.avg_utilization),
+        "distance_per_assigned_km": _delta(True, per_request_b, per_request_o),
+        "travel_minutes_per_assigned": _delta(True, minutes_per_b, minutes_per_o),
     }
 
     better = o.quality_key() < b.quality_key()
@@ -66,6 +76,7 @@ def compare(baseline: PlanResult, optimized: PlanResult) -> dict[str, Any]:
 
 def _summary(b, o, better: bool, same: bool) -> str:
     parts: list[str] = []
+    same_volume = b.assigned_count == o.assigned_count
     if o.assigned_count != b.assigned_count:
         parts.append(
             f"назначено заявок {o.assigned_count} против {b.assigned_count} у базового варианта"
@@ -74,14 +85,26 @@ def _summary(b, o, better: bool, same: bool) -> str:
         parts.append(
             f"задействовано инженеров {o.used_engineer_count} вместо {b.used_engineer_count}"
         )
-    if abs(o.total_distance_km - b.total_distance_km) > 0.05:
-        saved = b.total_distance_km - o.total_distance_km
-        word = "меньше" if saved > 0 else "больше"
-        parts.append(f"пробег на {abs(saved):.1f} км {word} ({o.total_distance_km:.1f} км)")
-    if abs(o.total_travel_minutes - b.total_travel_minutes) > 1.0:
-        saved = b.total_travel_minutes - o.total_travel_minutes
-        word = "меньше" if saved > 0 else "больше"
-        parts.append(f"время в пути на {abs(saved):.0f} мин {word}")
+    if same_volume:
+        if abs(o.total_distance_km - b.total_distance_km) > 0.05:
+            saved = b.total_distance_km - o.total_distance_km
+            word = "меньше" if saved > 0 else "больше"
+            parts.append(f"пробег на {abs(saved):.1f} км {word} ({o.total_distance_km:.1f} км)")
+        if abs(o.total_travel_minutes - b.total_travel_minutes) > 1.0:
+            saved = b.total_travel_minutes - o.total_travel_minutes
+            word = "меньше" if saved > 0 else "больше"
+            parts.append(f"время в пути на {abs(saved):.0f} мин {word}")
+    else:
+        # Объём работ разный — сравниваем удельные величины, иначе вывод будет ложным.
+        per_b = b.total_distance_km / b.assigned_count if b.assigned_count else 0.0
+        per_o = o.total_distance_km / o.assigned_count if o.assigned_count else 0.0
+        if abs(per_o - per_b) > 0.05:
+            word = "меньше" if per_o < per_b else "больше"
+            parts.append(
+                f"пробег на заявку {per_o:.1f} км против {per_b:.1f} км ({word}); "
+                f"суммарный пробег {o.total_distance_km:.1f} км против "
+                f"{b.total_distance_km:.1f} км — на большем объёме работ"
+            )
 
     if not parts:
         return "Планы совпадают по обязательным метрикам."

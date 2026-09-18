@@ -204,6 +204,9 @@ def _refresh_reasons(ctx: PlanContext, solution: Solution) -> None:
     has_engineers = bool(ctx.scenario.engineers)
     engineers = sorted(ctx.scenario.engineers, key=lambda e: (e.input_order, e.id))
     for request_id, request in solution.unassigned.items():
+        existing = solution.reasons.get(request_id)
+        if existing is not None and existing[0] is ReasonCode.MANUAL:
+            continue  # решение диспетчера машинной догадкой не переписывается
         accumulator = ReasonAccumulator()
         for engineer in engineers:
             static = check_static(engineer, request, ctx.settings)

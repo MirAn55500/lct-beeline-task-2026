@@ -108,6 +108,7 @@ class ReasonCode(_StrEnum):
     NO_WORK_TIME = "no_work_time"
     TIME_CONFLICT = "time_conflict"
     NOT_FOUND = "not_found"
+    MANUAL = "manual"
 
     @property
     def rank(self) -> int:
@@ -123,4 +124,7 @@ _REASON_RANK: dict[ReasonCode, int] = {
     ReasonCode.NO_WORK_TIME: 5,
     ReasonCode.TIME_CONFLICT: 6,
     ReasonCode.NOT_FOUND: 7,
+    # Ручное решение диспетчера — самый высокий ранг: пересчёт причин по общему правилу
+    # «максимальный ранг» не имеет права затереть его машинной догадкой.
+    ReasonCode.MANUAL: 8,
 }

@@ -39,12 +39,29 @@ __all__ = [
     "engineers_from_control",
     "generate_engineers",
     "build_scenario",
+    "find_dataset_dir",
     "DATA_DIR",
 ]
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 _ENCODINGS = ("utf-8-sig", "cp1251")
 _OFFICE_MARKERS = ("адрес офиса",)
+DATASET_DIR_NAME = "Обезличивание"
+
+
+def find_dataset_dir(start: Path | None = None) -> Path | None:
+    """Ищет каталог с исходными выгрузками, поднимаясь вверх по дереву.
+
+    Жёсткий путь «на уровень выше solution/» ломается при первом же переносе папки
+    решения внутрь репозитория — а перенести её захочется. Поиск вверх переживает
+    и это, и запуск из произвольного рабочего каталога.
+    """
+    base = (start or Path(__file__).resolve()).resolve()
+    for parent in [base, *base.parents]:
+        candidate = parent / DATASET_DIR_NAME
+        if candidate.is_dir():
+            return candidate
+    return None
 
 
 # --------------------------------------------------------------------------------------
@@ -119,6 +136,11 @@ class Geocoder:
             key: GeoPoint(value["lat"], value["lon"])
             for key, value in cache.get("addresses", {}).items()
         }
+        self.precision: dict[str, str] = {
+            key: str(value.get("precision", "дом"))
+            for key, value in cache.get("addresses", {}).items()
+        }
+        self.coarse: list[str] = []
         self.districts: dict[str, GeoPoint] = {
             key: GeoPoint(value["lat"], value["lon"])
             for key, value in cache.get("districts", {}).items()
@@ -143,6 +165,10 @@ class Geocoder:
         key = normalize_address(address)
         exact = self.addresses.get(key) or self.addresses.get(address.strip())
         if exact is not None:
+            # Найденная координата тоже может быть грубой: геокодер не знал дома и
+            # вернул середину улицы или центр посёлка. Диспетчер должен это видеть.
+            if self.precision.get(key, "дом") != "дом":
+                self.coarse.append(key)
             return exact
 
         centre = self.districts.get(district.strip()) or anchor
@@ -250,6 +276,12 @@ def load_requests(
         result.warnings.append(
             f"Координаты {unique} адресов не найдены в кэше геокодирования и заменены "
             f"детерминированной оценкой по району: пробег и время в пути ориентировочные"
+        )
+    if geocoder.coarse:
+        unique = len(set(geocoder.coarse))
+        result.warnings.append(
+            f"У {unique} адресов геокодер не нашёл дом и вернул координату улицы или "
+            f"населённого пункта: по этим точкам пробег завышен или занижен на сотни метров"
         )
     if skipped:
         result.warnings.append(f"Пропущено служебных и пустых строк: {skipped}")

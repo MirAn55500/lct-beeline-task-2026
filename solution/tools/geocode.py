@@ -29,87 +29,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from planner.io_csv import _read_rows, normalize_address  # noqa: E402
+from planner.io_csv import _read_rows, find_dataset_dir, normalize_address  # noqa: E402
+from tools.address import build_queries  # noqa: E402
 
-DATASET_DIR = ROOT.parent / "Обезличивание"
+DATASET_DIR = find_dataset_dir() or (ROOT.parent / "Обезличивание")
 CACHE_PATH = ROOT / "data" / "geocache.json"
 ENDPOINT = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = "LCT2026-BeelineRoutePlanner/1.0 (hackathon prototype; contact via repo)"
 DELAY_SECONDS = 1.1
-
-# Тип улицы в выгрузках стоит ПЕРЕД названием и сокращён: «ул.Грайвороновская».
-# Nominatim ожидает обычный порядок и полное слово: «Грайвороновская улица».
-STREET_TYPES = {
-    "ул.": "улица",
-    "пр-кт.": "проспект",
-    "пр-зд.": "проезд",
-    "проезд.": "проезд",
-    "пер.": "переулок",
-    "б-р.": "бульвар",
-    "наб.": "набережная",
-    "ш.": "шоссе",
-    "пл.": "площадь",
-    "туп.": "тупик",
-    "аллея.": "аллея",
-}
-
-CITY_PREFIXES = ("город ", "г.", "г ")
-REGION_MARKERS = ("мо", "обл.московская область", "московская область")
-
-
-def _clean_city(raw: str) -> str:
-    value = raw.strip()
-    lowered = value.lower()
-    for prefix in CITY_PREFIXES:
-        if lowered.startswith(prefix):
-            value = value[len(prefix):].strip()
-            lowered = value.lower()
-    if lowered.startswith("город "):
-        value = value[6:].strip()
-    return value
-
-
-def _clean_house(raw: str) -> str:
-    """«д. 128 к 5» → «128к5»; «д. 1А» → «1А»; строение и владение сохраняются."""
-    value = raw.strip()
-    value = re.sub(r"^д\.?\s*", "", value, flags=re.IGNORECASE)
-    value = re.sub(r"\s*к\.?\s*", "к", value, flags=re.IGNORECASE)
-    value = re.sub(r"\s*стр\.?\s*", "с", value, flags=re.IGNORECASE)
-    return value.strip()
-
-
-def _clean_street(raw: str) -> str:
-    value = raw.strip()
-    match = re.match(r"^([А-Яа-яё\-]+\.)\s*(.+)$", value)
-    if match and match.group(1).lower() in STREET_TYPES:
-        return f"{match.group(2).strip()} {STREET_TYPES[match.group(1).lower()]}"
-    return value
-
-
-def build_query(address: str) -> str:
-    """Приводит адрес выгрузки к виду, который понимает Nominatim."""
-    parts = [p.strip() for p in address.split(",") if p.strip()]
-    if not parts:
-        return ""
-
-    # Ведущий маркер региона («МО», «обл.Московская область») city не задаёт.
-    while parts and parts[0].lower().strip(".") in REGION_MARKERS:
-        parts.pop(0)
-    if not parts:
-        return ""
-
-    city = _clean_city(parts[0])
-    rest = parts[1:]
-
-    # Единичный случай без запятых: «Москва Бирюлевская ул. д. 44».
-    if not rest:
-        return f"{city}, Россия"
-
-    street = _clean_street(rest[0])
-    house = _clean_house(rest[1]) if len(rest) > 1 else ""
-    pieces = [p for p in (street, house, city, "Россия") if p]
-    return ", ".join(pieces)
-
 
 def collect_addresses() -> tuple[list[str], list[str]]:
     """Уникальные адреса заявок и адреса офисов из всех выгрузок."""
@@ -127,6 +54,9 @@ def collect_addresses() -> tuple[list[str], list[str]]:
             if value:
                 addresses.add(normalize_address(value))
     return sorted(addresses), sorted(offices)
+
+
+PRECISION = ("дом", "улица", "населённый пункт", "населённый пункт")
 
 
 def geocode(query: str) -> tuple[float, float] | None:
@@ -158,6 +88,8 @@ def main() -> int:
     targets = offices + addresses
     known = set(cache["addresses"])
     missed = set() if args.retry_missed else set(cache["not_found"])
+    if args.retry_missed:
+        cache["not_found"] = []
     pending = [a for a in targets if a not in known and a not in missed]
     if args.limit:
         pending = pending[: args.limit]
@@ -168,7 +100,8 @@ def main() -> int:
 
     if args.dry_run:
         for address in pending[:25]:
-            print(f"  {address}\n      -> {build_query(address)}")
+            ladder = " | ".join(build_queries(address)) or "— не разобран —"
+            print(f"  {address}\n      -> {ladder}")
         if len(pending) > 25:
             print(f"  ... ещё {len(pending) - 25}")
         return 0
@@ -178,25 +111,45 @@ def main() -> int:
     started = time.monotonic()
 
     for index, address in enumerate(pending, 1):
-        query = build_query(address)
-        try:
-            result = geocode(query) if query else None
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-            print(f"  [{index}/{len(pending)}] ОШИБКА СЕТИ: {exc} — прерываю, кэш сохранён")
+        queries = build_queries(address)
+        result = None
+        level = 0
+        failed = False
+
+        # Лестница запросов: сначала дом, при промахе — улица, затем населённый пункт.
+        # Улица промахивается на сотни метров, центр района — на километры.
+        for level, query in enumerate(queries):
+            try:
+                result = geocode(query)
+            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+                print(f"  [{index}/{len(pending)}] ОШИБКА СЕТИ: {exc} — прерываю, кэш сохранён")
+                failed = True
+                break
+            time.sleep(DELAY_SECONDS)
+            if result is not None:
+                break
+
+        if failed:
             break
 
         if result is None:
             not_found.append(address)
-            print(f"  [{index}/{len(pending)}] не найден: {query}")
+            print(f"  [{index}/{len(pending)}] не найден: {address}")
         else:
-            cache["addresses"][address] = {"lat": round(result[0], 6), "lon": round(result[1], 6)}
+            precision = PRECISION[min(level, len(PRECISION) - 1)]
+            cache["addresses"][address] = {
+                "lat": round(result[0], 6),
+                "lon": round(result[1], 6),
+                "precision": precision,
+            }
             found += 1
-            if index % 20 == 0 or index == len(pending):
+            if precision != "дом":
+                print(f"  [{index}/{len(pending)}] {address} — точность: {precision}")
+            elif index % 20 == 0 or index == len(pending):
                 print(f"  [{index}/{len(pending)}] найдено {found}, не найдено {len(not_found)}")
 
         if index % 10 == 0:
             _save(cache, not_found)
-        time.sleep(DELAY_SECONDS)
 
     _save(cache, not_found)
     elapsed = time.monotonic() - started

@@ -74,19 +74,20 @@ def reassign(
 
     # --- снятие с исполнителя ---
     if engineer_id is None:
-        solution.mark_unassigned(request, ReasonCode.NOT_FOUND, [])
-        result = _finish(ctx, solution, previous, started, plan_id)
-        return _override_explanation(
-            result,
-            request_id,
-            f"Заявка {request_id} снята с исполнителя вручную диспетчером "
-            f"и ожидает нового назначения.",
-        )
+        solution.mark_unassigned(request, ReasonCode.MANUAL, [])
+        return _finish(ctx, solution, previous, started, plan_id)
 
     # --- перенос к выбранному исполнителю ---
     target = solution.routes.get(engineer_id)
     if target is None:
-        return _refuse(previous, f"Инженер {engineer_id} не участвует в расчёте")
+        known = ctx.scenario.engineer_by_id.get(engineer_id)
+        if known is None:
+            return _refuse(previous, f"Инженера {engineer_id} нет во входных данных")
+        if not known.active:
+            return _refuse(
+                previous, f"{known.name} исключён из планирования на эту дату"
+            )
+        return _refuse(previous, f"У {known.name} нет рабочего времени на дату плана")
 
     static = check_static(target.engineer, request, ctx.settings)
     if not static.ok:
