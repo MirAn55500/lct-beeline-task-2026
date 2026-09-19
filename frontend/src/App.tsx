@@ -30,10 +30,11 @@ function App() {
           </p>
         </Card.Content>
         <Card.Footer className="flex flex-wrap gap-3">
-          <Button onPress={() => setPressCount((count) => count + 1)}>
+          <Button size="lg" onPress={() => setPressCount((count) => count + 1)}>
             Проверить интерфейс
           </Button>
           <Button
+            size="lg"
             variant="secondary"
             isDisabled={pressCount === 0}
             onPress={() => setPressCount(0)}
