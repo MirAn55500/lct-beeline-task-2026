@@ -1,0 +1,76 @@
+# Веб-интерфейс
+
+React 19 + TypeScript + Vite, Tailwind CSS 4 и HeroUI 3.
+
+## Локальная разработка
+
+Node.js 24 LTS (при использовании nvm: `nvm use` в этой папке).
+
+```bash
+npm ci
+npm run dev
+```
+
+- `npm run lint` — проверка исходников через Oxlint.
+- `npm run build` — проверка TypeScript и сборка в `dist/`.
+- `npm run preview` — локальный просмотр production-сборки.
+
+Сервер доступен только на локальном компьютере (`127.0.0.1`).
+Для запуска не нужны `.env`, API-ключи, Python или внешние CSV.
+
+## HeroUI
+
+Установлены `@heroui/react` и `@heroui/styles` версии 3.2.6.
+Tailwind обрабатывается плагином `@tailwindcss/vite`.
+В `src/index.css` сначала импортируется `tailwindcss`, затем `@heroui/styles`.
+HeroUI v3 не требует `HeroUIProvider` или Framer Motion.
+
+Компоненты импортируются напрямую:
+
+```tsx
+import { Button } from '@heroui/react'
+
+<Button onPress={() => console.log('pressed')}>Действие</Button>
+```
+
+`src/App.tsx` содержит стартовый экран с `Card`, `Chip` и `Button`, счётчиком
+нажатий, сбросом и доступным сообщением о результате. Это проверка подключения
+библиотеки, а не готовый экран диспетчера. Python API в репозитории пока нет.
+
+Документация: [HeroUI Quick Start](https://heroui.com/docs/react/getting-started/quick-start).
+При добавлении компонентов используйте API v3: инструкции для v2 несовместимы.
+
+## Палитра Билайн
+
+Исходные палитры сохранены без изменений в `src/theme/tokens/`:
+`beeline-carnica-primitives.json` и `beeline-heroui-semantics.json`.
+Команда `npm run theme:generate` преобразует их в `src/theme/beeline.css`,
+проверяя ссылки между токенами. Она также выполняется перед `dev` и `build`.
+После редактирования JSON при работающем сервере выполните её повторно.
+
+Тема переопределяет 64 цветовых токена HeroUI, включая hover, focus и soft.
+Используйте семантические классы (`bg-accent`, `text-foreground`, `text-muted`)
+или переменные (`var(--accent)`), чтобы компоненты следовали общей палитре.
+Примитивы доступны как `--beeline-brand-primary`, `--beeline-neutral-800` и т. д.
+
+По умолчанию используется светлая тема. Тёмная включается через
+`data-theme="dark"` на `<html>`; светлая — через `data-theme="light"`.
+Значения обеих тем и прозрачность перенесены из JSON без цветовых коррекций.
+Переключатель темы в интерфейс пока не добавлен.
+
+Радиусы централизованы в `src/theme/radius.css`. Базовый токен
+`--border-radius: 16px` подключен к нативному `--radius` HeroUI через alias.
+Производная шкала xs/sm/md/lg/xl — 4/8/12/16/24 px; 2xl/3xl/4xl —
+32/48/64 px. Радиус полей по стандартной формуле HeroUI составляет 24 px.
+Это шкала HeroUI, а не полное соответствие радиусам Carnica: отдельные
+значения Carnica 0/2/40/infinite пока не добавлены как токены расширения.
+Размеры и тени остаются стандартными HeroUI.
+
+Кнопки используют токены `--border-radius-button-sm/md/lg`:
+`sm` — 6 px, `md` (по умолчанию) — 8 px, `lg` — 12 px.
+Она применяется ко всем вариантам Button, включая кнопки с одной иконкой.
+
+Панели Card используют `--border-radius-panel: 20px` через локальный
+параметр HeroUI `--radius-3xl`. У Button нет нативной шкалы радиусов по
+размерам: адаптер связывает классы размеров с токеном `--border-radius-button`.
+Обе кнопки стартового экрана имеют размер `lg` и радиус 12 px.
