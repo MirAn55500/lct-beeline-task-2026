@@ -1,0 +1,35 @@
+name: Deploy backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "docker-compose.yml"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy backend
+        env:
+          POSTGRES_USER: ${{ vars.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ vars.POSTGRES_DB }}
+          POSTGRES_PORT: ${{ vars.POSTGRES_PORT }}
+          DEBUG: ${{ vars.DEBUG }}
+          BACKEND_PORT: ${{ vars.BACKEND_PORT }}
+          CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
+        run: |
+          set -e
+          docker compose up -d --build backend
+          docker compose ps

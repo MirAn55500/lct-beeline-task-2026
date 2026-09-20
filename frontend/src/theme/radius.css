@@ -1,0 +1,33 @@
+@layer base {
+  :root, :host {
+    --border-radius: 16px;
+    --border-radius-button-sm: 6px;
+    --border-radius-button-md: 8px;
+    --border-radius-button-lg: 12px;
+    --border-radius-panel: 20px;
+
+    /* HeroUI's native base radius drives the remaining component scale. */
+    --radius: var(--border-radius);
+  }
+}
+
+/* HeroUI v3 has no separate button-size radius parameters.
+   This adapter binds its component classes to our theme tokens. */
+@layer components {
+  .card {
+    --radius-3xl: var(--border-radius-panel);
+  }
+
+  .button {
+    --border-radius-button: var(--border-radius-button-md);
+    border-radius: var(--border-radius-button);
+  }
+
+  .button--sm {
+    --border-radius-button: var(--border-radius-button-sm);
+  }
+
+  .button--lg {
+    --border-radius-button: var(--border-radius-button-lg);
+  }
+}

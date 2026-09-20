@@ -1,0 +1,14 @@
+# Local Python environments and caches
+.venv/
+venv/
+backend/venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.pyc
+
+# Local configuration
+.env
+.env.*
+!.env.example
+.DS_Store
