@@ -1,0 +1,33 @@
+from datetime import datetime
+from typing import TYPE_CHECKING, Optional
+
+from sqlmodel import Field, Relationship
+
+from core.base_model import BaseTable
+
+if TYPE_CHECKING:
+    from modules.planning.models.assignment import Assignment
+
+
+class Plan(BaseTable, table=True):
+    """План."""
+
+    __tablename__ = "plans"
+
+    plan_id: Optional[int] = Field(default=None, primary_key=True)
+    version: int
+    created_at: datetime
+    reference_plan_id: Optional[int] = Field(default=None, foreign_key="plans.plan_id")
+
+    reference_plan: Optional["Plan"] = Relationship(
+        back_populates="derived_plans",
+        sa_relationship_kwargs={
+            "remote_side": "[Plan.plan_id]",
+            "foreign_keys": "[Plan.reference_plan_id]",
+        },
+    )
+    derived_plans: list["Plan"] = Relationship(
+        back_populates="reference_plan",
+        sa_relationship_kwargs={"foreign_keys": "[Plan.reference_plan_id]"},
+    )
+    assignments: list["Assignment"] = Relationship(back_populates="plan")
