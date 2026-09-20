@@ -13,7 +13,7 @@ from datetime import date as Date
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping, Sequence
 
-from .enums import EventType, Priority, Skill, TransportMode
+from .enums import EventType, ExecutionStatus, Priority, Skill, TransportMode
 
 __all__ = [
     "MSK",
@@ -119,8 +119,9 @@ def _normalize_intervals(intervals: Iterable[WorkInterval]) -> tuple[WorkInterva
 class Engineer:
     """Один выездной инженер.
 
-    Стартовая точка — офис бригады своего региона (БЗ «Бригада»). Возврат в офис
-    после последней заявки моделью не предусмотрен (ТЗ п. 2.4, открытый маршрут).
+    Стартовая точка — офис бригады своего региона либо условный домашний адрес
+    в удалённом городе Подмосковья (`home_start=True`). Возврат после последней
+    заявки моделью не предусмотрен (ТЗ п. 2.4, открытый маршрут).
     """
 
     id: str
@@ -140,6 +141,12 @@ class Engineer:
     equipment: frozenset[str] = frozenset()
     active: bool = True
     input_order: int = 0
+    home_start: bool = False
+    """True, если `start_point` — условный домашний адрес, а не офис бригады.
+
+    Комплект оборудования к моменту такого старта считается уже выданным;
+    логистика выдачи в маршрут не включается.
+    """
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "work_intervals", _normalize_intervals(self.work_intervals))
@@ -182,6 +189,7 @@ class Engineer:
             "equipment": sorted(self.equipment),
             "active": self.active,
             "input_order": self.input_order,
+            "home_start": self.home_start,
         }
 
     @classmethod
@@ -198,6 +206,7 @@ class Engineer:
             equipment=frozenset(raw.get("equipment", ())),
             active=bool(raw.get("active", True)),
             input_order=int(raw.get("input_order", 0)),
+            home_start=bool(raw.get("home_start", False)),
         )
 
 
@@ -212,10 +221,15 @@ class Request:
 
     `window_start`/`window_end` — окно **прибытия** (БЗ «Правила модели»): раньше окна
     начинать работу нельзя, раннее прибытие означает ожидание; прибытие позже
-    `window_end` не считается попаданием в окно. Окна никогда не сдвигаются.
+    `window_end` не считается попаданием в окно. Алгоритм окна сам не сдвигает:
+    расчёт берёт актуальное окно из сценария; старый план сохраняет своё.
 
-    `duration_minutes` — только технические работы и документы, **без** дорожной
-    составляющей норматива (БЗ «Нормативы работ»): дорога считается отдельно.
+    `duration_minutes` — длительность выполнения без дороги: технические работы
+    и документы. Для всех видов (подключение 70, авария 80, дозаказ 20, локальная 30)
+    дорожные 20 минут из Excel не входят: перемещение считается отдельно.
+
+    `received_at` — момент поступления. Работа не начинается раньше поступления
+    и прибытия; заявка, поступившая после `Scenario.as_of`, в этот снимок не входит.
     """
 
     id: str
@@ -225,27 +239,44 @@ class Request:
     duration_minutes: int
     required_skill: Skill
     region_key: str = "default"
-    priority: Priority = Priority.NORMAL
+    priority: Priority = Priority.CONNECTION
     required_transport: TransportMode | None = None
     required_equipment: frozenset[str] = frozenset()
     address: str = ""
     district: str = ""
     input_order: int = 0
+    received_at: datetime | None = None
+    execution_status: ExecutionStatus = ExecutionStatus.PENDING
+    request_type_bk: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "required_skill", Skill(self.required_skill))
         object.__setattr__(self, "priority", Priority(self.priority))
+        object.__setattr__(self, "execution_status", ExecutionStatus(self.execution_status))
         object.__setattr__(self, "required_equipment", frozenset(self.required_equipment))
         if self.required_transport is not None:
             object.__setattr__(self, "required_transport", TransportMode(self.required_transport))
+        if self.received_at is not None:
+            object.__setattr__(self, "received_at", _parse_dt(self.received_at))
 
     @property
     def window_width_minutes(self) -> float:
         return (self.window_end - self.window_start).total_seconds() / 60.0
 
     @property
-    def is_urgent(self) -> bool:
-        return self.priority is Priority.URGENT
+    def is_emergency(self) -> bool:
+        return self.priority is Priority.EMERGENCY
+
+    @property
+    def is_closed(self) -> bool:
+        return self.execution_status.is_closed
+
+    @property
+    def service_not_before(self) -> datetime:
+        """Самый ранний момент начала работ: max(окно, поступление)."""
+        if self.received_at is None:
+            return self.window_start
+        return self.window_start if self.window_start >= self.received_at else self.received_at
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -264,11 +295,15 @@ class Request:
             "address": self.address,
             "district": self.district,
             "input_order": self.input_order,
+            "received_at": self.received_at.isoformat() if self.received_at else None,
+            "execution_status": self.execution_status.value,
+            "request_type_bk": self.request_type_bk,
         }
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> "Request":
         transport = raw.get("required_transport")
+        received = raw.get("received_at")
         return cls(
             id=str(raw["id"]),
             point=GeoPoint.from_dict(raw["point"]),
@@ -277,12 +312,15 @@ class Request:
             duration_minutes=int(raw["duration_minutes"]),
             required_skill=Skill(raw["required_skill"]),
             region_key=str(raw.get("region_key", "default")),
-            priority=Priority(raw.get("priority", Priority.NORMAL)),
+            priority=Priority(raw.get("priority", Priority.CONNECTION)),
             required_transport=TransportMode(transport) if transport else None,
             required_equipment=frozenset(raw.get("required_equipment", ())),
             address=str(raw.get("address", "")),
             district=str(raw.get("district", "")),
             input_order=int(raw.get("input_order", 0)),
+            received_at=_parse_dt(received) if received else None,
+            execution_status=ExecutionStatus(raw.get("execution_status", ExecutionStatus.PENDING)),
+            request_type_bk=str(raw.get("request_type_bk", "")),
         )
 
 
@@ -405,6 +443,11 @@ class Scenario:
     engineers: tuple[Engineer, ...] = ()
     settings: Settings = field(default_factory=Settings)
     name: str = ""
+    as_of: datetime | None = None
+    """Граница снимка плана. Заявки с `received_at` позже этого момента
+    в расчёт не входят (авария в 13:00 не появляется в плане на 09:00).
+    `None` — учитывать все незакрытые заявки входа.
+    """
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "requests", tuple(self.requests))
@@ -424,6 +467,24 @@ class Scenario:
 
     def active_engineers(self) -> tuple[Engineer, ...]:
         return tuple(e for e in self.engineers if e.active)
+
+    def planning_requests(self) -> tuple[Request, ...]:
+        """Заявки, которые этот расчёт имеет право назначать.
+
+        Закрытые исключаются. Если задан `as_of`, ещё не поступившие тоже.
+        """
+        selected: list[Request] = []
+        for request in self.requests:
+            if request.is_closed:
+                continue
+            if (
+                self.as_of is not None
+                and request.received_at is not None
+                and request.received_at > self.as_of
+            ):
+                continue
+            selected.append(request)
+        return tuple(selected)
 
     # -- проверки --
 
@@ -447,6 +508,20 @@ class Scenario:
                     f"Заявка {r.id}: окно относится к {r.window_start.date()}, "
                     f"а план строится на {self.date}"
                 )
+            if r.is_closed:
+                warnings.append(
+                    f"Заявка {r.id}: статус {r.execution_status.value} — "
+                    f"закрытые исключаются из планирования"
+                )
+            if (
+                self.as_of is not None
+                and r.received_at is not None
+                and r.received_at > self.as_of
+            ):
+                warnings.append(
+                    f"Заявка {r.id}: поступила в {r.received_at:%H:%M}, "
+                    f"позже снимка плана {self.as_of:%H:%M} — в этот расчёт не входит"
+                )
         for e in self.engineers:
             if e.active and not e.work_intervals:
                 warnings.append(f"Инженер {e.id} ({e.name}): нет рабочих интервалов на дату плана")
@@ -458,11 +533,48 @@ class Scenario:
                         f"Инженер {e.id}: рабочий интервал {interval.start:%d.%m %H:%M} "
                         f"вне даты плана {self.date}"
                     )
+        warnings += self._warn_about_requests_longer_than_any_shift()
         if not self.engineers:
             warnings.append("В сценарии нет ни одного инженера — все заявки останутся без исполнителя")
         if not self.requests:
             warnings.append("В сценарии нет заявок")
         return warnings
+
+    def _warn_about_requests_longer_than_any_shift(self) -> list[str]:
+        """Заявки, которые не выполнить ни при каком распределении.
+
+        Работа не начинается раньше окна и поступления. Если после этого момента ни у
+        одного инженера не остаётся `duration_minutes` рабочих минут до конца смены,
+        заявка не поместится даже в пустой день. Это не результат расчёта, а свойство
+        входных данных: чаще всего окна выгрузки просто выходят за границы заданной
+        смены. Без явного предупреждения такие заявки молча оседают в «не назначено»,
+        и причину ищут в алгоритме, а не в параметрах дня.
+        """
+        available = [e for e in self.engineers if e.active and e.work_intervals]
+        if not available:
+            return []
+        hopeless: list[str] = []
+        for request in self.planning_requests():
+            if request.duration_minutes <= 0:
+                continue
+            start = request.service_not_before
+            if any(
+                _working_minutes_from(e.work_intervals, start) >= request.duration_minutes
+                for e in available
+            ):
+                continue
+            hopeless.append(request.id)
+        if not hopeless:
+            return []
+        shown = ", ".join(hopeless[:5])
+        if len(hopeless) > 5:
+            shown += f" и ещё {len(hopeless) - 5}"
+        return [
+            f"Заявок, не помещающихся в смену ни одного инженера: {len(hopeless)} ({shown}). "
+            f"Работа не может начаться раньше окна, а смена заканчивается раньше, чем она "
+            f"успеет закончиться — их не выполнить ни при каком распределении. "
+            f"Проверьте границы смены: в выгрузке есть окна, выходящие за неё"
+        ]
 
     # -- производные сценарии (используются при перепланировании) --
 
@@ -479,7 +591,18 @@ class Scenario:
             "requests": [r.to_dict() for r in self.requests],
             "engineers": [e.to_dict() for e in self.engineers],
             "settings": self.settings.to_dict(),
+            "as_of": self.as_of.isoformat() if self.as_of else None,
         }
+
+
+def _working_minutes_from(intervals: Iterable[WorkInterval], moment: datetime) -> float:
+    """Сколько рабочих минут остаётся в графике начиная с `moment`."""
+    total = 0.0
+    for interval in intervals:
+        start = moment if moment > interval.start else interval.start
+        if interval.end > start:
+            total += (interval.end - start).total_seconds() / 60.0
+    return total
 
 
 def _require_unique(what: str, ids: Iterable[str]) -> None:
@@ -512,7 +635,7 @@ class ReplanEvent:
     def __post_init__(self) -> None:
         object.__setattr__(self, "type", EventType(self.type))
         if self.type is EventType.URGENT_REQUEST and self.request is None:
-            raise ValueError("Для срочной заявки нужен полный набор полей заявки (поле request)")
+            raise ValueError("Для аварийной заявки нужен полный набор полей заявки (поле request)")
         if self.type in (EventType.CANCEL_REQUEST, EventType.CLIENT_REFUSAL):
             if not (self.request_id or (self.request and self.request.id)):
                 raise ValueError("Для отмены или отказа клиента нужен request_id")

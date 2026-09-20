@@ -301,7 +301,7 @@ def _retry_unassigned(
     """
     if not solution.unassigned:
         return 0
-    from .construct import place_single
+    from .construct import place_single, place_with_ejection
 
     placed = 0
     candidates = sorted(
@@ -310,5 +310,9 @@ def _retry_unassigned(
     allowed = None if routes_filter is None else [i for i in solution.order if i in routes_filter]
     for request in candidates:
         if place_single(ctx, solution, request, allowed_engineers=allowed) is not None:
+            placed += 1
+        elif request.is_emergency and place_with_ejection(
+            ctx, solution, request, allowed_engineers=allowed
+        ) is not None:
             placed += 1
     return placed

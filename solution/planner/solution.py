@@ -10,13 +10,13 @@ from __future__ import annotations
 from typing import Iterable, Iterator
 
 from .context import PlanContext
-from .enums import ReasonCode
+from .enums import Priority, ReasonCode
 from .models import Engineer, Request
 from .route import RouteState
 
 __all__ = ["Solution", "QualityKey"]
 
-QualityKey = tuple[int, int, int, float, float]
+QualityKey = tuple[int, int, int, int, float, float]
 _ROUND = 6
 
 
@@ -102,19 +102,18 @@ class Solution:
     def used_engineer_count(self) -> int:
         return sum(1 for route in self if route.stops)
 
-    @property
-    def urgent_unassigned_count(self) -> int:
-        return sum(1 for r in self.unassigned.values() if r.is_urgent)
+    def unassigned_of(self, priority: Priority) -> int:
+        return sum(1 for r in self.unassigned.values() if r.priority is priority)
 
     def quality_key(self) -> QualityKey:
         """Лексикографический ключ качества плана: меньше — лучше.
 
-        Порядок задан базой знаний: сперва выполнить срочные, затем как можно больше
-        заявок вообще, затем обойтись меньшим числом людей, затем сэкономить время
-        в пути и только в последнюю очередь — километры.
+        Порядок: авария → подключение → общий объём → число людей → время в пути → пробег.
+        Ремонт и дозаказ входят в общий объём; отдельный ключ для них не нужен.
         """
         return (
-            self.urgent_unassigned_count,
+            self.unassigned_of(Priority.EMERGENCY),
+            self.unassigned_of(Priority.CONNECTION),
             len(self.unassigned),
             self.used_engineer_count,
             round(self.total_travel_minutes, _ROUND),

@@ -109,6 +109,7 @@ def _api(name: str):
 Skill = sym("Skill")
 TransportMode = sym("TransportMode")
 Priority = sym("Priority")
+ExecutionStatus = sym("ExecutionStatus")
 AssignmentStatus = sym("AssignmentStatus")
 Algorithm = sym("Algorithm")
 EventType = sym("EventType")
@@ -135,7 +136,7 @@ solve = _api("solve")
 def scenario_after(scenario, previous, ev):
     """Действующий сценарий после события — единственный корректный вход validate_plan.
 
-    После события состав заявок меняется (срочная добавилась, отменённая исчезла, у
+    После события состав заявок меняется (аварийная добавилась, отменённая исчезла, у
     заявки с отказом клиента обнулилась работа), поэтому результат ``replan()`` описывает
     именно этот сценарий, а не исходный.
     """
@@ -236,6 +237,7 @@ def eng(
     order: int = 0,
     name: str | None = None,
     day: _date | None = None,
+    home_start: bool = False,
 ) -> Any:
     """Инженер с разумными дефолтами (SPEC §2.3)."""
     return Engineer(
@@ -249,6 +251,7 @@ def eng(
         equipment=frozenset(equipment),
         active=active,
         input_order=order,
+        home_start=home_start,
     )
 
 
@@ -259,7 +262,7 @@ def req(
     dur: int = 70,
     skill: str = "connection",
     at=_DEFAULT_REQ_POINT,
-    priority: str = "normal",
+    priority: str = "connection",
     region: str = "default",
     transport: str | None = None,
     equipment: Iterable[str] = (),
@@ -267,9 +270,15 @@ def req(
     address: str = "",
     district: str = "",
     day: _date | None = None,
+    received_at: str | datetime | None = None,
+    execution_status: str = "pending",
 ) -> Any:
     """Заявка с разумными дефолтами (SPEC §2.4)."""
     start, end = window
+    received = None
+    if received_at is not None:
+        received = t(received_at, day) if isinstance(received_at, str) else received_at
+    status = execution_status if isinstance(execution_status, ExecutionStatus) else ExecutionStatus(execution_status)
     return Request(
         id=id,
         point=gp(at),
@@ -288,6 +297,8 @@ def req(
         address=address,
         district=district,
         input_order=order,
+        received_at=received,
+        execution_status=status,
     )
 
 
@@ -308,6 +319,7 @@ def sc(
     date: _date | None = None,
     name: str = "",
     renumber: bool = True,
+    as_of: str | datetime | None = None,
     **settings_overrides,
 ) -> Any:
     """Сценарий (SPEC §2.6).
@@ -321,12 +333,16 @@ def sc(
     if renumber:
         reqs = tuple(replace(r, input_order=i) for i, r in enumerate(reqs))
         engs = tuple(replace(e, input_order=i) for i, e in enumerate(engs))
+    snapshot = None
+    if as_of is not None:
+        snapshot = t(as_of, date) if isinstance(as_of, str) else as_of
     return Scenario(
         date=date or DATE,
         requests=reqs,
         engineers=engs,
         settings=settings(**settings_overrides),
         name=name,
+        as_of=snapshot,
     )
 
 
@@ -533,7 +549,17 @@ def normalized_dict(result) -> Any:
 # --------------------------------------------------------------------------
 
 _SKILL_POOL = ("local", "connection", "emergency")
-_DURATIONS = (20, 30, 70, 80)  # нормативы БЗ без дорожных 20 минут
+_DURATIONS = (20, 30, 70, 80)  # обслуживание без дороги: дозаказ / локальная / подключение / авария
+
+
+def _random_priority(rnd: random.Random, emergency_share: float, connection_share: float) -> str:
+    """Независимый от навыка приоритет: авария / подключение / ремонт-дозаказ."""
+    roll = rnd.random()
+    if roll < emergency_share:
+        return "emergency"
+    if roll < emergency_share + connection_share:
+        return "connection"
+    return "repair_or_addon"
 
 
 def random_scenario(
@@ -541,7 +567,8 @@ def random_scenario(
     n_engineers: int = 4,
     n_requests: int = 20,
     *,
-    urgent_share: float = 0.15,
+    emergency_share: float = 0.15,
+    connection_share: float = 0.45,
     transport_pool: Sequence[str] = ("car", "walking", "bicycle", "public_transport"),
     box: tuple[float, float, float, float] = (55.60, 55.85, 37.40, 37.80),
     **settings_overrides,
@@ -586,7 +613,7 @@ def random_scenario(
                 dur=rnd.choice(_DURATIONS),
                 skill=rnd.choice(_SKILL_POOL),
                 at=point(),
-                priority="urgent" if rnd.random() < urgent_share else "normal",
+                priority=_random_priority(rnd, emergency_share, connection_share),
                 order=i,
             )
         )

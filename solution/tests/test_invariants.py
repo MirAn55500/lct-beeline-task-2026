@@ -34,13 +34,15 @@ SEEDS = list(range(1, 21))
 def check_invariants(result, scenario) -> list[str]:
     """Вернуть список нарушений инвариантов SPEC §9 (пустой = всё хорошо)."""
     problems: list[str] = []
-    requests = {r.id: r for r in scenario.requests}
+    planning = {r.id: r for r in scenario.planning_requests()}
     engineers = {e.id: e for e in scenario.engineers}
 
-    # 1. Каждая заявка входа имеет ровно один Assignment.
+    # 1. Каждая планируемая заявка имеет ровно один Assignment.
     ids = [a.request_id for a in result.assignments]
-    if sorted(ids) != sorted(requests):
-        problems.append(f"инв.1: состав assignments не совпадает с заявками входа: {sorted(set(ids) ^ set(requests))}")
+    if sorted(ids) != sorted(planning):
+        problems.append(
+            f"инв.1: состав assignments не совпадает с planning_requests: {sorted(set(ids) ^ set(planning))}"
+        )
     if len(ids) != len(set(ids)):
         problems.append("инв.1: дублирующиеся Assignment")
 
@@ -55,13 +57,19 @@ def check_invariants(result, scenario) -> list[str]:
     for assignment in result.assignments:
         if assignment.status != AssignmentStatus.ASSIGNED:
             continue
-        request = requests.get(assignment.request_id)
+        request = planning.get(assignment.request_id)
         if request is None:
             continue
         if assignment.arrival_at is None or assignment.arrival_at > request.window_end:
             problems.append(f"инв.3: {request.id} прибытие позже конца окна")
         if assignment.service_start_at is None or assignment.service_start_at < request.window_start:
             problems.append(f"инв.3: {request.id} работа начата раньше окна")
+        if (
+            request.received_at is not None
+            and assignment.service_start_at is not None
+            and assignment.service_start_at < request.received_at
+        ):
+            problems.append(f"инв.3: {request.id} работа начата раньше поступления")
         if assignment.service_start_at is not None and assignment.arrival_at is not None:
             if assignment.service_start_at < assignment.arrival_at:
                 problems.append(f"инв.3: {request.id} работа начата раньше прибытия")
@@ -248,6 +256,7 @@ def test_input_models_and_enums_are_reexported_from_package_root():
         "Skill",
         "TransportMode",
         "Priority",
+        "ExecutionStatus",
         "Algorithm",
         "AssignmentStatus",
         "EventType",
@@ -276,6 +285,14 @@ def test_plan_defaults_to_optimized_algorithm():
     """SPEC §8: алгоритм по умолчанию — OPTIMIZED."""
     scenario = random_scenario(42, n_engineers=3, n_requests=10)
     assert plan(scenario).algorithm == Algorithm.OPTIMIZED
+
+
+def test_quality_key_has_six_components():
+    """SPEC §5.2: quality_key — 6-кортеж (авария, подключение, объём, люди, путь, пробег)."""
+    scenario = random_scenario(4, n_engineers=3, n_requests=10)
+    key = plan_optimized(scenario).metrics.quality_key()
+    assert isinstance(key, tuple)
+    assert len(key) == 6
 
 
 def test_oracle_calendar_matches_engineer_capacity():
@@ -399,3 +416,23 @@ def test_validator_catches_distance_mismatch():
     result = plan_optimized(scenario)
     broken = _corrupt(result, distance_km=result.routes[0].distance_km + 100.0)
     assert validate_plan(broken, scenario) != [], "верификатор не заметил подмену пробега"
+
+
+def test_validator_catches_visit_without_assignment():
+    """Визит в маршруте без своего `Assignment` обязан быть замечен (инвариант 1).
+
+    Зеркало `test_validator_catches_missing_assignment`: там пропадает назначение
+    вместе с заявкой из плана, здесь заявка остаётся в маршруте, а назначение исчезает.
+    Именно так выглядела заявка, попавшая в маршрут мимо `planning_requests()`.
+    """
+    import dataclasses
+
+    scenario = _mutation_scenario()
+    result = plan_optimized(scenario)
+    orphan = result.routes[0].visits[0].request_id
+    broken = dataclasses.replace(
+        result, assignments=tuple(a for a in result.assignments if a.request_id != orphan)
+    )
+    problems = validate_plan(broken, scenario)
+    assert problems != [], "верификатор не заметил визит без назначения"
+    assert any(orphan in p for p in problems)

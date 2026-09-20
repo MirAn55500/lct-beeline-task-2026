@@ -27,6 +27,12 @@ class RequestTiming:
     window_start: float
     window_end: float
     duration: float
+    available_from: float
+    """Момент поступления в минутах. Работа не начинается раньше этого значения."""
+
+    @property
+    def service_not_before(self) -> float:
+        return self.window_start if self.window_start >= self.available_from else self.available_from
 
 
 class PlanContext:
@@ -43,12 +49,7 @@ class PlanContext:
             e.id: WorkCalendar(e.work_intervals, self.origin) for e in scenario.engineers
         }
         self._timings: dict[str, RequestTiming] = {
-            r.id: RequestTiming(
-                window_start=self._minutes(r.window_start),
-                window_end=self._minutes(r.window_end),
-                duration=float(r.duration_minutes),
-            )
-            for r in scenario.requests
+            r.id: self._timing_of(r) for r in scenario.requests
         }
 
     # ------------------------------------------------------------------ точка отсчёта
@@ -91,14 +92,23 @@ class PlanContext:
             self._calendars[engineer.id] = cal
         return cal
 
+    def _timing_of(self, request: Request) -> RequestTiming:
+        available = (
+            self._minutes(request.received_at)
+            if request.received_at is not None
+            else self._minutes(request.window_start)
+        )
+        return RequestTiming(
+            window_start=self._minutes(request.window_start),
+            window_end=self._minutes(request.window_end),
+            duration=float(request.duration_minutes),
+            available_from=available,
+        )
+
     def timing(self, request: Request) -> RequestTiming:
         timing = self._timings.get(request.id)
         if timing is None:
-            timing = RequestTiming(
-                window_start=self._minutes(request.window_start),
-                window_end=self._minutes(request.window_end),
-                duration=float(request.duration_minutes),
-            )
+            timing = self._timing_of(request)
             self._timings[request.id] = timing
         return timing
 

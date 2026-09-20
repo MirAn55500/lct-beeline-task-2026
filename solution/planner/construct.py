@@ -21,13 +21,19 @@ from typing import Iterable, Sequence
 
 from .context import PlanContext
 from .cost import WORST_POSSIBLE, InsertionCost
-from .enums import ReasonCode
+from .enums import Priority, ReasonCode
 from .feasibility import ReasonAccumulator, check_static
 from .models import Request
 from .route import RouteState
 from .solution import Solution
 
-__all__ = ["build_baseline", "insert_regret", "place_single"]
+__all__ = [
+    "build_baseline",
+    "insert_regret",
+    "place_single",
+    "place_with_ejection",
+    "reclaim_emergencies",
+]
 
 
 def _ordered_requests(requests: Iterable[Request]) -> list[Request]:
@@ -51,7 +57,7 @@ def build_baseline(ctx: PlanContext) -> Solution:
     # иначе диспетчер получит бессодержательное «нет ни одного исполнителя».
     engineers = sorted(ctx.scenario.engineers, key=lambda e: (e.input_order, e.id))
 
-    for request in _ordered_requests(ctx.scenario.requests):
+    for request in _ordered_requests(ctx.scenario.planning_requests()):
         accumulator = ReasonAccumulator()
         placed = False
         for engineer in engineers:
@@ -301,3 +307,133 @@ def place_single(
         return None
     solution.clear_unassigned(request.id)
     return route, best[1]
+
+
+def place_with_ejection(
+    ctx: PlanContext,
+    solution: Solution,
+    request: Request,
+    *,
+    allowed_engineers: Sequence[str] | None = None,
+    touched: set[str] | None = None,
+) -> tuple[RouteState, int] | None:
+    """Ставит заявку, вытесняя до `ejection_depth` менее приоритетных, если прямой вставки нет.
+
+    Авария важнее любой другой работы: она сдвигает хвост маршрута, а если окна
+    остальных не держат сдвиг — вытесняет их. Одной вытесненной заявки хватает не
+    всегда: длинная авария в плотной смене освобождает себе место только через
+    несколько работ подряд, поэтому вытеснение идёт по нарастающей, но не глубже
+    заданного предела — иначе ради одной заявки можно развалить весь день.
+
+    Сначала ищется вытеснение, после которого **все** потеснённые заявки находят новое
+    место. Только если такого нет, принимается честная потеря работ меньшего приоритета.
+    """
+    depth = max(0, ctx.settings.ejection_depth)
+    if depth <= 0:
+        return None
+
+    candidates = allowed_engineers if allowed_engineers is not None else solution.order
+    fallback: tuple[str, int, list[str], Solution] | None = None
+    for engineer_id in candidates:
+        probe = solution.routes.get(engineer_id)
+        if probe is None or probe.is_empty or not probe.accepts(request):
+            continue
+        victims = [
+            r.id
+            for r in probe.stops[probe.locked_count :]
+            if r.priority.rank < request.priority.rank
+        ]
+
+        for first in range(len(victims)):
+            snapshot = solution.clone()
+            route = solution.routes[engineer_id]
+            removed: list[Request] = []
+            position = -1
+
+            # Освобождаем места по одному, начиная с выбранной заявки: так при
+            # `ejection_depth=1` поведение остаётся прежним — перебор одиночных жертв.
+            for victim_id in victims[first:]:
+                index = route.index_of(victim_id)
+                if index < 0 or index < route.locked_count:
+                    continue
+                removed.append(route.remove_at(index))
+                placed = route.best_insertion(request)
+                if placed is not None and route.insert_checked(request, placed[1]):
+                    position = placed[1]
+                    break
+                if len(removed) >= depth:
+                    break
+
+            if position < 0:
+                solution.restore_from(snapshot)
+                continue
+
+            solution.clear_unassigned(request.id)
+            homeless: list[str] = []
+            for victim in removed:
+                rehomed = place_single(ctx, solution, victim)
+                if rehomed is None:
+                    homeless.append(victim.id)
+                elif touched is not None:
+                    touched.add(rehomed[0].engineer.id)
+
+            if not homeless:
+                if touched is not None:
+                    touched.add(engineer_id)
+                return solution.routes[engineer_id], position
+            # Вытеснение с потерей — запасной вариант: берём тот, где теряется меньше.
+            if fallback is None or len(homeless) < len(fallback[2]):
+                fallback = (engineer_id, position, homeless, solution.clone())
+            solution.restore_from(snapshot)
+
+    if fallback is not None:
+        engineer_id, position, homeless, state = fallback
+        solution.restore_from(state)
+        for victim_id in homeless:
+            victim = ctx.scenario.request_by_id.get(victim_id)
+            if victim is not None:
+                solution.mark_unassigned(
+                    victim,
+                    ReasonCode.TIME_CONFLICT,
+                    [f"место освобождено под аварийную заявку {request.id}"],
+                )
+        if touched is not None:
+            touched.add(engineer_id)
+        return solution.routes[engineer_id], position
+
+    return None
+
+
+def reclaim_emergencies(
+    ctx: PlanContext,
+    solution: Solution,
+    *,
+    allowed_engineers: Sequence[str] | None = None,
+    touched: set[str] | None = None,
+) -> int:
+    """Доразмещает неназначенные аварии, сдвигая или вытесняя менее приоритетные."""
+    pending = [
+        request
+        for request in sorted(
+            solution.unassigned.values(),
+            key=lambda r: (-r.priority.rank, r.input_order, r.id),
+        )
+        if request.priority is Priority.EMERGENCY
+    ]
+    placed = 0
+    for request in pending:
+        if request.id not in solution.unassigned:
+            continue
+        if place_single(ctx, solution, request, allowed_engineers=allowed_engineers) is not None:
+            placed += 1
+            continue
+        found = place_with_ejection(
+            ctx,
+            solution,
+            request,
+            allowed_engineers=allowed_engineers,
+            touched=touched,
+        )
+        if found is not None:
+            placed += 1
+    return placed

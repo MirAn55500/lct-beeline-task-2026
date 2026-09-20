@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Расписание визита и временные окна (SPEC §3.3).
 
-Самая тонкая часть контракта: окна ПРИБЫТИЯ не сдвигаются никогда, раннее
+Самая тонкая часть контракта: алгоритм окна сам не сдвигает, раннее
 прибытие превращается в ожидание, позднее — в отказ. Проверяем каждую границу
 по отдельности, включая распространение времени по цепочке визитов.
 """
@@ -40,12 +40,16 @@ def only_visit(result, engineer_id="E1"):
 
 
 # --------------------------------------------------------------------------
-# Раннее прибытие -> ожидание
+# Отложенный выезд: ждём до выезда, а не у клиента
 # --------------------------------------------------------------------------
 
 
-def test_early_arrival_produces_waiting_and_starts_at_window_start():
-    """Прибытие раньше окна допустимо и означает ожидание до window_start."""
+def test_departure_is_delayed_so_engineer_does_not_wait_at_the_client():
+    """Выезд откладывается до окна: инженер не стоит у подъезда два часа.
+
+    Свободное время остаётся простоем ПЕРЕД выездом (`idle_before_minutes`), а не
+    попадает в занятость: иначе маршрут из одной заявки показывал бы полную загрузку.
+    """
     scenario = sc(
         [req("R1", window=("11:00", "12:00"), dur=60, at=HOME)],
         [eng("E1", shift=("09:00", "18:00"), at=HOME)],
@@ -54,8 +58,47 @@ def test_early_arrival_produces_waiting_and_starts_at_window_start():
     visit = only_visit(result)
 
     assert_dt(visit.service_start_at, t("11:00"), "начало работы = начало окна")
-    assert visit.arrival_at < visit.service_start_at, "не зафиксировано раннее прибытие"
-    assert visit.waiting_minutes > 0, "ожидание не посчитано"
+    assert_dt(visit.arrival_at, t("11:00"), "приезжает ровно к началу работ")
+    assert visit.waiting_minutes == pytest.approx(0.0, abs=1e-6), "у клиента ждать нечего"
+    assert visit.idle_before_minutes == pytest.approx(120.0, abs=1e-6), (
+        "два свободных часа до выезда должны быть видны как простой"
+    )
+
+    # Смена 540 минут, работы 60, дороги нет: свободны ровно 480 минут. Пока ожидание
+    # считалось занятостью, те же 120 минут простоя списывались в busy и «съедали» запас.
+    route = routes_by_engineer(result)["E1"]
+    assert route.busy_minutes == pytest.approx(60.0, abs=1e-6)
+    assert route.free_minutes == pytest.approx(480.0, abs=1e-6), (
+        "свободное время дня обязано быть честным, а не съеденным ожиданием"
+    )
+    assert validate_plan(result, scenario) == []
+
+
+def test_delayed_departure_never_misses_the_arrival_window():
+    """Откладывая выезд, алгоритм не имеет права опоздать в окно прибытия.
+
+    Окно закрывается раньше, чем работа может начаться (заявка поступает позже окна),
+    поэтому откат выезда упирается в `window_end`, а не в начало работ.
+    """
+    scenario = sc(
+        [
+            req(
+                "R1",
+                window=("10:00", "11:00"),
+                dur=30,
+                at=HOME,
+                received_at="12:00",
+            )
+        ],
+        [eng("E1", shift=("09:00", "18:00"), at=HOME)],
+        service_must_start_within_window=False,
+    )
+    result = plan_optimized(scenario)
+    visit = only_visit(result)
+
+    assert visit.arrival_at <= t("11:00"), "прибытие обязано попасть в окно"
+    assert_dt(visit.service_start_at, t("12:00"), "работа не начинается раньше поступления")
+    assert visit.waiting_minutes > 0, "остаточное ожидание у клиента здесь неизбежно"
     assert validate_plan(result, scenario) == []
 
 
@@ -398,3 +441,25 @@ def test_travel_consumes_working_time_only():
     assert consumed == pytest.approx(visit.travel_minutes, abs=1e-6), (
         f"перемещение потребило {consumed} рабочих минут вместо {visit.travel_minutes}"
     )
+
+
+def test_emergency_does_not_start_before_received_at():
+    """Работа не начинается раньше поступления: авария в 13:00 при окне с 09:00."""
+    request = req(
+        "RE",
+        window=("09:00", "21:00"),
+        dur=100,
+        skill="emergency",
+        priority="emergency",
+        at=HOME,
+        received_at="13:00",
+    )
+    assert request.service_not_before == t("13:00")
+    scenario = sc([request], [eng("E1", skills=["emergency"], shift=("09:00", "18:00"), at=HOME)])
+    result = plan_optimized(scenario)
+    assignment = assignments_by_id(result)["RE"]
+    assert assignment.status == AssignmentStatus.ASSIGNED
+    assert assignment.service_start_at >= t("13:00"), (
+        f"авария начата в {hhmm(assignment.service_start_at)}, раньше поступления 13:00"
+    )
+    assert validate_plan(result, scenario) == []

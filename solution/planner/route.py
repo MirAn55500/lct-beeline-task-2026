@@ -32,6 +32,56 @@ _EPS = 1e-9
 _NEG_INF = -math.inf
 
 
+def schedule_leg(cal, timing, free_from: float, minutes: float, strict: bool):
+    """Расписание одного визита: выезд, прибытие, начало и конец работ, ожидание.
+
+    Возвращает `None`, если визит недопустим.
+
+    **Выезд откладывается.** Наивный расчёт «освободился — сразу поехал» отправляет
+    инженера к клиенту за два часа до открытия окна, и он стоит у подъезда. Это неверно
+    и по жизни, и по отчётности: ожидание попадает в занятость, маршрут из четырёх
+    заявок показывает 97 % загрузки, и диспетчер не видит, что у человека свободны часы.
+
+    Поэтому сначала считается самое раннее возможное начало работ (оно и решает
+    допустимость визита), а затем выезд откатывается назад ровно настолько, чтобы
+    приехать к началу работ. Раньше, чем инженер освободился, выехать нельзя;
+    позже конца окна прибыть нельзя — на этом откат и останавливается.
+    """
+    earliest_departure = cal.first_m(free_from)
+    if earliest_departure is None:
+        return None
+    earliest_arrival = cal.add_m(earliest_departure, minutes)
+    if earliest_arrival is None or earliest_arrival > timing.window_end + _EPS:
+        return None
+
+    not_before = timing.service_not_before
+    target = earliest_arrival if earliest_arrival > not_before else not_before
+    service_start = cal.first_m(target)
+    if service_start is None:
+        return None
+    if strict and service_start > timing.window_end + _EPS:
+        return None
+    service_end = cal.add_m(service_start, timing.duration)
+    if service_end is None:
+        return None
+
+    # Целимся прибыть к началу работ, но не позже конца окна прибытия: при выключенном
+    # `service_must_start_within_window` работа может начинаться и после окна, а вот
+    # приехать в него обязаны — иначе отложенный выезд сам сорвал бы окно.
+    aim = service_start if service_start < timing.window_end else timing.window_end
+    departure = cal.sub_m(aim, minutes)
+    if departure is None or departure < earliest_departure:
+        departure, arrival = earliest_departure, earliest_arrival
+    else:
+        arrival = cal.add_m(departure, minutes)
+        if arrival is None or arrival > timing.window_end + _EPS:
+            departure, arrival = earliest_departure, earliest_arrival
+
+    waiting = cal.working_between_m(arrival, service_start)
+    idle = cal.working_between_m(earliest_departure, departure)
+    return departure, arrival, service_start, service_end, waiting, idle
+
+
 class RouteState:
     """Изменяемое состояние маршрута. Все времена — минуты от `context.origin`."""
 
@@ -47,9 +97,11 @@ class RouteState:
         "_start",
         "_end",
         "_wait",
+        "_idle",
         "_leg_minutes",
         "_leg_km",
         "_latest",
+        "_frozen",
         "_static",
         "feasible",
         "distance_km",
@@ -71,6 +123,7 @@ class RouteState:
         self.mode = engineer.transport_mode
         self.stops: list[Request] = list(stops)
         self.locked_count = locked_count
+        self._frozen: list[tuple[float, float, float, float, float, float, float]] = []
         self._static: dict[str, bool] = {}
         self.recompute()
 
@@ -105,9 +158,11 @@ class RouteState:
         copy._start = list(self._start)
         copy._end = list(self._end)
         copy._wait = list(self._wait)
+        copy._idle = list(self._idle)
         copy._leg_minutes = list(self._leg_minutes)
         copy._leg_km = list(self._leg_km)
         copy._latest = list(self._latest)
+        copy._frozen = list(self._frozen)
         copy._static = dict(self._static)
         copy.feasible = self.feasible
         copy.distance_km = self.distance_km
@@ -159,6 +214,7 @@ class RouteState:
         self._start = [0.0] * n
         self._end = [0.0] * n
         self._wait = [0.0] * n
+        self._idle = [0.0] * n
         self._leg_minutes = [0.0] * n
         self._leg_km = [0.0] * n
         self._latest = [_NEG_INF] * n
@@ -180,35 +236,42 @@ class RouteState:
         cursor = shift_start
 
         for i, request in enumerate(self.stops):
+            if i < self.locked_count and i < len(self._frozen):
+                # Начатая работа — это факт, а не решение планировщика: её время не
+                # пересчитывается. Иначе исчезновение более раннего визита сдвигало бы
+                # прошлое назад, и план утверждал бы, что работа шла не тогда, когда шла.
+                dep, arr, start, end, wait, minutes, km = self._frozen[i]
+                self._dep[i] = dep
+                self._arr[i] = arr
+                self._start[i] = start
+                self._end[i] = end
+                self._wait[i] = wait
+                self._idle[i] = 0.0
+                self._leg_minutes[i] = minutes
+                self._leg_km[i] = km
+                self.distance_km += km
+                self.travel_minutes += minutes
+                self.service_minutes += ctx.timing(request).duration
+                self.waiting_minutes += wait
+                cursor = end
+                point = request.point
+                continue
+
             timing = ctx.timing(request)
             km, minutes = travel.both(point, request.point, mode)
 
-            departure = cal.first_m(cursor)
-            if departure is None:
+            leg = schedule_leg(cal, timing, cursor, minutes, strict)
+            if leg is None:
                 self.feasible = False
                 return False
-            arrival = cal.add_m(departure, minutes)
-            if arrival is None or arrival > timing.window_end + _EPS:
-                self.feasible = False
-                return False
-            target = arrival if arrival > timing.window_start else timing.window_start
-            service_start = cal.first_m(target)
-            if service_start is None:
-                self.feasible = False
-                return False
-            if strict and service_start > timing.window_end + _EPS:
-                self.feasible = False
-                return False
-            service_end = cal.add_m(service_start, timing.duration)
-            if service_end is None:
-                self.feasible = False
-                return False
+            departure, arrival, service_start, service_end, waiting, idle = leg
 
             self._dep[i] = departure
             self._arr[i] = arrival
             self._start[i] = service_start
             self._end[i] = service_end
-            self._wait[i] = cal.working_between_m(arrival, service_start)
+            self._wait[i] = waiting
+            self._idle[i] = idle
             self._leg_minutes[i] = minutes
             self._leg_km[i] = km
 
@@ -240,6 +303,10 @@ class RouteState:
         for i in range(n - 1, -1, -1):
             request = self.stops[i]
             timing = ctx.timing(request)
+            if i < self.locked_count and i < len(self._frozen):
+                # Начатую работу задержать уже нельзя: запас по определению нулевой.
+                latest[i] = self._start[i]
+                continue
             if i == n - 1:
                 bound = cal.sub_m(shift_end, timing.duration)
             else:
@@ -280,23 +347,10 @@ class RouteState:
 
         in_km, in_min = travel.both(prev_point, request.point, mode)
 
-        departure = cal.first_m(cursor)
-        if departure is None:
+        leg = schedule_leg(cal, timing, cursor, in_min, strict)
+        if leg is None:
             return None
-        arrival = cal.add_m(departure, in_min)
-        if arrival is None or arrival > timing.window_end + _EPS:
-            return None
-        target = arrival if arrival > timing.window_start else timing.window_start
-        service_start = cal.first_m(target)
-        if service_start is None:
-            return None
-        if strict and service_start > timing.window_end + _EPS:
-            return None
-        service_end = cal.add_m(service_start, timing.duration)
-        if service_end is None:
-            return None
-
-        waiting = cal.working_between_m(arrival, service_start)
+        _, _, service_start, service_end, waiting, _ = leg
 
         if position == len(self.stops):
             out_km = out_min = 0.0
@@ -309,21 +363,12 @@ class RouteState:
             removed_km = self._leg_km[position]
             removed_min = self._leg_minutes[position]
 
-            nxt_departure = cal.first_m(service_end)
-            if nxt_departure is None:
+            nxt_leg = schedule_leg(cal, nxt_timing, service_end, out_min, strict)
+            if nxt_leg is None:
                 return None
-            nxt_arrival = cal.add_m(nxt_departure, out_min)
-            if nxt_arrival is None or nxt_arrival > nxt_timing.window_end + _EPS:
-                return None
-            nxt_target = nxt_arrival if nxt_arrival > nxt_timing.window_start else nxt_timing.window_start
-            nxt_start = cal.first_m(nxt_target)
-            if nxt_start is None:
-                return None
+            nxt_start, new_nxt_wait = nxt_leg[2], nxt_leg[4]
             if nxt_start > self._latest[position] + _EPS:
                 return None
-            if strict and nxt_start > nxt_timing.window_end + _EPS:
-                return None
-            new_nxt_wait = cal.working_between_m(nxt_arrival, nxt_start)
             delta_wait = waiting + new_nxt_wait - self._wait[position]
 
         return InsertionCost(
@@ -380,6 +425,29 @@ class RouteState:
             return None
         return self.remove_at(index)
 
+    def adopt(
+        self,
+        stops: Sequence[Request],
+        locked_count: int,
+        frozen: Sequence[tuple[float, float, float, float, float, float, float]] = (),
+    ) -> bool:
+        """Принимает состав маршрута из готового плана вместе с фактами по начатым визитам.
+
+        `frozen` — расписание locked-префикса в минутах от `ctx.origin`, взятое из
+        предыдущего плана. Оно подставляется как есть: работа, которая уже идёт,
+        не может «переехать» из-за того, что событие изменило остальной день.
+        При недопустимости состава изменение откатывается целиком.
+        """
+        snapshot = (self.stops[:], self.locked_count, list(self._frozen))
+        self.stops = list(stops)
+        self.locked_count = max(0, min(locked_count, len(self.stops)))
+        self._frozen = list(frozen)[: self.locked_count]
+        if self.recompute():
+            return True
+        self.stops, self.locked_count, self._frozen = snapshot
+        self.recompute()
+        return False
+
     def try_sequence(self, stops: Iterable[Request]) -> bool:
         """Пробует заменить порядок визитов. При недопустимости откатывает."""
         candidate = list(stops)
@@ -406,13 +474,32 @@ class RouteState:
         маршрута: диспетчеру нужно знать не «не влезло», а когда инженер освобождается
         и во сколько он смог бы доехать.
         """
-        if not self.stops:
-            return FeasibilityResult(False, ReasonCode.TIME_CONFLICT, self._solo_detail(request))
-
         ctx = self.ctx
         cal = self.cal
         timing = ctx.timing(request)
         name = self.engineer.name
+
+        # Сначала — случай «не помещается в принципе»: работа не может начаться раньше
+        # окна (и поступления), а смена заканчивается раньше, чем она успеет закончиться.
+        # Здесь ни загрузка, ни дорога ни при чём, и говорить про «уже запланированные
+        # работы» нечестно: заявку не взять даже в совершенно пустой день.
+        shift_end = cal.end_m
+        if shift_end is not None:
+            latest_start = cal.sub_m(shift_end, timing.duration)
+            if latest_start is None or timing.service_not_before > latest_start + _EPS:
+                return FeasibilityResult(
+                    False,
+                    ReasonCode.TIME_CONFLICT,
+                    # Имя инженера намеренно не упоминается: причина общая, и одинаковые
+                    # формулировки схлопнутся в одну вместо списка из десяти строк.
+                    f"работа {int(timing.duration)} мин не может начаться раньше "
+                    f"{ctx.to_datetime(timing.service_not_before):%H:%M}, а смена "
+                    f"заканчивается в {ctx.to_datetime(shift_end):%H:%M} — "
+                    f"заявка не помещается даже в пустой день",
+                )
+
+        if not self.stops:
+            return FeasibilityResult(False, ReasonCode.TIME_CONFLICT, self._solo_detail(request))
         free_at = self._end[-1]
         minutes = ctx.travel.travel_minutes(self.stops[-1].point, request.point, self.mode)
         departure = cal.first_m(free_at)
@@ -472,14 +559,17 @@ class RouteState:
 
     # ------------------------------------------------------------------ доступ к расписанию
 
-    def schedule_at(self, index: int) -> tuple[float, float, float, float, float, float, float]:
-        """(выезд, прибытие, начало, конец, ожидание, минуты в пути, км) для визита."""
+    def schedule_at(
+        self, index: int
+    ) -> tuple[float, float, float, float, float, float, float, float]:
+        """(выезд, прибытие, начало, конец, ожидание, простой до выезда, минуты в пути, км)."""
         return (
             self._dep[index],
             self._arr[index],
             self._start[index],
             self._end[index],
             self._wait[index],
+            self._idle[index],
             self._leg_minutes[index],
             self._leg_km[index],
         )

@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 
 from factories import (
@@ -45,8 +47,8 @@ P = {
 def base_scenario():
     """Базовый сценарий дня: два инженера, семь заявок, работы до и после 13:00."""
     engineers = [
-        eng("E1", shift=("09:00", "18:00"), at=HOME, order=0),
-        eng("E2", shift=("09:00", "18:00"), at=HOME, order=1),
+        eng("E1", skills=["connection", "emergency"], shift=("09:00", "18:00"), at=HOME, order=0),
+        eng("E2", skills=["connection", "emergency"], shift=("09:00", "18:00"), at=HOME, order=1),
     ]
     requests = [
         req("R1", window=("09:00", "10:00"), dur=60, at=P["R1"]),
@@ -112,7 +114,7 @@ def route_signature(result, engineer_id):
 
 
 def assert_windows_not_shifted(result, scenario):
-    """Окна заявок не сдвигаются никогда (SPEC §6.3, база знаний)."""
+    """Алгоритм окна сам не сдвигает: визиты сверяются с актуальным окном сценария."""
     known = {r.id: r for r in scenario.requests}
     for assignment in result.assignments:
         if assignment.status != AssignmentStatus.ASSIGNED:
@@ -150,12 +152,13 @@ def assert_locked_unchanged(before, after, moment):
 
 
 def urgent_request(**overrides):
-    """Срочная заявка для события URGENT_REQUEST."""
+    """Аварийная заявка для события URGENT_REQUEST (имя события не менялось)."""
     params = dict(
         window=("13:30", "14:30"),
         dur=30,
         at=(55.700, 37.600),
-        priority="urgent",
+        skill="emergency",
+        priority="emergency",
         order=100,
     )
     params.update(overrides)
@@ -203,7 +206,7 @@ def test_replan_result_is_valid(name):
 
 @pytest.mark.parametrize("name", sorted(all_events()))
 def test_windows_are_never_shifted_by_replan(name):
-    """Окна заявок остаются исходными при любом ремонте."""
+    """Алгоритм окна сам не мутирует: визиты укладываются в окно действующего сценария."""
     scenario = base_scenario()
     before = plan_optimized(scenario)
     ev = all_events()[name]
@@ -221,7 +224,7 @@ def test_requests_are_never_auto_cancelled(name):
 
     # Состав заявок считается по действующему сценарию: отменённая исчезает только
     # потому, что её отменили явным событием, а не «сама».
-    expected = {r.id for r in scenario_after(scenario, before, ev).requests}
+    expected = {r.id for r in scenario_after(scenario, before, ev).planning_requests()}
     actual = {a.request_id for a in after.assignments}
     assert expected == actual, (
         f"расхождение состава: потеряны {sorted(expected - actual)}, "
@@ -280,18 +283,18 @@ def test_routes_declared_unchanged_are_really_identical(name):
 
 
 def test_urgent_request_is_inserted_into_plan():
-    """Срочная заявка, для которой есть место, обязана быть размещена."""
+    """Аварийная заявка, для которой есть место, обязана быть размещена."""
     scenario = base_scenario()
     before = plan_optimized(scenario)
     urgent = urgent_request()
     after = replan(before, scenario, event(EventType.URGENT_REQUEST, EVENT_AT, request=urgent))
 
-    assert "RU" in assigned_ids(after), "срочная заявка не размещена, хотя место было"
-    assert after.metrics.urgent_unassigned_count == 0
+    assert "RU" in assigned_ids(after), "аварийная заявка не размещена, хотя место было"
+    assert after.metrics.emergency_unassigned_count == 0
 
 
 def test_urgent_request_does_not_touch_unrelated_routes():
-    """Маршруты, которых срочная заявка не касается, остаются идентичными."""
+    """Маршруты, которых аварийная заявка не касается, остаются идентичными."""
     scenario = base_scenario()
     before = plan_optimized(scenario)
     urgent = urgent_request()
@@ -307,18 +310,18 @@ def test_urgent_request_does_not_touch_unrelated_routes():
             continue
         assert route_signature(after, route.engineer_id) == route_signature(
             before, route.engineer_id
-        ), f"маршрут {route.engineer_id} изменился, хотя срочная заявка его не касалась"
+        ), f"маршрут {route.engineer_id} изменился, хотя аварийная заявка его не касалась"
 
 
 def test_impossible_urgent_request_is_unassigned_with_reason():
-    """Невозможную срочную заявку честно помечаем неназначенной с причиной."""
+    """Невозможную аварийную заявку честно помечаем неназначенной с причиной."""
     scenario = base_scenario()
     before = plan_optimized(scenario)
     urgent = urgent_request(window=("03:00", "04:00"), dur=30)
     after = replan(before, scenario, event(EventType.URGENT_REQUEST, EVENT_AT, request=urgent))
 
     assignment = assignments_by_id(after).get("RU")
-    assert assignment is not None, "срочная заявка исчезла из результата"
+    assert assignment is not None, "аварийная заявка исчезла из результата"
     assert assignment.status == AssignmentStatus.UNASSIGNED
     assert assignment.reason is not None
     assert assignment.explanation and has_cyrillic(assignment.explanation)
@@ -344,8 +347,8 @@ def test_urgent_request_in_the_past_is_not_forced_into_locked_window():
 
 
 def ejection_scenario():
-    """Плотный день одного инженера: свободного места под срочную нет."""
-    engineers = [eng("E1", shift=("09:00", "18:00"), at=HOME, order=0)]
+    """Плотный день одного инженера: свободного места под аварию нет."""
+    engineers = [eng("E1", skills=["connection", "emergency"], shift=("09:00", "18:00"), at=HOME, order=0)]
     requests = [
         req("N1", window=("09:00", "09:00"), dur=120, at=HOME),
         req("N2", window=("11:00", "11:00"), dur=120, at=HOME),
@@ -356,16 +359,24 @@ def ejection_scenario():
 
 
 def test_ejection_places_urgent_request():
-    """При ejection_depth>=1 срочная заявка вытесняет обычную и размещается."""
+    """При ejection_depth>=1 авария вытесняет заявку меньшего приоритета и размещается."""
     base = ejection_scenario()
     scenario = sc(base.requests, base.engineers, ejection_depth=1)
     before = plan_optimized(scenario)
     assert before.metrics.assigned_count == 4, "сценарий вытеснения собран неверно"
 
-    urgent = req("RU", window=("15:00", "15:00"), dur=120, at=HOME, priority="urgent", order=100)
+    urgent = req(
+        "RU",
+        window=("15:00", "15:00"),
+        dur=120,
+        at=HOME,
+        skill="emergency",
+        priority="emergency",
+        order=100,
+    )
     after = replan(before, scenario, event(EventType.URGENT_REQUEST, "14:00", request=urgent))
 
-    assert "RU" in assigned_ids(after), "срочная заявка не размещена даже вытеснением"
+    assert "RU" in assigned_ids(after), "аварийная заявка не размещена даже вытеснением"
     assert "N4" not in assigned_ids(after) or assignments_by_id(after)["N4"].engineer_id is not None
 
 
@@ -374,7 +385,15 @@ def test_ejected_request_is_either_reassigned_or_honestly_unassigned():
     base = ejection_scenario()
     scenario = sc(base.requests, base.engineers, ejection_depth=1)
     before = plan_optimized(scenario)
-    urgent = req("RU", window=("15:00", "15:00"), dur=120, at=HOME, priority="urgent", order=100)
+    urgent = req(
+        "RU",
+        window=("15:00", "15:00"),
+        dur=120,
+        at=HOME,
+        skill="emergency",
+        priority="emergency",
+        order=100,
+    )
     after = replan(before, scenario, event(EventType.URGENT_REQUEST, "14:00", request=urgent))
 
     victim = assignments_by_id(after)["N4"]
@@ -390,21 +409,72 @@ def test_ejection_respects_frozen_past():
     base = ejection_scenario()
     scenario = sc(base.requests, base.engineers, ejection_depth=1)
     before = plan_optimized(scenario)
-    urgent = req("RU", window=("15:00", "15:00"), dur=120, at=HOME, priority="urgent", order=100)
+    urgent = req(
+        "RU",
+        window=("15:00", "15:00"),
+        dur=120,
+        at=HOME,
+        skill="emergency",
+        priority="emergency",
+        order=100,
+    )
     after = replan(before, scenario, event(EventType.URGENT_REQUEST, "14:00", request=urgent))
     assert_locked_unchanged(before, after, t("14:00"))
 
 
 def test_zero_ejection_depth_forbids_displacement():
-    """ejection_depth=0 запрещает вытеснение: срочная остаётся неназначенной."""
+    """ejection_depth=0 запрещает вытеснение: авария остаётся неназначенной."""
     base = ejection_scenario()
     scenario = sc(base.requests, base.engineers, ejection_depth=0)
     before = plan_optimized(scenario)
-    urgent = req("RU", window=("15:00", "15:00"), dur=120, at=HOME, priority="urgent", order=100)
+    urgent = req(
+        "RU",
+        window=("15:00", "15:00"),
+        dur=120,
+        at=HOME,
+        skill="emergency",
+        priority="emergency",
+        order=100,
+    )
     after = replan(before, scenario, event(EventType.URGENT_REQUEST, "14:00", request=urgent))
 
     assert assignments_by_id(after)["RU"].status == AssignmentStatus.UNASSIGNED
-    assert "N4" in assigned_ids(after), "без вытеснения обычная заявка должна остаться"
+    assert "N4" in assigned_ids(after), "без вытеснения заявка меньшего приоритета должна остаться"
+
+
+def test_ejection_cannot_displace_another_emergency():
+    """Входящая авария не вытесняет другую аварию: rank входящей не выше."""
+    engineers = [eng("E1", skills=["connection", "emergency"], shift=("09:00", "18:00"), at=HOME)]
+    requests = [
+        req("N1", window=("09:00", "09:00"), dur=120, at=HOME),
+        req("N2", window=("11:00", "11:00"), dur=120, at=HOME),
+        req("N3", window=("13:00", "13:00"), dur=120, at=HOME),
+        req(
+            "N4",
+            window=("15:00", "15:00"),
+            dur=120,
+            at=HOME,
+            skill="emergency",
+            priority="emergency",
+        ),
+    ]
+    scenario = sc(requests, engineers, ejection_depth=1)
+    before = plan_optimized(scenario)
+    assert "N4" in assigned_ids(before)
+
+    incoming = req(
+        "RU",
+        window=("15:00", "15:00"),
+        dur=120,
+        at=HOME,
+        skill="emergency",
+        priority="emergency",
+        order=100,
+    )
+    after = replan(before, scenario, event(EventType.URGENT_REQUEST, "14:00", request=incoming))
+
+    assert "N4" in assigned_ids(after), "другую аварию нельзя вытеснить"
+    assert assignments_by_id(after)["RU"].status == AssignmentStatus.UNASSIGNED
 
 
 # --------------------------------------------------------------------------
@@ -632,3 +702,115 @@ def test_replan_without_stabilization_is_still_valid():
     ev = event(EventType.CANCEL_REQUEST, EVENT_AT, request_id="R5")
     after = replan(before, scenario, ev)
     assert validate_plan(after, scenario_after(scenario, before, ev)) == []
+
+
+# --------------------------------------------------------------------------
+# Регрессии: заморозка при исчезновении более раннего визита и глубина вытеснения
+# --------------------------------------------------------------------------
+
+
+def _chain_scenario(**overrides):
+    """Один инженер и цепочка из трёх заявок подряд — без конкуренции за исполнителя."""
+    here = (55.750, 37.610)
+    there = (55.760, 37.630)
+    engineers = [eng("E1", skills=["connection"], shift=("09:00", "20:00"), at=here, order=0)]
+    requests = [
+        req("R1", window=("09:00", "18:00"), dur=60, at=here, order=0),
+        req("R2", window=("09:00", "18:00"), dur=60, at=there, order=1),
+        req("R3", window=("09:00", "18:00"), dur=60, at=there, order=2),
+    ]
+    return sc(requests, engineers, name="replan-chain", **overrides)
+
+
+def test_started_work_keeps_its_time_when_earlier_visit_disappears():
+    """Отмена уже отработанного визита не двигает начатые работы назад во времени.
+
+    Регрессия: расписание пересчитывалось от начала смены целиком, поэтому исчезновение
+    более раннего визита сдвигало замороженный хвост в прошлое — план утверждал, что
+    работа шла не тогда, когда она шла на самом деле.
+    """
+    scenario = _chain_scenario()
+    before = plan_optimized(scenario)
+    first = before.routes[0].visits[0]
+
+    # Момент события — когда все три визита уже начаты: всё, что было, стало фактом.
+    moment = before.routes[0].visits[-1].service_start_at + timedelta(minutes=1)
+    after = replan(before, scenario, event(EventType.CANCEL_REQUEST, moment, request_id=first.request_id))
+
+    was = {v.request_id: v for v in before.routes[0].visits}
+    for visit in after.routes[0].visits:
+        assert visit.locked, f"визит {visit.request_id} обязан остаться замороженным"
+        old = was[visit.request_id]
+        assert visit.service_start_at == old.service_start_at, visit.request_id
+        assert visit.service_end_at == old.service_end_at, visit.request_id
+        assert visit.arrival_at == old.arrival_at, visit.request_id
+    assert validate_plan(after, scenario_after(scenario, before, event(
+        EventType.CANCEL_REQUEST, moment, request_id=first.request_id))) == []
+
+
+def test_urgent_request_gets_assignment_when_scenario_has_snapshot():
+    """Со снимком `as_of` авария после события попадает и в маршрут, и в назначения.
+
+    Регрессия: `apply_event` не сдвигал границу снимка на момент события, поэтому
+    заявка стояла в маршруте, но выпадала из `planning_requests()` — а значит из
+    назначений и из метрик, и план при этом выглядел корректным.
+    """
+    engineers = [eng("E1", skills=["connection", "emergency"], shift=("09:00", "18:00"), order=0)]
+    requests = [req("R1", window=("10:00", "12:00"), dur=60, order=0)]
+    scenario = sc(requests, engineers, as_of="09:00", name="replan-snapshot")
+    before = plan_optimized(scenario)
+
+    urgent = req(
+        "U1",
+        window=("13:00", "15:00"),
+        dur=80,
+        skill="emergency",
+        priority="emergency",
+        received_at="13:00",
+        order=99,
+    )
+    ev = event(EventType.URGENT_REQUEST, "13:00", request=urgent)
+    after = replan(before, scenario, ev)
+
+    placed = assignments_by_id(after).get("U1")
+    assert placed is not None, "аварийная заявка обязана иметь Assignment"
+    assert placed.status == AssignmentStatus.ASSIGNED
+    assert "U1" in assigned_ids(after)
+    assert after.metrics.assigned_count == 2
+    assert validate_plan(after, scenario_after(scenario, before, ev)) == []
+
+
+def test_ejection_depth_allows_displacing_several_requests():
+    """`ejection_depth` — это глубина: при 2 авария вытесняет две заявки, при 1 — нет.
+
+    Регрессия: вытеснялась ровно одна заявка при любом значении настройки, поэтому
+    авария, которой нужно освободить два слота подряд, терялась.
+    """
+    here = (55.750, 37.610)
+    engineers = [eng("E1", skills=["connection", "emergency"], shift=("09:00", "13:00"), at=here, order=0)]
+    requests = [
+        req("C1", window=("09:00", "12:00"), dur=100, at=here, priority="connection", order=0),
+        req("C2", window=("09:00", "12:00"), dur=100, at=here, priority="connection", order=1),
+    ]
+    urgent = req(
+        "A1",
+        window=("09:00", "10:00"),
+        dur=180,
+        at=here,
+        skill="emergency",
+        priority="emergency",
+        received_at="09:00",
+        order=9,
+    )
+
+    outcome = {}
+    for depth in (1, 2):
+        scenario = sc(requests, engineers, ejection_depth=depth, name=f"eject-{depth}")
+        before = plan_optimized(scenario)
+        ev = event(EventType.URGENT_REQUEST, "09:00", request=urgent)
+        after = replan(before, scenario, ev)
+        outcome[depth] = "A1" in assigned_ids(after)
+        assert validate_plan(after, scenario_after(scenario, before, ev)) == []
+
+    assert outcome[1] is False, "одной вытесненной заявки не хватает — авария не помещается"
+    assert outcome[2] is True, "при глубине 2 авария обязана вытеснить обе заявки и встать"

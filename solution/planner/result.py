@@ -60,10 +60,21 @@ class Visit:
     service_minutes: float = 0.0
     """Чистая длительность работ. Отдельным полем, потому что разность
     `service_end_at - service_start_at` включает перерыв, если работа его пересекла."""
+    idle_before_minutes: float = 0.0
+    """Свободные рабочие минуты перед выездом к этому визиту: инженер уже закончил
+    прошлую работу, но ехать ещё рано. Выезд откладывается, чтобы не стоять у клиента,
+    и это время — честный резерв дня, а не занятость."""
     locked: bool = False
     address: str = ""
-    priority: str = "normal"
+    priority: str = "connection"
     required_skill: Skill = Skill.CONNECTION
+    geometry_range: tuple[int, int] | None = None
+    """Границы участка внутри `RouteResult.geometry`: от предыдущей точки маршрута сюда.
+
+    Индексы, а не копия координат: линия по улицам — это сотни точек на маршрут, и
+    хранить её дважды (целиком и по участкам) значит удвоить JSON плана без пользы.
+    `None` — реальной геометрии нет, участок рисуется прямой.
+    """
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -76,6 +87,7 @@ class Visit:
             "service_end_at": _iso(self.service_end_at),
             "latest_departure_at": _iso(self.latest_departure_at),
             "service_minutes": _r(self.service_minutes, 1),
+            "idle_before_minutes": _r(self.idle_before_minutes, 1),
             "slack_minutes": _r(self.slack_minutes, 1),
             "travel_minutes": _r(self.travel_minutes, 1),
             "distance_km": _r(self.distance_km),
@@ -86,6 +98,7 @@ class Visit:
             "address": self.address,
             "priority": self.priority,
             "required_skill": self.required_skill.value,
+            "geometry_range": list(self.geometry_range) if self.geometry_range else None,
         }
 
 
@@ -107,6 +120,18 @@ class RouteResult:
     capacity_minutes: float
     region_key: str = "default"
     explanation: str = ""
+    geometry: tuple[GeoPoint, ...] = ()
+    """Линия маршрута по улицам, полученная из маршрутного сервиса (`planner.ors`).
+
+    Пустая, пока план считался по координатам: тогда карта рисует `polyline` —
+    прямые между точками. Заполняется постобработкой `attach_route_geometry`,
+    расписание и назначения от неё не зависят.
+    """
+    geometry_source: str = "straight"
+    """`"ors"` — линия по улицам, `"straight"` — соединение точек по прямой.
+
+    Поле существует, чтобы интерфейс не выдавал прямую за реальный маршрут.
+    """
 
     @property
     def busy_minutes(self) -> float:
@@ -149,6 +174,8 @@ class RouteResult:
             "free_minutes": _r(self.free_minutes, 1),
             "utilization": _r(self.utilization, 4),
             "polyline": [p.as_geojson() for p in self.polyline],
+            "geometry": [p.as_geojson() for p in self.geometry],
+            "geometry_source": self.geometry_source,
         }
 
 
@@ -236,7 +263,8 @@ class PlanMetrics:
     tight_visit_count: int = 0
     """Сколько визитов идут без запаса (менее 10 минут до срыва окна)."""
     unassigned_count: int = 0
-    urgent_unassigned_count: int = 0
+    emergency_unassigned_count: int = 0
+    connection_unassigned_count: int = 0
     used_engineer_count: int = 0
     available_engineer_count: int = 0
     total_distance_km: float = 0.0
@@ -248,10 +276,15 @@ class PlanMetrics:
     constraints_valid: bool = True
     per_engineer: tuple[EngineerMetrics, ...] = ()
 
-    def quality_key(self) -> tuple[int, int, int, float, float]:
-        """Лексикографический ключ сравнения планов: меньше — лучше."""
+    def quality_key(self) -> tuple[int, int, int, int, float, float]:
+        """Лексикографический ключ сравнения планов: меньше — лучше.
+
+        Авария важнее подключения, подключение важнее общего объёма, затем люди,
+        время в пути и пробег.
+        """
         return (
-            self.urgent_unassigned_count,
+            self.emergency_unassigned_count,
+            self.connection_unassigned_count,
             self.unassigned_count,
             self.used_engineer_count,
             round(self.total_travel_minutes, 6),
@@ -264,7 +297,8 @@ class PlanMetrics:
             "feasible_count": self.feasible_count,
             "tight_visit_count": self.tight_visit_count,
             "unassigned_count": self.unassigned_count,
-            "urgent_unassigned_count": self.urgent_unassigned_count,
+            "emergency_unassigned_count": self.emergency_unassigned_count,
+            "connection_unassigned_count": self.connection_unassigned_count,
             "used_engineer_count": self.used_engineer_count,
             "available_engineer_count": self.available_engineer_count,
             "total_distance_km": _r(self.total_distance_km),

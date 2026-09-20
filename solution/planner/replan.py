@@ -21,7 +21,7 @@ from dataclasses import replace as _replace
 from datetime import datetime
 from typing import Sequence
 
-from .construct import insert_regret, place_single
+from .construct import insert_regret, place_single, place_with_ejection
 from .context import PlanContext
 from .enums import Algorithm, EventType, Priority, ReasonCode
 from .explain import explain_replan
@@ -65,12 +65,14 @@ def replan(
     if urgent_request is not None:
         placed = place_single(ctx, solution, urgent_request)
         if placed is None:
-            placed = _place_with_ejection(ctx, solution, urgent_request, pool, touched)
+            placed = place_with_ejection(
+                ctx, solution, urgent_request, touched=touched
+            )
         if placed is None:
             solution.mark_unassigned(
                 urgent_request,
                 ReasonCode.TIME_CONFLICT,
-                ["срочную заявку не удалось вставить ни в один маршрут, даже вытесняя обычные"],
+                ["аварийную заявку не удалось вставить ни в один маршрут, даже вытесняя менее приоритетные"],
             )
         else:
             touched.add(placed[0].engineer.id)
@@ -122,7 +124,14 @@ def apply_event(scenario: Scenario, previous: PlanResult, event) -> tuple[Scenar
         if new_request.id in {r.id for r in requests}:
             requests = [r for r in requests if r.id != new_request.id]
         order = max((r.input_order for r in requests), default=0) + 1
-        requests.append(_replace(new_request, input_order=order, priority=Priority.URGENT))
+        requests.append(
+            _replace(
+                new_request,
+                input_order=order,
+                priority=Priority.EMERGENCY,
+                received_at=new_request.received_at or event.at,
+            )
+        )
 
     elif event.type is EventType.CANCEL_REQUEST:
         target = event.target_request_id
@@ -162,7 +171,19 @@ def apply_event(scenario: Scenario, previous: PlanResult, event) -> tuple[Scenar
             )
         engineers = updated_engineers
 
-    return _replace(scenario, requests=tuple(requests), engineers=tuple(engineers)), warnings
+    # Событие происходит «сейчас», поэтому граница снимка сдвигается на его момент:
+    # иначе аварийная заявка, поступившая позже прежнего `as_of`, попадала бы в маршрут,
+    # но выпадала из `planning_requests()` — и, значит, из назначений и метрик.
+    as_of = scenario.as_of
+    if as_of is not None and event.at > as_of:
+        as_of = event.at
+
+    return (
+        _replace(
+            scenario, requests=tuple(requests), engineers=tuple(engineers), as_of=as_of
+        ),
+        warnings,
+    )
 
 
 def _minutes_spent(previous: PlanResult, request_id: str, moment: datetime) -> float:
@@ -226,6 +247,7 @@ def seed_from_previous(
             continue
 
         kept: list[Request] = []
+        schedule: list[tuple[float, float, float, float, float, float, float]] = []
         locked_count = 0
         for visit in route.visits:
             request = by_id.get(visit.request_id)
@@ -241,101 +263,42 @@ def seed_from_previous(
             )
             if frozen and len(kept) == locked_count:
                 locked_count += 1
+                schedule.append(_visit_schedule(ctx, visit))
             kept.append(request)
 
-        if not state.try_sequence(kept):
-            # Обрезанная смена или изменившаяся длительность: оставляем только замороженное,
-            # остальное честно отправляем на перераспределение.
+        if not state.adopt(kept, locked_count, schedule):
+            # Обрезанная смена или изменившаяся длительность: факты по начатым работам
+            # остаются на месте, остальное честно отправляем на перераспределение.
             touched.add(route.engineer_id)
             head = kept[:locked_count]
             tail = kept[locked_count:]
-            while head and not state.try_sequence(head):
-                orphans.append(head.pop())
-                locked_count -= 1
-            if not head:
-                state.try_sequence([])
-                locked_count = 0
+            if not state.adopt(head, locked_count, schedule):
+                # Недостижимо, пока префикс состоит из фактов, но молча терять заявки нельзя.
+                state.adopt([], 0, ())
+                orphans.extend(head)
+                tail = kept
             for request in tail:
                 if not state.insert_checked(request, len(state.stops)):
                     orphans.append(request)
-        state.locked_count = max(0, min(locked_count, state.size))
 
     orphans.sort(key=lambda r: (-r.priority.rank, r.input_order, r.id))
     return solution, orphans, touched
 
 
-# --------------------------------------------------------------------------------------
-# Вытеснение ради срочной заявки
-# --------------------------------------------------------------------------------------
-
-
-def _place_with_ejection(
-    ctx: PlanContext,
-    solution: Solution,
-    urgent: Request,
-    pool: list[Request],
-    touched: set[str],
-):
-    """Срочная заявка вправе потеснить обычную, если иначе её не выполнить вовсе.
-
-    Сначала ищется вытеснение, после которого потеснённая заявка находит новое место —
-    тогда день не теряет ни одной работы. Только если такого нет, принимается вариант
-    с потерей обычной заявки: срочность по ТЗ приоритетнее.
-    """
-    depth = max(0, ctx.settings.ejection_depth)
-    if depth <= 0:
-        return None
-
-    fallback = None
-    for engineer_id in solution.order:
-        probe = solution.routes.get(engineer_id)
-        if probe is None or probe.is_empty or not probe.accepts(urgent):
-            continue
-        # Откат пересоздаёт объекты маршрутов, поэтому список кандидатов снимается
-        # заранее по идентификаторам заявок, а маршрут берётся из решения на каждом шаге.
-        victims = [
-            r.id for r in probe.stops[probe.locked_count :] if r.priority is not Priority.URGENT
-        ]
-
-        for victim_id in victims:
-            route = solution.routes.get(engineer_id)
-            if route is None:
-                break
-            index = route.index_of(victim_id)
-            if index < route.locked_count:
-                continue
-
-            snapshot = solution.clone()
-            victim = route.remove_at(index)
-            placed = route.best_insertion(urgent)
-            if placed is None or not route.insert_checked(urgent, placed[1]):
-                solution.restore_from(snapshot)
-                continue
-
-            solution.clear_unassigned(urgent.id)
-            rehomed = place_single(ctx, solution, victim)
-            if rehomed is not None:
-                touched.add(engineer_id)
-                touched.add(rehomed[0].engineer.id)
-                return solution.routes[engineer_id], index
-            if fallback is None:
-                fallback = (engineer_id, index, victim.id, solution.clone())
-            solution.restore_from(snapshot)
-
-    if fallback is not None:
-        engineer_id, index, victim_id, state = fallback
-        solution.restore_from(state)
-        victim = ctx.scenario.request_by_id.get(victim_id)
-        if victim is not None:
-            solution.mark_unassigned(
-                victim,
-                ReasonCode.TIME_CONFLICT,
-                [f"место освобождено под срочную заявку {urgent.id}"],
-            )
-        touched.add(engineer_id)
-        return solution.routes[engineer_id], index
-
-    return None
+def _visit_schedule(
+    ctx: PlanContext, visit
+) -> tuple[float, float, float, float, float, float, float]:
+    """Фактическое расписание начатого визита в минутах от точки отсчёта расчёта."""
+    m = ctx.to_minutes
+    return (
+        m(visit.departure_at),
+        m(visit.arrival_at),
+        m(visit.service_start_at),
+        m(visit.service_end_at),
+        visit.waiting_minutes,
+        visit.travel_minutes,
+        visit.distance_km,
+    )
 
 
 # --------------------------------------------------------------------------------------

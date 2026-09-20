@@ -92,11 +92,16 @@ def test_baseline_positions_are_continuous_from_one():
         assert [v.position for v in route.visits] == list(range(1, len(route.visits) + 1))
 
 
-def test_baseline_waiting_is_recorded_for_early_arrival():
-    """R4: инженер освободился в 11:00, а окно с 11:30 — 30 минут ожидания."""
+def test_baseline_idle_is_recorded_before_departure_not_at_the_client():
+    """R4: инженер освободился в 11:00, а окно с 11:30 — эти 30 минут он не едет.
+
+    Выезд откладывается, поэтому свободные полчаса — простой перед выездом,
+    а не ожидание у клиента; занятость дня они не раздувают.
+    """
     result = plan_baseline(manual_scenario())
     visit = {v.request_id: v for v in routes_by_engineer(result)["E1"].visits}["R4"]
-    assert visit.waiting_minutes == pytest.approx(30.0, abs=1e-6)
+    assert visit.waiting_minutes == pytest.approx(0.0, abs=1e-6)
+    assert visit.idle_before_minutes == pytest.approx(30.0, abs=1e-6)
 
 
 def test_baseline_picks_first_suitable_engineer_by_input_order():

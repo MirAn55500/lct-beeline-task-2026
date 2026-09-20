@@ -26,6 +26,7 @@ from factories import (
     req,
     sc,
     t,
+    unassigned_ids,
     validate_plan,
 )
 
@@ -119,15 +120,15 @@ def test_required_transport_nobody_has():
     assert assignment.reason == ReasonCode.NO_TRANSPORT
 
 
-def test_all_requests_urgent_is_handled():
-    """Все заявки срочные — приоритет перестаёт различать, план остаётся валидным."""
+def test_all_requests_emergency_is_handled():
+    """Все заявки аварийные — приоритет перестаёт различать, план остаётся валидным."""
     requests = [
-        req(f"R{i}", window=("09:00", "16:00"), dur=60, at=HOME, priority="urgent")
+        req(f"R{i}", window=("09:00", "16:00"), dur=60, at=HOME, priority="emergency")
         for i in range(6)
     ]
     scenario = sc(requests, [eng("E1", at=HOME), eng("E2", at=HOME)])
     result = plan_optimized(scenario)
-    assert result.metrics.urgent_unassigned_count == result.metrics.unassigned_count
+    assert result.metrics.emergency_unassigned_count == result.metrics.unassigned_count
     assert validate_plan(result, scenario) == []
 
 
@@ -313,13 +314,13 @@ def test_scenario_is_constructible_directly_without_factories():
 
 
 def test_unassigned_request_priority_is_reflected_in_metrics():
-    """Неназначенная срочная заявка попадает в urgent_unassigned_count."""
+    """Неназначенная авария попадает в emergency_unassigned_count."""
     scenario = sc(
-        [req("R1", window=("03:00", "04:00"), dur=30, at=HOME, priority="urgent")],
+        [req("R1", window=("03:00", "04:00"), dur=30, at=HOME, priority="emergency")],
         [eng("E1", at=HOME)],
     )
     result = plan_optimized(scenario)
-    assert result.metrics.urgent_unassigned_count == 1
+    assert result.metrics.emergency_unassigned_count == 1
     assert result.metrics.unassigned_count == 1
 
 
@@ -334,6 +335,103 @@ def test_baseline_and_optimized_agree_on_trivially_infeasible_requests():
 
 
 def test_priority_enum_values_are_stable():
-    """Значения приоритетов сериализуются как строки ТЗ."""
-    assert Priority.NORMAL.value == "normal"
-    assert Priority.URGENT.value == "urgent"
+    """Значения приоритетов сериализуются как строки БЗ; ранг — авария > подключение > ремонт."""
+    assert Priority.EMERGENCY.value == "emergency"
+    assert Priority.CONNECTION.value == "connection"
+    assert Priority.REPAIR.value == "repair_or_addon"
+    assert Priority.EMERGENCY.rank == 2
+    assert Priority.CONNECTION.rank == 1
+    assert Priority.REPAIR.rank == 0
+
+
+def test_request_default_priority_is_connection():
+    """Дефолт заявки — подключение, независимо от навыка (SPEC §2.4)."""
+    request = req("R1", at=HOME)
+    assert request.priority == Priority.CONNECTION
+    assert request.is_emergency is False
+
+
+def test_completed_request_is_excluded_from_assignments():
+    """Закрытая заявка не входит в planning_requests и не получает Assignment."""
+    closed = req("RDONE", window=("09:00", "12:00"), dur=60, at=HOME, execution_status="completed")
+    open_request = req("R1", window=("09:00", "12:00"), dur=60, at=HOME)
+    scenario = sc([closed, open_request], [eng("E1", at=HOME)])
+
+    assert closed.id not in {r.id for r in scenario.planning_requests()}
+    result = plan_optimized(scenario)
+    assert closed.id not in {a.request_id for a in result.assignments}
+    assert assigned_ids(result) == {"R1"}
+    assert validate_plan(result, scenario) == []
+
+
+def test_future_received_at_is_excluded_when_as_of_is_earlier():
+    """Авария, поступившая после as_of, в этот снимок плана не входит."""
+    emergency = req(
+        "RE",
+        window=("09:00", "21:00"),
+        dur=100,
+        skill="emergency",
+        priority="emergency",
+        at=HOME,
+        received_at="13:00",
+    )
+    scenario = sc(
+        [emergency],
+        [eng("E1", skills=["emergency"], at=HOME)],
+        as_of="09:00",
+    )
+    assert emergency.id not in {r.id for r in scenario.planning_requests()}
+    result = plan_optimized(scenario)
+    assert result.assignments == ()
+    assert assigned_ids(result) == set()
+    assert validate_plan(result, scenario) == []
+
+
+def test_engineer_home_start_survives_dict_round_trip():
+    """home_start — часть входа и обязан переживать сериализацию (SPEC §2.3)."""
+    engineer = eng("E1", at=HOME, home_start=True)
+    restored = type(engineer).from_dict(engineer.to_dict())
+    assert restored.home_start is True
+    assert eng("E2", at=HOME).home_start is False
+
+
+def test_request_that_cannot_fit_any_shift_is_reported_as_a_warning():
+    """Заявка, не помещающаяся в смену ни к кому, попадает в предупреждения плана.
+
+    Реальный случай «Востока»: в выгрузке есть окна 20:00–22:00, а смена задана до 21:00.
+    Авария длится 80 минут и не может начаться раньше 20:00 — её не выполнить ни при каком
+    распределении. Без предупреждения такая заявка молча оседает в «не назначено»,
+    и причину ищут в алгоритме, а не в границах смены.
+    """
+    scenario = sc(
+        [
+            req("R1", window=("10:00", "12:00"), dur=60),
+            req("R2", window=("20:00", "22:00"), dur=80, skill="emergency", priority="emergency"),
+        ],
+        [eng("E1", skills=["connection", "emergency"], shift=("09:00", "21:00"))],
+    )
+    result = plan_optimized(scenario)
+
+    assert "R2" in unassigned_ids(result)
+    hint = [w for w in result.warnings if "не помещающихся в смену" in w]
+    assert hint, f"нет предупреждения о заявке вне смены: {result.warnings}"
+    assert "R2" in hint[0]
+    assert "R1" not in hint[0], "нормальная заявка не должна попадать в предупреждение"
+
+
+def test_explanation_says_the_work_does_not_fit_even_an_empty_day():
+    """Объяснение отличает «не влезает в принципе» от «инженер занят».
+
+    Инженер полностью свободен, и всё равно не может взять заявку: работа начинается
+    не раньше 20:00 и длится 80 минут, а смена заканчивается в 21:00. Говорить про
+    «уже запланированные работы» здесь было бы неправдой.
+    """
+    scenario = sc(
+        [req("R1", window=("20:00", "22:00"), dur=80, skill="emergency", priority="emergency")],
+        [eng("E1", skills=["emergency"], shift=("09:00", "21:00"))],
+    )
+    result = plan_optimized(scenario)
+    explanation = assignments_by_id(result)["R1"].explanation
+
+    assert "не помещается даже в пустой день" in explanation, explanation
+    assert "уже запланированных работ" not in explanation, explanation

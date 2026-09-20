@@ -20,8 +20,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from planner import Algorithm, EventType, Priority, ReplanEvent, compare, plan, replan, validate_plan
+from planner import (
+    Algorithm,
+    EventType,
+    Priority,
+    ReplanEvent,
+    Skill,
+    compare,
+    plan,
+    replan,
+    validate_plan,
+)
 from planner.io_csv import build_scenario, find_dataset_dir
+from planner.ors import DEFAULT_BASE_URL, setup_routing
 from planner.textutil import plural
 
 SOURCES = {
@@ -50,7 +61,7 @@ def _plan_summary(tag: str, result) -> None:
     m = result.metrics
     print(
         f"  {tag:<12} назначено {m.assigned_count:>3} | без исполнителя {m.unassigned_count:>3} "
-        f"(срочных {m.urgent_unassigned_count}) | инженеров {m.used_engineer_count:>2} | "
+        f"(аварий {m.emergency_unassigned_count}, подключений {m.connection_unassigned_count}) | инженеров {m.used_engineer_count:>2} | "
         f"пробег {m.total_distance_km:>7.1f} км | в пути {m.total_travel_minutes:>6.0f} мин | "
         f"{m.computation_ms:>6.0f} мс"
     )
@@ -59,10 +70,22 @@ def _plan_summary(tag: str, result) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--region", choices=sorted(SOURCES), default="east")
-    parser.add_argument("--shift", default="09:00-21:00", help="смена, формат ЧЧ:ММ-ЧЧ:ММ")
+    # Смена по умолчанию согласована с данными: в выгрузках есть окна прибытия до 22:00.
+    # При 09:00-21:00 пять заявок (включая две аварии) не помещаются в смену физически —
+    # алгоритм тут ни при чём, и план об этом честно предупреждает.
+    parser.add_argument("--shift", default="09:00-22:00", help="смена, формат ЧЧ:ММ-ЧЧ:ММ")
     parser.add_argument("--lunch", default="13:00-14:00", help="перерыв или 'нет'")
     parser.add_argument("--limit", type=float, default=5.0, help="лимит поиска, секунд")
     parser.add_argument("--json", type=Path, help="куда сохранить план целиком")
+    parser.add_argument(
+        "--ors",
+        nargs="?",
+        const=DEFAULT_BASE_URL,
+        metavar="URL",
+        help="считать расстояния по улицам через openrouteservice "
+        f"(по умолчанию {DEFAULT_BASE_URL}); без флага берётся кэш data/routing_cache.json, "
+        "а если и его нет — расчёт по координатам",
+    )
     args = parser.parse_args()
 
     title, synthetic, control = SOURCES[args.region]
@@ -83,15 +106,30 @@ def main() -> int:
     for note in notes:
         print(f"  · {note}")
 
+    # Модель перемещения — единственное, что меняется от подключения ORS:
+    # алгоритм, расписание и метрики считаются ровно теми же функциями.
+    routing = setup_routing(scenario, url=args.ors)
+    print(
+        "  Расстояния: "
+        + ("по улицам (openrouteservice)" if routing.enabled else "по координатам (гаверсинус)")
+    )
+    for note in routing.notes:
+        print(f"  · {note}")
+
     _head("2. РАСЧЁТ И СРАВНЕНИЕ С БАЗОВЫМ ВАРИАНТОМ")
-    baseline = plan(scenario, Algorithm.BASELINE)
-    optimized = plan(scenario, Algorithm.OPTIMIZED)
+    baseline = plan(scenario, Algorithm.BASELINE, travel=routing.travel)
+    optimized = routing.attach(plan(scenario, Algorithm.OPTIMIZED, travel=routing.travel))
+    routing.save()
     _plan_summary("базовый", baseline)
     _plan_summary("оптимизир.", optimized)
     print(f"\n  {compare(baseline, optimized)['summary']}")
 
-    problems = validate_plan(optimized, scenario)
+    # Проверка обязана считать теми же расстояниями, что и план: иначе она
+    # сравнивает расписание по улицам с расписанием по прямой и ругается на всё.
+    problems = validate_plan(optimized, scenario, routing.travel)
     print(f"  Независимая проверка плана: {'нарушений нет' if not problems else problems[:3]}")
+    for warning in optimized.warnings:
+        print(f"  ⚠ {warning}")
 
     _head("3. МАРШРУТЫ")
     for route in optimized.routes[:4]:
@@ -124,21 +162,35 @@ def main() -> int:
     else:
         print("  Все заявки распределены.")
 
-    _head("5. ПЕРЕПЛАНИРОВАНИЕ: СРОЧНАЯ ЗАЯВКА В СЕРЕДИНЕ ДНЯ")
-    sample = optimized.routes[0].visits[-1]
+    _head("5. ПЕРЕПЛАНИРОВАНИЕ: АВАРИЙНАЯ ЗАЯВКА В СЕРЕДИНЕ ДНЯ")
+    # Момент события — середина самого загруженного маршрута: так видно и заморозку
+    # уже начатых работ, и перестройку хвоста дня.
+    busiest = max(optimized.routes, key=lambda r: len(r.visits))
+    sample = busiest.visits[len(busiest.visits) // 2]
     source = scenario.request_by_id[sample.request_id]
     from dataclasses import replace as _replace
 
+    # Авария — это не «обычная заявка с высоким приоритетом»: по базе знаний («Навык»)
+    # категория BK «Глобальная проблема» требует навыка «Аварийные работы», и исполнитель
+    # без него не получит её ни при каком приоритете. Норматив обслуживания — 80 минут
+    # без дороги. Берём реальный адрес из выгрузки, всё остальное задаём как у аварии.
     urgent = _replace(
         source,
         id="URGENT-1",
-        priority=Priority.URGENT,
-        window_start=source.window_start + timedelta(hours=1),
-        window_end=source.window_end + timedelta(hours=1),
+        priority=Priority.EMERGENCY,
+        required_skill=Skill.EMERGENCY,
+        request_type_bk="Глобальная проблема",
+        required_equipment=frozenset(),
+        received_at=sample.departure_at,
+        duration_minutes=80,
+        # Окно аварии отсчитывается от поступления, а не копируется у исходной заявки:
+        # авария доступна с момента, когда о ней сообщили, и ехать нужно ближайшие часы.
+        window_start=sample.departure_at,
+        window_end=sample.departure_at + timedelta(hours=2),
         input_order=10_000,
     )
     event = ReplanEvent(type=EventType.URGENT_REQUEST, at=sample.departure_at, request=urgent)
-    updated = replan(optimized, scenario, event)
+    updated = replan(optimized, scenario, event, travel=routing.travel)
 
     _plan_summary("после", updated)
     print(f"\n  {updated.diff.summary}")

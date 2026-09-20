@@ -1,3 +1,5 @@
+viz/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -225,6 +227,11 @@ __marimo__/
 
 # demo.py --json dump
 /plan.json
+
+# Выгрузки data.mos.ru, из которых tools/mosdata_to_gtfs.py собирает gtfs.zip:
+# полгигабайта исходников, которые скачиваются заново по ссылкам из README.
+# Производные кэши (geocache.json, routing_cache.json, work_types.json) остаются.
+/data/*.csv
 
 # Windows
 Thumbs.db

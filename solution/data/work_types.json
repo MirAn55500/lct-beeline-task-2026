@@ -1,17 +1,23 @@
 {
-  "version": "1.0",
+  "version": "1.3",
   "comment": [
     "Сопоставление пар «Тип заявки BK» + «Тип заявки HD» из выгрузок с видом работ,",
-    "длительностью и снаряжением. Навык заявки задаётся только категорией BK",
-    "(таблица «Навык» в базе знаний); HD описывает работу и навык не подменяет.",
-    "В исходных файлах готового соответствия нет — поэтому таблица вынесена в данные,",
-    "а не зашита в код: правило можно поправить, не трогая алгоритм.",
+    "длительностью, приоритетом и снаряжением. Навык и приоритет задаются только",
+    "категорией BK (таблица «Навык» и словарь priority в базе знаний); HD описывает",
+    "работу и навык не подменяет.",
     "",
     "Длительность = технические работы + документы, БЕЗ дорожных 20 минут базового",
-    "норматива: перемещение алгоритм считает отдельно, иначе дорога учтётся дважды.",
+    "норматива для всех видов: подключение 70, авария 80, дозаказ 20, локальная 30.",
+    "Перемещение алгоритм считает отдельно, иначе дорога из Excel учтётся дважды.",
     "",
-    "Приоритет норматива: точная пара (bk + hd) → только hd → только bk → значение по умолчанию.",
-    "Приоритет навыка: только bk; если BK неизвестен — навык из выбранного норматива."
+    "Приоритет: авария → подключение → ремонт / дозаказ. Дозаказ требует навык",
+    "connection, но по важности равен ремонту (repair_or_addon).",
+    "",
+    "Порядок разбора: точная пара (bk|hd) как явное исключение → bk → hd → значение по умолчанию.",
+    "Вид работ, длительность, навык и приоритет определяет только BK: норматив привязан",
+    "к виду работ, а вид работ — к категории BK. HD уточняет лишь снаряжение (он знает",
+    "про замену приставки или роутера). Секция by_hd применяется целиком только тогда,",
+    "когда категория BK неизвестна; её значения приведены к таблице «Маппинг типов заявок»."
   ],
   "norms_source": {
     "file": "Нормативы.xlsx",
@@ -25,36 +31,37 @@
   "default": {
     "category": "Подключение клиентов Базовая",
     "skill": "connection",
+    "priority": "connection",
     "duration_minutes": 70,
     "equipment": []
   },
   "by_hd": {
-    "Заявка на подключение": {"category": "Подключение клиентов Базовая", "skill": "connection", "duration_minutes": 70},
-    "Конвергенция абонента": {"category": "Подключение клиентов Базовая", "skill": "connection", "duration_minutes": 70},
-    "Переключение на Гбит/с": {"category": "Подключение клиентов Базовая", "skill": "connection", "duration_minutes": 70},
+    "Заявка на подключение": {"category": "Подключение клиентов Базовая", "skill": "connection", "priority": "connection", "duration_minutes": 70},
+    "Конвергенция абонента": {"category": "Подключение клиентов Базовая", "skill": "connection", "priority": "connection", "duration_minutes": 70},
+    "Переключение на Гбит/с": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "priority": "repair_or_addon", "duration_minutes": 30},
 
-    "Дозаказ оборудования": {"category": "Дозаказ оборудования", "skill": "connection", "duration_minutes": 20, "equipment": ["router"]},
-    "Заказ подключения/Дозаказ оборудования": {"category": "Дозаказ оборудования", "skill": "connection", "duration_minutes": 20, "equipment": ["router"]},
+    "Дозаказ оборудования": {"category": "Дозаказ оборудования", "skill": "connection", "priority": "repair_or_addon", "duration_minutes": 20, "equipment": ["router"]},
+    "Заказ подключения/Дозаказ оборудования": {"category": "Дозаказ оборудования", "skill": "connection", "priority": "repair_or_addon", "duration_minutes": 20, "equipment": ["router"]},
 
-    "Авария": {"category": "Аварий на ТКД", "skill": "emergency", "duration_minutes": 80},
-    "Нет линка": {"category": "Аварий на ТКД", "skill": "emergency", "duration_minutes": 80},
-    "Мониторинг": {"category": "Аварий на ТКД", "skill": "emergency", "duration_minutes": 80},
-    "Рост ошибок на порту": {"category": "Аварий на ТКД", "skill": "emergency", "duration_minutes": 80},
+    "Авария": {"category": "Аварий на ТКД", "skill": "emergency", "priority": "emergency", "duration_minutes": 80},
+    "Нет линка": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "priority": "repair_or_addon", "duration_minutes": 30},
+    "Мониторинг": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "priority": "repair_or_addon", "duration_minutes": 30},
+    "Рост ошибок на порту": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "priority": "repair_or_addon", "duration_minutes": 30},
 
-    "Разрывы": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "duration_minutes": 30},
-    "Низкая скорость": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "duration_minutes": 30},
-    "IP-адрес 169...": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "duration_minutes": 30},
-    "Работа с кабелем": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "duration_minutes": 30},
-    "Информация": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "duration_minutes": 30},
-    "TVE/ENT. Другие ошибки": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "duration_minutes": 30},
-    "TVE/ENT. Замена приставки техником": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "duration_minutes": 30, "equipment": ["set_top_box"]},
-    "ТВ. Замена приставки техником": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "duration_minutes": 30, "equipment": ["set_top_box"]},
-    "Роутер. Замена техническим специалистом": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "duration_minutes": 30, "equipment": ["router"]}
+    "Разрывы": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "priority": "repair_or_addon", "duration_minutes": 30},
+    "Низкая скорость": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "priority": "repair_or_addon", "duration_minutes": 30},
+    "IP-адрес 169...": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "priority": "repair_or_addon", "duration_minutes": 30},
+    "Работа с кабелем": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "priority": "repair_or_addon", "duration_minutes": 30},
+    "Информация": {"category": "Аварий на ТКД", "skill": "emergency", "priority": "emergency", "duration_minutes": 80},
+    "TVE/ENT. Другие ошибки": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "priority": "repair_or_addon", "duration_minutes": 30},
+    "TVE/ENT. Замена приставки техником": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "priority": "repair_or_addon", "duration_minutes": 30, "equipment": ["set_top_box"]},
+    "ТВ. Замена приставки техником": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "priority": "repair_or_addon", "duration_minutes": 30, "equipment": ["set_top_box"]},
+    "Роутер. Замена техническим специалистом": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "priority": "repair_or_addon", "duration_minutes": 30, "equipment": ["router"]}
   },
   "by_bk": {
-    "Подключение": {"category": "Подключение клиентов Базовая", "skill": "connection", "duration_minutes": 70},
-    "Дозаказ": {"category": "Дозаказ оборудования", "skill": "connection", "duration_minutes": 20, "equipment": ["router"]},
-    "Локальная заявка": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "duration_minutes": 30},
-    "Глобальная проблема": {"category": "Аварий на ТКД", "skill": "emergency", "duration_minutes": 80}
+    "Подключение": {"category": "Подключение клиентов Базовая", "skill": "connection", "priority": "connection", "duration_minutes": 70},
+    "Дозаказ": {"category": "Дозаказ оборудования", "skill": "connection", "priority": "repair_or_addon", "duration_minutes": 20, "equipment": ["router"]},
+    "Локальная заявка": {"category": "Локальная заявка/ремонт у клиента", "skill": "local", "priority": "repair_or_addon", "duration_minutes": 30},
+    "Глобальная проблема": {"category": "Аварий на ТКД", "skill": "emergency", "priority": "emergency", "duration_minutes": 80}
   }
 }

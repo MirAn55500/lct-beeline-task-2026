@@ -22,9 +22,9 @@ from dataclasses import replace as _replace
 from datetime import datetime
 from typing import Sequence
 
-from .construct import build_baseline, insert_regret
+from .construct import build_baseline, insert_regret, reclaim_emergencies
 from .context import PlanContext
-from .enums import Algorithm, AssignmentStatus, ReasonCode
+from .enums import Algorithm, AssignmentStatus, Priority, ReasonCode
 from .explain import explain_assignment, explain_route, explain_unassigned
 from .feasibility import check_static
 from .fleet import minimize_fleet
@@ -74,10 +74,11 @@ def solve(
 
     solution = Solution(ctx)
     pool: Sequence[Request] = sorted(
-        ctx.scenario.requests, key=lambda r: (r.input_order, r.id)
+        ctx.scenario.planning_requests(), key=lambda r: (r.input_order, r.id)
     )
     # Конструктивная фаза идёт без урезания: без допустимого решения оптимизировать нечего.
     insert_regret(ctx, solution, pool, deadline=deadline)
+    reclaim_emergencies(ctx, solution)
 
     # Оставшийся бюджет делится между фазами заранее. Иначе локальный поиск на трудном
     # наборе съедает всё время и минимизация числа исполнителей — первая обязательная
@@ -153,7 +154,7 @@ def build_result(
         routes.append(route)
         assignments.update(route_assignments)
 
-    for request in scenario.requests:
+    for request in scenario.planning_requests():
         if request.id in assignments:
             continue
         reason, details = solution.reasons.get(request.id, (ReasonCode.NOT_FOUND, []))
@@ -169,7 +170,7 @@ def build_result(
 
     ordered_assignments = tuple(
         assignments[r.id]
-        for r in sorted(scenario.requests, key=lambda r: (r.input_order, r.id))
+        for r in sorted(scenario.planning_requests(), key=lambda r: (r.input_order, r.id))
         if r.id in assignments
     )
 
@@ -226,7 +227,7 @@ def _count_alternatives(ctx: PlanContext) -> dict[str, int]:
     """Сколько инженеров вообще имели право взять заявку — нужно для объяснений."""
     counts: dict[str, int] = {}
     engineers = ctx.scenario.active_engineers()
-    for request in ctx.scenario.requests:
+    for request in ctx.scenario.planning_requests():
         counts[request.id] = sum(
             1 for e in engineers if check_static(e, request, ctx.settings).ok
         )
@@ -243,7 +244,7 @@ def _build_route(
     assignments: dict[str, Assignment] = {}
 
     for index, request in enumerate(state.stops):
-        dep, arr, start, end, wait, leg_minutes, leg_km = state.schedule_at(index)
+        dep, arr, start, end, wait, idle, leg_minutes, leg_km = state.schedule_at(index)
         from_point = engineer.start_point if index == 0 else state.stops[index - 1].point
 
         visit = Visit(
@@ -261,6 +262,7 @@ def _build_route(
             to_point=request.point,
             latest_departure_at=ctx.to_datetime(state.latest_departure_m(index)),
             service_minutes=float(request.duration_minutes),
+            idle_before_minutes=idle,
             slack_minutes=state.slack_m(index),
             locked=index < state.locked_count,
             address=request.address,
@@ -352,7 +354,9 @@ def _build_metrics(
     assigned = sum(1 for a in assignments if a.is_assigned)
     unassigned_list = [a for a in assignments if not a.is_assigned]
     tight = sum(1 for r in routes for v in r.visits if v.slack_minutes < 10.0)
-    urgent_ids = {r.id for r in ctx.scenario.requests if r.is_urgent}
+    by_id = {r.id: r for r in ctx.scenario.planning_requests()}
+    emergency_ids = {rid for rid, r in by_id.items() if r.priority is Priority.EMERGENCY}
+    connection_ids = {rid for rid, r in by_id.items() if r.priority is Priority.CONNECTION}
     utilizations = [m.utilization for m in per_engineer]
 
     return PlanMetrics(
@@ -360,7 +364,10 @@ def _build_metrics(
         feasible_count=assigned,
         tight_visit_count=tight,
         unassigned_count=len(unassigned_list),
-        urgent_unassigned_count=sum(1 for a in unassigned_list if a.request_id in urgent_ids),
+        emergency_unassigned_count=sum(1 for a in unassigned_list if a.request_id in emergency_ids),
+        connection_unassigned_count=sum(
+            1 for a in unassigned_list if a.request_id in connection_ids
+        ),
         used_engineer_count=len(routes),
         available_engineer_count=len(ctx.scenario.active_engineers()),
         total_distance_km=sum(r.distance_km for r in routes),

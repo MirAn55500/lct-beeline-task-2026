@@ -18,7 +18,7 @@ import time as _time
 from dataclasses import replace as _replace
 
 from .context import PlanContext
-from .enums import Algorithm, AssignmentStatus, EventType, ReasonCode
+from .enums import Algorithm, EventType, ReasonCode
 from .feasibility import check_static
 from .models import Scenario
 from .replan import build_diff, seed_from_previous
@@ -166,13 +166,3 @@ def _refuse(previous: PlanResult, reason: str) -> PlanResult:
             summary=f"Ручное переназначение отклонено: {reason}. План не изменён.",
         ),
     )
-
-
-def _override_explanation(result: PlanResult, request_id: str, text: str) -> PlanResult:
-    assignments = tuple(
-        _replace(a, explanation=text)
-        if a.request_id == request_id and a.status is AssignmentStatus.UNASSIGNED
-        else a
-        for a in result.assignments
-    )
-    return _replace(result, assignments=assignments)

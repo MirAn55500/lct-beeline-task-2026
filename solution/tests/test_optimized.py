@@ -3,8 +3,8 @@
 
 Главная гарантия: optimized никогда не хуже baseline по лексикографическому
 ключу качества. Дополнительно проверяются эффекты, ради которых он и нужен:
-приоритет срочных, regret-эффект для «безальтернативных» заявок и выигрыш на
-сценарии-ловушке из ТЗ п.6.
+приоритет авария → подключение → ремонт/дозаказ, regret-эффект для
+«безальтернативных» заявок и выигрыш на сценарии-ловушке из ТЗ п.6.
 """
 from __future__ import annotations
 
@@ -104,8 +104,8 @@ def scenario_tight_capacity():
         req("R1", window=("09:00", "12:00"), dur=90, at=HOME),
         req("R2", window=("09:00", "12:00"), dur=90, at=HOME),
         req("R3", window=("09:00", "12:00"), dur=90, at=HOME),
-        req("R4", window=("09:00", "12:00"), dur=90, at=HOME, priority="urgent"),
-        req("R5", window=("09:00", "12:00"), dur=90, at=HOME, priority="urgent"),
+        req("R4", window=("09:00", "12:00"), dur=90, at=HOME, priority="emergency"),
+        req("R5", window=("09:00", "12:00"), dur=90, at=HOME, priority="emergency"),
     ]
     return sc(requests, engineers, name="tight-capacity")
 
@@ -193,39 +193,125 @@ def test_trap_scenario_optimized_is_strictly_better():
 
 
 # --------------------------------------------------------------------------
-# Срочные заявки
+# Приоритеты: авария → подключение → ремонт / дозаказ
 # --------------------------------------------------------------------------
 
 
-def test_urgent_requests_are_placed_first_under_scarcity():
-    """Ресурса хватает на часть — срочные обязаны быть размещены полностью."""
+def test_emergency_requests_are_placed_first_under_scarcity():
+    """Ресурса хватает на часть — аварии обязаны быть размещены полностью."""
     scenario = scenario_tight_capacity()
     optimized = plan_optimized(scenario)
-    assert optimized.metrics.urgent_unassigned_count == 0, (
-        f"срочные потеряны: {[a.request_id for a in optimized.unassigned]}"
+    assert optimized.metrics.emergency_unassigned_count == 0, (
+        f"аварии потеряны: {[a.request_id for a in optimized.unassigned]}"
     )
     assert assigned_ids(optimized) == {"R4", "R5"}
 
 
-def test_urgent_priority_beats_input_order():
-    """Срочная заявка, стоящая последней во входе, всё равно получает ресурс."""
+def test_emergency_priority_beats_input_order():
+    """Авария, стоящая последней во входе, всё равно получает ресурс вместо подключения."""
     engineers = [eng("E1", shift=("09:00", "11:00"), at=HOME)]
     requests = [
-        req("R_NORMAL", window=("09:00", "10:00"), dur=120, at=HOME),
-        req("R_URGENT", window=("09:00", "10:00"), dur=120, at=HOME, priority="urgent"),
+        req("R_CONN", window=("09:00", "10:00"), dur=120, at=HOME, priority="connection"),
+        req("R_EMERGENCY", window=("09:00", "10:00"), dur=120, at=HOME, priority="emergency"),
     ]
     scenario = sc(requests, engineers)
     optimized = plan_optimized(scenario)
-    assert assigned_ids(optimized) == {"R_URGENT"}
-    assert optimized.metrics.urgent_unassigned_count == 0
+    assert assigned_ids(optimized) == {"R_EMERGENCY"}
+    assert optimized.metrics.emergency_unassigned_count == 0
 
 
-def test_urgent_unassigned_count_counts_only_urgent():
-    """Метрика urgent_unassigned_count не смешивается с общим числом отказов."""
+def test_emergency_unassigned_count_counts_only_emergency():
+    """Метрика emergency_unassigned_count не смешивается с общим числом отказов."""
     scenario = scenario_tight_capacity()
     optimized = plan_optimized(scenario)
     assert optimized.metrics.unassigned_count == 3
-    assert optimized.metrics.urgent_unassigned_count == 0
+    assert optimized.metrics.emergency_unassigned_count == 0
+    assert optimized.metrics.connection_unassigned_count == 3
+
+
+def test_priority_scarcity_keeps_emergency_then_connection():
+    """Один инженер, три заявки не влезают: авария, затем подключение, не наоборот.
+
+    Навык и приоритет независимы: все три заявки может выполнить один исполнитель,
+    различается только важность. Влезают две из трёх — ремонт/дозаказ отбрасывается.
+    """
+    engineer = eng(
+        "E1",
+        skills=["emergency", "connection", "local"],
+        shift=("09:00", "13:00"),
+        at=HOME,
+    )
+    requests = [
+        req(
+            "R_REPAIR",
+            window=("09:00", "13:00"),
+            dur=90,
+            skill="local",
+            priority="repair_or_addon",
+            at=HOME,
+        ),
+        req(
+            "R_CONN",
+            window=("09:00", "13:00"),
+            dur=90,
+            skill="connection",
+            priority="connection",
+            at=HOME,
+        ),
+        req(
+            "R_EMERGENCY",
+            window=("09:00", "13:00"),
+            dur=90,
+            skill="emergency",
+            priority="emergency",
+            at=HOME,
+        ),
+    ]
+    scenario = sc(requests, [engineer])
+    optimized = plan_optimized(scenario)
+    ids = assigned_ids(optimized)
+    assert "R_EMERGENCY" in ids, f"авария потеряна: {ids}"
+    assert "R_CONN" in ids, f"подключение потеряно при наличии места: {ids}"
+    assert "R_REPAIR" not in ids, f"ремонт вытеснил более важный приоритет: {ids}"
+    assert optimized.metrics.emergency_unassigned_count == 0
+    assert optimized.metrics.connection_unassigned_count == 0
+
+
+def test_emergency_displaces_packed_lower_priority_on_static_plan():
+    """Авария сдвигает/вытесняет менее приоритетные уже в основном расчёте, не только в replan.
+
+    Четыре плотных подключения занимают весь день. Авария с тем же окном, что и
+    последнее подключение, должна получить место: либо хвост сдвигается, либо
+    менее важная заявка уходит в неназначенные.
+    """
+    engineer = eng(
+        "E1",
+        skills=["connection", "emergency"],
+        shift=("09:00", "18:00"),
+        at=HOME,
+    )
+    requests = [
+        req("N1", window=("09:00", "09:00"), dur=120, at=HOME, skill="connection"),
+        req("N2", window=("11:00", "11:00"), dur=120, at=HOME, skill="connection"),
+        req("N3", window=("13:00", "13:00"), dur=120, at=HOME, skill="connection"),
+        req("N4", window=("15:00", "15:00"), dur=120, at=HOME, skill="connection"),
+        req(
+            "EM",
+            window=("15:00", "15:00"),
+            dur=120,
+            at=HOME,
+            skill="emergency",
+            priority="emergency",
+            order=99,
+        ),
+    ]
+    scenario = sc(requests, [engineer], enable_local_search=False, enable_fleet_minimization=False)
+    optimized = plan_optimized(scenario)
+    assert "EM" in assigned_ids(optimized), (
+        f"авария не размещена в статическом плане: {assigned_ids(optimized)}"
+    )
+    assert optimized.metrics.emergency_unassigned_count == 0
+    assert optimized.metrics.assigned_count <= 4
 
 
 # --------------------------------------------------------------------------
@@ -306,9 +392,11 @@ def test_quality_key_components_match_metrics():
     result = plan_optimized(scenario_tight_capacity())
     m = result.metrics
     assert m.quality_key() == (
-        m.urgent_unassigned_count,
+        m.emergency_unassigned_count,
+        m.connection_unassigned_count,
         m.unassigned_count,
         m.used_engineer_count,
         round(m.total_travel_minutes, 6),
         round(m.total_distance_km, 6),
     )
+    assert len(m.quality_key()) == 6

@@ -27,7 +27,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-from .enums import Priority, Skill, TransportMode
+from .enums import ExecutionStatus, Priority, Skill, TransportMode
 from .models import MSK, Engineer, GeoPoint, Request, Scenario, Settings, WorkInterval
 
 __all__ = [
@@ -42,6 +42,21 @@ __all__ = [
     "find_dataset_dir",
     "DATA_DIR",
 ]
+
+_CLOSED_SOURCE_STATUSES = frozenset({"выполнена", "отменена"})
+_SOURCE_STATUS_MAP: dict[str, ExecutionStatus] = {
+    "не отправлена": ExecutionStatus.PENDING,
+    "отправлена": ExecutionStatus.PENDING,
+    "в пути": ExecutionStatus.EN_ROUTE,
+    "в работе": ExecutionStatus.IN_PROGRESS,
+    "выполнена": ExecutionStatus.COMPLETED,
+    "отменена": ExecutionStatus.CANCELLED,
+}
+
+
+def _execution_status(source: str) -> ExecutionStatus:
+    return _SOURCE_STATUS_MAP.get(source.strip().lower(), ExecutionStatus.UNKNOWN)
+
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 _ENCODINGS = ("utf-8-sig", "cp1251")
@@ -74,8 +89,18 @@ class WorkTypeCatalog:
 
     def __init__(self, raw: dict[str, Any]) -> None:
         self._default = raw["default"]
-        self._by_hd = raw.get("by_hd", {})
-        self._by_bk = raw.get("by_bk", {})
+        # Ключи нормализуются так же, как значения из выгрузки. Иначе «IP-адрес 169...»
+        # в справочнике недостижим: у искомого значения точки срезаются, у ключа — нет.
+        self._by_hd = {self._normalize_key(k): v for k, v in raw.get("by_hd", {}).items()}
+        self._by_bk = {self._normalize(k): v for k, v in raw.get("by_bk", {}).items()}
+
+    @classmethod
+    def _normalize_key(cls, key: str) -> str:
+        """Ключ `by_hd`: либо один HD, либо пара «BK|HD» — нормализуется по частям."""
+        if "|" in key:
+            bk, hd = key.split("|", 1)
+            return f"{cls._normalize(bk)}|{cls._normalize(hd)}"
+        return cls._normalize(key)
 
     @classmethod
     def load(cls, path: Path | None = None) -> "WorkTypeCatalog":
@@ -87,18 +112,29 @@ class WorkTypeCatalog:
         return value.strip().rstrip(".").strip()
 
     def resolve(self, bk: str, hd: str) -> dict[str, Any]:
-        """Норматив: точная пара → HD → BK → default. Навык: только BK, если категория известна.
+        """Вид работ, норматив, навык и приоритет — по BK. HD уточняет только снаряжение.
 
-        HD описывает работу и может задать длительность и снаряжение, но не подменяет
-        требуемый навык: он берётся из BK по таблице базы знаний «Навык».
+        Порядок: точная пара `BK|HD` (явное исключение) → BK → HD → default.
+
+        Норматив обслуживания привязан к виду работ, а вид работ — к категории BK
+        (БЗ «Нормативы работ», «Вид работ»). Поэтому HD не имеет права задавать
+        длительность: иначе заявка BK «Локальная заявка» с HD «Нет линка» получала бы
+        аварийные 80 минут вместо своих 30, а BK «Глобальная проблема» с HD
+        «Информация» — 30 минут вместо 80. HD описывает конкретную работу и полезен
+        ровно одним: он знает про замену приставки или роутера, то есть про снаряжение.
         """
         bk_key, hd_key = self._normalize(bk), self._normalize(hd)
         exact = self._by_hd.get(f"{bk_key}|{hd_key}")
-        found = exact or self._by_hd.get(hd_key) or self._by_bk.get(bk_key) or self._default
-        result = dict(found)
         bk_spec = self._by_bk.get(bk_key)
-        if bk_spec is not None and "skill" in bk_spec:
-            result["skill"] = bk_spec["skill"]
+        hd_spec = self._by_hd.get(hd_key)
+
+        result = dict(exact or bk_spec or hd_spec or self._default)
+        if bk_spec is not None:
+            # Навык и приоритет не подменяет никто, включая точную пару.
+            result["skill"] = bk_spec.get("skill", result.get("skill"))
+            result["priority"] = bk_spec.get("priority", result.get("priority"))
+            if exact is None and hd_spec is not None and "equipment" in hd_spec:
+                result["equipment"] = hd_spec["equipment"]
         return result
 
 
@@ -229,6 +265,7 @@ def load_requests(
     requests: list[Request] = []
     brigades: dict[str, list[str]] = {}
     skipped = 0
+    closed = 0
 
     for index, row in enumerate(rows):
         external_id = row.get("Заявка", "")
@@ -247,6 +284,14 @@ def load_requests(
         address = row.get("Адрес", "")
         district = row.get("Район", "")
         status = row.get("Статус BK", "")
+        execution = _execution_status(status)
+        if execution.is_closed or status.strip().lower() in _CLOSED_SOURCE_STATUSES:
+            closed += 1
+            continue
+
+        priority = Priority(spec.get("priority", Priority.CONNECTION))
+        if urgent_statuses and status in urgent_statuses:
+            priority = Priority.EMERGENCY
 
         requests.append(
             Request(
@@ -257,11 +302,13 @@ def load_requests(
                 duration_minutes=int(spec["duration_minutes"]),
                 required_skill=Skill(spec["skill"]),
                 region_key=region_key,
-                priority=Priority.URGENT if status in urgent_statuses else Priority.NORMAL,
+                priority=priority,
                 required_equipment=frozenset(spec.get("equipment", ())),
                 address=address,
                 district=district,
                 input_order=index,
+                request_type_bk=row.get("Тип заявки BK", ""),
+                execution_status=execution,
             )
         )
         brigade = row.get("Бригада", "")
@@ -285,6 +332,10 @@ def load_requests(
         )
     if skipped:
         result.warnings.append(f"Пропущено служебных и пустых строк: {skipped}")
+    if closed:
+        result.warnings.append(
+            f"Закрытые заявки исключены из планирования: {closed}"
+        )
 
     result.requests = tuple(requests)
     result.source_brigades = brigades

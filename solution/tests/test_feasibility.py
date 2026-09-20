@@ -231,12 +231,32 @@ def test_reason_is_max_rank_across_all_engineers_not_first_match():
 def test_reason_is_no_skill_when_nobody_has_it_regardless_of_order():
     """Если навыка нет ни у кого — причина no_skill независимо от порядка входа."""
     scenario = sc(
-        [req("R1", skill="emergency")],
+        [req("R1", skill="emergency", priority="emergency")],
         [eng("E1", skills=["local"]), eng("E2", skills=["connection"])],
     )
     assignment = assignments_by_id(plan_optimized(scenario))["R1"]
     assert assignment.status == AssignmentStatus.UNASSIGNED
     assert assignment.reason == ReasonCode.NO_SKILL
+
+
+def test_engineer_without_emergency_skill_never_gets_emergency():
+    """Аварию нельзя отдать инженеру без навыка emergency, даже при свободном дне."""
+    scenario = sc(
+        [
+            req(
+                "RE",
+                window=("09:00", "17:00"),
+                dur=100,
+                skill="emergency",
+                priority="emergency",
+            )
+        ],
+        [eng("E1", skills=["connection", "local"])],
+    )
+    assignment = assignments_by_id(plan_optimized(scenario))["RE"]
+    assert assignment.status == AssignmentStatus.UNASSIGNED
+    assert assignment.reason == ReasonCode.NO_SKILL
+    assert assignment.engineer_id is None
 
 
 def test_reason_is_no_region_when_nobody_covers_the_region():
@@ -329,3 +349,17 @@ def test_combined_static_constraints_all_hold_together():
         eng("E5", skills=["connection"], region="south", transport="car", equipment=[]),
     ):
         assert fr(broken, request, check_equipment=True).ok is False, f"{broken.id} прошёл проверку"
+
+
+def test_missing_work_time_is_checked_after_profile():
+    """Пустой график проверяется ПОСЛЕ профиля: сначала называется более узкая причина.
+
+    Ранги `ReasonCode` устроены так же (`no_work_time`=5 > `no_skill`=2), поэтому при
+    выборе «максимального ранга» выходной инженер иначе заслонял бы честное «нет навыка»
+    у всех остальных. `active=False` — исключение: он проверяется первым.
+    """
+    result = fr(eng("E1", skills=["local"], shift=()), req("R1", skill="connection"))
+    assert result.reason == ReasonCode.NO_SKILL
+
+    inactive = fr(eng("E2", skills=["local"], active=False), req("R1", skill="connection"))
+    assert inactive.reason == ReasonCode.NO_WORK_TIME

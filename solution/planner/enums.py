@@ -12,6 +12,7 @@ __all__ = [
     "Skill",
     "TransportMode",
     "Priority",
+    "ExecutionStatus",
     "AssignmentStatus",
     "Algorithm",
     "EventType",
@@ -59,15 +60,48 @@ TRANSPORT_TITLES: dict[TransportMode, str] = {
 
 
 class Priority(_StrEnum):
-    """Приоритет заявки. Срочные размещаются раньше обычных."""
+    """Приоритет заявки при нехватке ресурсов: авария → подключение → ремонт / дозаказ.
 
-    NORMAL = "normal"
-    URGENT = "urgent"
+    Коды совпадают со словарём модели (`priority`). Навык и приоритет — разные оси:
+    дозаказ требует навык `connection`, но по важности равен ремонту.
+    """
+
+    REPAIR = "repair_or_addon"
+    CONNECTION = "connection"
+    EMERGENCY = "emergency"
 
     @property
     def rank(self) -> int:
         """Чем больше, тем важнее. Используется как первый ключ отбора."""
-        return 1 if self is Priority.URGENT else 0
+        return _PRIORITY_RANK[self]
+
+
+_PRIORITY_RANK: dict["Priority", int] = {
+    Priority.REPAIR: 0,
+    Priority.CONNECTION: 1,
+    Priority.EMERGENCY: 2,
+}
+
+PRIORITY_TITLES: dict[Priority, str] = {
+    Priority.EMERGENCY: "авария",
+    Priority.CONNECTION: "подключение",
+    Priority.REPAIR: "ремонт / дозаказ",
+}
+
+
+class ExecutionStatus(_StrEnum):
+    """Статус выполнения заявки. Закрытые (completed, cancelled) в новый план не входят."""
+
+    UNKNOWN = "unknown"
+    PENDING = "pending"
+    EN_ROUTE = "en_route"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+    @property
+    def is_closed(self) -> bool:
+        return self in (ExecutionStatus.COMPLETED, ExecutionStatus.CANCELLED)
 
 
 class AssignmentStatus(_StrEnum):

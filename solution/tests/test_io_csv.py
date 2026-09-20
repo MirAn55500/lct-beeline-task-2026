@@ -29,6 +29,7 @@ RAW = {
     "default": {
         "category": "Подключение клиентов Базовая",
         "skill": "connection",
+        "priority": "connection",
         "duration_minutes": 70,
         "equipment": [],
     },
@@ -36,24 +37,28 @@ RAW = {
         "Подключение|Заявка на подключение": {
             "category": "точная пара",
             "skill": "connection",
+            "priority": "connection",
             "duration_minutes": 70,
             "equipment": [],
         },
         "Глобальная проблема|Заявка на подключение": {
             "category": "точная пара с чужим навыком",
             "skill": "connection",
+            "priority": "connection",
             "duration_minutes": 70,
             "equipment": [],
         },
         "Заявка на подключение": {
             "category": "только HD",
             "skill": "connection",
+            "priority": "connection",
             "duration_minutes": 70,
             "equipment": [],
         },
         "Авария": {
             "category": "Аварий на ТКД",
             "skill": "emergency",
+            "priority": "emergency",
             "duration_minutes": 80,
             "equipment": [],
         },
@@ -62,18 +67,28 @@ RAW = {
         "Подключение": {
             "category": "только BK",
             "skill": "connection",
+            "priority": "connection",
             "duration_minutes": 70,
+            "equipment": [],
+        },
+        "Дозаказ": {
+            "category": "только BK дозаказ",
+            "skill": "connection",
+            "priority": "repair_or_addon",
+            "duration_minutes": 20,
             "equipment": [],
         },
         "Локальная заявка": {
             "category": "Локальная заявка/ремонт у клиента",
             "skill": "local",
+            "priority": "repair_or_addon",
             "duration_minutes": 30,
             "equipment": [],
         },
         "Глобальная проблема": {
             "category": "только BK авария",
             "skill": "emergency",
+            "priority": "emergency",
             "duration_minutes": 80,
             "equipment": [],
         },
@@ -92,16 +107,23 @@ def test_exact_pair_wins_over_hd_and_bk(catalog):
     assert catalog.resolve("Подключение", "Заявка на подключение")["category"] == "точная пара"
 
 
-def test_hd_wins_over_bk_when_no_exact_pair(catalog):
-    """Без точной пары HD задаёт вид работ (длительность/категорию), не навык."""
-    assert catalog.resolve("Дозаказ", "Заявка на подключение")["category"] == "только HD"
+def test_bk_wins_over_hd_when_no_exact_pair(catalog):
+    """Без точной пары вид работ и норматив задаёт BK: норматив привязан к категории BK."""
+    resolved = catalog.resolve("Дозаказ", "Заявка на подключение")
+    assert resolved["category"] == "только BK дозаказ"
+    assert resolved["duration_minutes"] == 20
 
 
-def test_known_bk_skill_is_not_overridden_by_hd(catalog):
-    """Навык берётся только из BK: HD «Авария» не делает локальную заявку аварийной."""
+def test_known_bk_is_not_overridden_by_hd(catalog):
+    """HD «Авария» не делает локальную заявку аварийной ни по навыку, ни по нормативу.
+
+    Это реальная пара выгрузок: BK «Локальная заявка» встречается с аварийно звучащими
+    HD («Нет линка», «Рост ошибок на порту»). Дать им 80 минут — раздуть работу втрое.
+    """
     resolved = catalog.resolve("Локальная заявка", "Авария")
     assert resolved["skill"] == "local"
-    assert resolved["duration_minutes"] == 80
+    assert resolved["priority"] == "repair_or_addon"
+    assert resolved["duration_minutes"] == 30
 
 
 def test_known_bk_skill_is_not_overridden_by_exact_pair(catalog):
@@ -139,7 +161,7 @@ def test_default_is_used_when_nothing_matches(catalog):
 def test_trailing_dot_is_normalized(catalog):
     """Точка в конце значения из выгрузки не должна ломать сопоставление."""
     assert catalog.resolve("Подключение.", "Заявка на подключение.")["category"] == "точная пара"
-    assert catalog.resolve("Подключение", "Авария.")["category"] == "Аварий на ТКД"
+    assert catalog.resolve("Чужая категория", "Авария.")["category"] == "Аварий на ТКД"
 
 
 def test_surrounding_whitespace_is_normalized(catalog):
@@ -183,14 +205,17 @@ def test_shipped_catalog_maps_known_types_from_real_data():
 
     emergency = shipped.resolve("Глобальная проблема", "Авария")
     assert emergency["skill"] == "emergency"
+    assert emergency["priority"] == "emergency"
     assert emergency["duration_minutes"] == 80
 
     local = shipped.resolve("Локальная заявка", "Разрывы")
     assert local["skill"] == "local"
+    assert local["priority"] == "repair_or_addon"
     assert local["duration_minutes"] == 30
 
     extra = shipped.resolve("Дозаказ", "Дозаказ оборудования")
     assert extra["skill"] == "connection"
+    assert extra["priority"] == "repair_or_addon"
     assert extra["duration_minutes"] == 20
 
 
@@ -210,6 +235,27 @@ def test_shipped_catalog_skill_follows_bk_not_hd(bk, hd, skill):
     """БЗ «Навык»: HD не подменяет категорию BK даже на реальном справочнике."""
     shipped = WorkTypeCatalog.load()
     assert shipped.resolve(bk, hd)["skill"] == skill
+
+
+def test_shipped_catalog_addon_skill_is_connection_priority_is_repair(catalog):
+    """BK Дозаказ: навык подключения, приоритет ремонта/дозаказа — разные оси."""
+    shipped = WorkTypeCatalog.load()
+    resolved = shipped.resolve("Дозаказ", "Дозаказ оборудования")
+    assert resolved["skill"] == "connection"
+    assert resolved["priority"] == "repair_or_addon"
+
+    from_raw = catalog.resolve("Дозаказ", "Неизвестный HD")
+    assert from_raw["skill"] == "connection"
+    assert from_raw["priority"] == "repair_or_addon"
+
+
+def test_shipped_catalog_global_problem_duration_is_80():
+    """BK Глобальная проблема: авария, норматив 80 минут без дороги (SPEC §10)."""
+    shipped = WorkTypeCatalog.load()
+    resolved = shipped.resolve("Глобальная проблема", "Авария")
+    assert resolved["skill"] == "emergency"
+    assert resolved["priority"] == "emergency"
+    assert resolved["duration_minutes"] == 80
 
 
 def test_shipped_catalog_keeps_hd_equipment_when_skill_comes_from_bk():
@@ -333,3 +379,79 @@ def test_loader_notes_reach_plan_result(anonymized_csv_dir):
     result = plan_optimized(scenario)
     for warning in result.warnings:
         assert isinstance(warning, str) and warning.strip()
+
+
+# --------------------------------------------------------------------------
+# Согласованность data/work_types.json с таблицами базы знаний
+# --------------------------------------------------------------------------
+
+# БЗ «Навык»: категория заявки в Beekeeper → требуемый навык, приоритет и норматив
+# обслуживания без дороги (БЗ «Нормативы работ»: 70 / 80 / 20 / 30).
+BK_REFERENCE = {
+    "Подключение": ("connection", "connection", 70),
+    "Дозаказ": ("connection", "repair_or_addon", 20),
+    "Локальная заявка": ("local", "repair_or_addon", 30),
+    "Глобальная проблема": ("emergency", "emergency", 80),
+}
+
+# БЗ «Маппинг типов заявок»: наблюдаемые пары HD → BK в предоставленных выгрузках.
+HD_TO_BK = {
+    "IP-адрес 169...": "Локальная заявка",
+    "TVE/ENT. Другие ошибки": "Локальная заявка",
+    "TVE/ENT. Замена приставки техником": "Локальная заявка",
+    "Авария": "Глобальная проблема",
+    "Дозаказ оборудования": "Дозаказ",
+    "Заявка на подключение": "Подключение",
+    "Информация": "Глобальная проблема",
+    "Мониторинг": "Локальная заявка",
+    "Нет линка": "Локальная заявка",
+    "Низкая скорость": "Локальная заявка",
+    "Переключение на Гбит/с": "Локальная заявка",
+    "Работа с кабелем": "Локальная заявка",
+    "Разрывы": "Локальная заявка",
+    "Рост ошибок на порту": "Локальная заявка",
+    "Роутер. Замена техническим специалистом": "Локальная заявка",
+    "ТВ. Замена приставки техником": "Локальная заявка",
+}
+
+
+@pytest.fixture
+def shipped_catalog():
+    """Реальный справочник solution/data/work_types.json, а не тестовая заглушка."""
+    return WorkTypeCatalog.load()
+
+
+@pytest.mark.parametrize("bk", sorted(BK_REFERENCE))
+def test_shipped_catalog_matches_knowledge_base_norms(shipped_catalog, bk):
+    """Навык, приоритет и норматив каждой категории BK совпадают с базой знаний."""
+    skill, priority, duration = BK_REFERENCE[bk]
+    resolved = shipped_catalog.resolve(bk, "")
+    assert resolved["skill"] == skill
+    assert resolved["priority"] == priority
+    assert resolved["duration_minutes"] == duration
+
+
+@pytest.mark.parametrize("hd", sorted(HD_TO_BK))
+def test_shipped_catalog_duration_follows_bk_for_observed_pairs(shipped_catalog, hd):
+    """На всех наблюдаемых парах HD/BK норматив определяется категорией BK.
+
+    Регрессия: справочник разбирался в порядке «HD → BK», из-за чего 126 строк из 413
+    в реальных выгрузках получали чужой норматив — «Нет линка» при BK «Локальная заявка»
+    считался аварией на 80 минут вместо 30.
+    """
+    bk = HD_TO_BK[hd]
+    skill, priority, duration = BK_REFERENCE[bk]
+    resolved = shipped_catalog.resolve(bk, hd)
+    assert resolved["duration_minutes"] == duration, f"{bk} + {hd}"
+    assert resolved["skill"] == skill, f"{bk} + {hd}"
+    assert resolved["priority"] == priority, f"{bk} + {hd}"
+
+
+@pytest.mark.parametrize("hd", sorted(HD_TO_BK))
+def test_shipped_hd_fallback_agrees_with_mapping_table(shipped_catalog, hd):
+    """Фолбэк по одному HD (когда BK пуст) не противоречит таблице «Маппинг типов заявок»."""
+    skill, priority, duration = BK_REFERENCE[HD_TO_BK[hd]]
+    resolved = shipped_catalog.resolve("", hd)
+    assert resolved["skill"] == skill, hd
+    assert resolved["priority"] == priority, hd
+    assert resolved["duration_minutes"] == duration, hd

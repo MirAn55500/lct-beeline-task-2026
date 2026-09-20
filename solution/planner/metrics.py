@@ -47,7 +47,12 @@ def compare(baseline: PlanResult, optimized: PlanResult) -> dict[str, Any]:
     comparison = {
         "assigned_count": _delta(False, b.assigned_count, o.assigned_count),
         "unassigned_count": _delta(True, b.unassigned_count, o.unassigned_count),
-        "urgent_unassigned_count": _delta(True, b.urgent_unassigned_count, o.urgent_unassigned_count),
+        "emergency_unassigned_count": _delta(
+            True, b.emergency_unassigned_count, o.emergency_unassigned_count
+        ),
+        "connection_unassigned_count": _delta(
+            True, b.connection_unassigned_count, o.connection_unassigned_count
+        ),
         "used_engineer_count": _delta(True, b.used_engineer_count, o.used_engineer_count),
         "total_distance_km": _delta(True, b.total_distance_km, o.total_distance_km),
         "total_travel_minutes": _delta(True, b.total_travel_minutes, o.total_travel_minutes),

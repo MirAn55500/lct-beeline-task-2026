@@ -53,7 +53,7 @@ def validate_plan(
 def _check_coverage(result: PlanResult, scenario: Scenario) -> list[str]:
     problems: list[str] = []
     seen = [a.request_id for a in result.assignments]
-    expected = {r.id for r in scenario.requests}
+    expected = {r.id for r in scenario.planning_requests()}
     if len(seen) != len(set(seen)):
         problems.append("Инвариант 1: на одну заявку приходится больше одного назначения")
     missing = expected - set(seen)
@@ -119,30 +119,69 @@ def _check_route(route, scenario, requests, engineers, travel) -> list[str]:
                 f"у инженера {engineer.id} — {static.detail}"
             )
 
+        if visit.locked:
+            # Начатая работа — зафиксированный факт предыдущего плана, а не решение
+            # текущего расчёта. Пересчитывать её нечем и незачем: проверяется только
+            # непротиворечивость (работы не наезжают друг на друга) и допуск инженера.
+            if previous_end is not None and visit.departure_at < previous_end - timedelta(seconds=1):
+                problems.append(
+                    f"Инвариант 4: в маршруте {engineer.id} работы пересекаются перед заявкой {request.id}"
+                )
+            if visit.service_end_at < visit.service_start_at:
+                problems.append(
+                    f"Заявка {request.id}: зафиксированная работа заканчивается раньше, чем начинается"
+                )
+            distance_sum += visit.distance_km
+            travel_sum += visit.travel_minutes
+            previous_end = visit.service_end_at
+            cursor = visit.service_end_at
+            point = request.point
+            continue
+
         if cursor is None:
             problems.append(f"Инженер {engineer.id}: рабочее время исчерпано до заявки {request.id}")
             break
 
         minutes = travel.travel_minutes(point, request.point, engineer.transport_mode)
         km = travel.distance_km(point, request.point, engineer.transport_mode)
-        departure = calendar.first_moment_at_or_after(cursor)
-        arrival = calendar.add(departure, minutes) if departure else None
+        earliest_departure = calendar.first_moment_at_or_after(cursor)
+        earliest_arrival = (
+            calendar.add(earliest_departure, minutes) if earliest_departure else None
+        )
 
-        if arrival is None:
+        if earliest_arrival is None:
             problems.append(f"Заявка {request.id}: до неё невозможно доехать в пределах смены")
             break
-        if arrival > request.window_end:
+        if earliest_arrival > request.window_end:
             problems.append(
-                f"Инвариант 3: заявка {request.id} — прибытие {arrival:%H:%M} "
+                f"Инвариант 3: заявка {request.id} — прибытие {earliest_arrival:%H:%M} "
                 f"позже конца окна {request.window_end:%H:%M}"
             )
-        service_start = calendar.first_moment_at_or_after(max(arrival, request.window_start))
+        service_start = calendar.first_moment_at_or_after(
+            max(earliest_arrival, request.service_not_before)
+        )
         if service_start is None:
             problems.append(f"Заявка {request.id}: работу негде начать в рабочем времени")
             break
+
+        # Отложенный выезд (SPEC §3.3): выезжаем так, чтобы приехать к началу работ,
+        # но не раньше, чем освободились, и не позже конца окна прибытия.
+        aim = min(service_start, request.window_end)
+        departure = calendar.sub(aim, minutes)
+        if departure is None or departure < earliest_departure:
+            departure, arrival = earliest_departure, earliest_arrival
+        else:
+            arrival = calendar.add(departure, minutes)
+            if arrival is None or arrival > request.window_end:
+                departure, arrival = earliest_departure, earliest_arrival
         if service_start < request.window_start:
             problems.append(
                 f"Инвариант 3: заявка {request.id} — работа начата до открытия окна"
+            )
+        if request.received_at is not None and service_start < request.received_at:
+            problems.append(
+                f"Инвариант 3: заявка {request.id} — работа начата до поступления "
+                f"({service_start:%H:%M} < {request.received_at:%H:%M})"
             )
         if strict and service_start > request.window_end:
             problems.append(
@@ -161,6 +200,7 @@ def _check_route(route, scenario, requests, engineers, travel) -> list[str]:
                 f"Инвариант 4: в маршруте {engineer.id} работы пересекаются перед заявкой {request.id}"
             )
 
+        problems += _compare_moment(request.id, "выезд", visit.departure_at, departure)
         problems += _compare_moment(request.id, "прибытие", visit.arrival_at, arrival)
         problems += _compare_moment(request.id, "начало работ", visit.service_start_at, service_start)
         problems += _compare_moment(request.id, "окончание работ", visit.service_end_at, service_end)
@@ -237,6 +277,17 @@ def _check_assignments_match_routes(result: PlanResult) -> list[str]:
     for route in result.routes:
         for visit in route.visits:
             in_routes[visit.request_id] = (route.engineer_id, visit.position)
+
+    # Обратная сторона инварианта 1: визит в маршруте обязан иметь своё назначение.
+    # Без этой проверки заявка, попавшая в маршрут мимо `planning_requests()`, молча
+    # исчезала из назначений и из метрик, а план выглядел корректным.
+    declared = {a.request_id for a in result.assignments}
+    for request_id in sorted(set(in_routes) - declared):
+        engineer_id, position = in_routes[request_id]
+        problems.append(
+            f"Инвариант 1: заявка {request_id} стоит в маршруте {engineer_id} "
+            f"на позиции {position}, но у неё нет Assignment"
+        )
 
     for assignment in result.assignments:
         if assignment.is_assigned:

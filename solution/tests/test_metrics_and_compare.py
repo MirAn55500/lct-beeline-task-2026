@@ -27,7 +27,7 @@ HOME = (55.70, 37.60)
 
 
 def rich_scenario():
-    """Сценарий со всем сразу: назначенные, неназначенные, срочные, ожидание."""
+    """Сценарий со всем сразу: назначенные, неназначенные, авария, ожидание, закрытая."""
     engineers = [
         eng("E1", shift=("09:00", "18:00"), at=HOME, order=0),
         eng("E2", shift=[("09:00", "13:00"), ("14:00", "18:00")], at=(55.72, 37.63), order=1),
@@ -37,10 +37,17 @@ def rich_scenario():
         req("R1", window=("09:30", "11:00"), dur=70, at=(55.71, 37.61)),
         req("R2", window=("11:00", "13:00"), dur=80, at=(55.74, 37.66)),
         req("R3", window=("14:00", "16:00"), dur=30, at=(55.68, 37.57)),
-        req("R4", window=("15:00", "17:00"), dur=20, at=(55.75, 37.69), priority="urgent"),
+        req("R4", window=("15:00", "17:00"), dur=20, at=(55.75, 37.69), priority="emergency"),
         req("R5", window=("09:00", "18:00"), dur=30, skill="local", at=(55.69, 37.59)),
         req("R6", window=("03:00", "04:00"), dur=30, at=HOME),  # заведомо неназначаемая
         req("R7", window=("09:00", "17:00"), dur=30, skill="emergency", at=HOME),  # нет навыка
+        req(
+            "R8",
+            window=("09:00", "12:00"),
+            dur=30,
+            at=HOME,
+            execution_status="completed",
+        ),  # закрытая — в план не входит
     ]
     return sc(requests, engineers, name="rich")
 
@@ -58,11 +65,13 @@ def rich():
 
 
 def test_assigned_plus_unassigned_equals_number_of_requests(rich):
-    """SPEC §9 п.1: каждая заявка входа учтена ровно один раз."""
+    """SPEC §9 п.1: каждая планируемая заявка учтена ровно один раз."""
     scenario, result = rich
+    planned = scenario.planning_requests()
     m = result.metrics
-    assert m.assigned_count + m.unassigned_count == len(scenario.requests)
-    assert len(result.assignments) == len(scenario.requests)
+    assert m.assigned_count + m.unassigned_count == len(planned)
+    assert len(result.assignments) == len(planned)
+    assert {a.request_id for a in result.assignments} == {r.id for r in planned}
 
 
 def test_unassigned_tuple_is_a_slice_of_assignments(rich):
@@ -81,12 +90,19 @@ def test_assignments_are_sorted_by_request_input_order(rich):
     assert keys == sorted(keys)
 
 
-def test_urgent_unassigned_count_matches_priorities(rich):
-    """Счётчик срочных отказов согласован с приоритетами заявок входа."""
+def test_emergency_unassigned_count_matches_priorities(rich):
+    """Счётчики отказов по приоритетам согласованы с заявками среза планирования."""
     scenario, result = rich
-    urgent = {r.id for r in scenario.requests if r.priority == Priority.URGENT}
-    expected = len([a for a in result.unassigned if a.request_id in urgent])
-    assert result.metrics.urgent_unassigned_count == expected
+    planned = {r.id: r for r in scenario.planning_requests()}
+    unassigned_ids = {a.request_id for a in result.unassigned}
+    expected_emergency = sum(
+        1 for rid in unassigned_ids if planned[rid].priority == Priority.EMERGENCY
+    )
+    expected_connection = sum(
+        1 for rid in unassigned_ids if planned[rid].priority == Priority.CONNECTION
+    )
+    assert result.metrics.emergency_unassigned_count == expected_emergency
+    assert result.metrics.connection_unassigned_count == expected_connection
 
 
 # --------------------------------------------------------------------------
@@ -341,7 +357,8 @@ def test_metrics_are_consistent_on_random_scenarios(seed):
     scenario = random_scenario(seed, n_engineers=6, n_requests=35, time_limit_seconds=2.0)
     for result in (plan_baseline(scenario), plan_optimized(scenario)):
         m = result.metrics
-        assert m.assigned_count + m.unassigned_count == len(scenario.requests)
+        planned = scenario.planning_requests()
+        assert m.assigned_count + m.unassigned_count == len(planned)
         assert m.total_distance_km == pytest.approx(
             sum(r.distance_km for r in result.routes), abs=1e-6
         )

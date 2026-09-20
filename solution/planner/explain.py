@@ -67,7 +67,7 @@ def explain_assignment(
         f"(окно {_hhmm(request.window_start)}–{_hhmm(request.window_end)})"
     )
     if visit.waiting_minutes > 0.5:
-        parts.append(f", ждёт {round(visit.waiting_minutes)} мин до начала окна")
+        parts.append(f", ждёт {round(visit.waiting_minutes)} мин до начала работ")
     parts.append(
         f", работает с {_hhmm(visit.service_start_at)} до {_hhmm(visit.service_end_at)}"
     )
@@ -112,10 +112,9 @@ def explain_unassigned(request: Request, reason: ReasonCode, details: list[str])
     elif reason is ReasonCode.NO_WORK_TIME:
         body = "у подходящих инженеров нет рабочего времени на дату плана"
     elif reason is ReasonCode.TIME_CONFLICT:
-        body = (
-            f"ни один инженер с навыком «{skill}» не успевает в окно {window} "
-            f"с учётом уже запланированных работ и времени в пути"
-        )
+        # Причину называют детали: у одного не хватает смены в принципе, у другого —
+        # из-за уже набранных работ. Заголовок не должен приписывать одно другому.
+        body = f"ни один инженер с навыком «{skill}» не успевает выполнить её в окне {window}"
     else:
         body = "подходящий вариант не найден за отведённое время поиска; невозможность не доказана"
 
@@ -138,10 +137,11 @@ def explain_route(route: RouteResult) -> str:
         f"{count} {_plural(count, 'заявка', 'заявки', 'заявок')}, "
         f"с {_hhmm(route.start_at)} до {_hhmm(route.end_at)}, "
         f"пробег {route.distance_km:.1f} км, в пути {round(route.travel_minutes)} мин, "
-        f"ожидание {round(route.waiting_minutes)} мин, "
+        f"свободно {round(route.free_minutes)} мин, "
         f"загрузка {route.utilization * 100:.0f}% от смены. "
         f"Порядок объезда выбран так, чтобы каждая заявка попадала в своё окно "
-        f"при наименьшем приросте времени в пути."
+        f"при наименьшем приросте времени в пути; выезд к каждой заявке отложен так, "
+        f"чтобы не ждать у клиента."
     )
 
 
@@ -151,7 +151,7 @@ def explain_replan(event_type: EventType, diff: PlanDiff, total_routes: int) -> 
     # Маршрутов после события может стать больше, чем было: «затронуто 2 из 1» — бессмыслица.
     total_routes = max(total_routes, touched + len(diff.unchanged_route_engineer_ids))
     titles = {
-        EventType.URGENT_REQUEST: "Поступила срочная заявка",
+        EventType.URGENT_REQUEST: "Поступила аварийная заявка",
         EventType.CANCEL_REQUEST: "Заявка отменена",
         EventType.ENGINEER_UNAVAILABLE: "Инженер стал недоступен",
         EventType.CLIENT_REFUSAL: "Клиент отказался на адресе",

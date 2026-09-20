@@ -80,7 +80,14 @@ def test_apply_event_returns_scenario_and_string_notes(prepared, name):
         "urgent": event(
             EventType.URGENT_REQUEST,
             EVENT_AT,
-            request=req("RU", window=("13:30", "14:30"), dur=30, at=HOME, priority="urgent"),
+            request=req(
+                "RU",
+                window=("13:30", "14:30"),
+                dur=30,
+                at=HOME,
+                skill="emergency",
+                priority="emergency",
+            ),
         ),
         "cancel": event(EventType.CANCEL_REQUEST, EVENT_AT, request_id="R3"),
         "refusal": event(EventType.CLIENT_REFUSAL, EVENT_AT, request_id="R3"),
@@ -135,7 +142,7 @@ def test_apply_event_is_deterministic(prepared):
 def test_urgent_event_adds_the_request(prepared):
     """Срочная заявка появляется в действующем сценарии."""
     scenario, before = prepared
-    urgent = req("RU", window=("13:30", "14:30"), dur=30, at=HOME, priority="urgent")
+    urgent = req("RU", window=("13:30", "14:30"), dur=30, at=HOME, skill="emergency", priority="emergency")
     updated, _notes = apply_event(
         scenario, before, event(EventType.URGENT_REQUEST, EVENT_AT, request=urgent)
     )
@@ -144,14 +151,33 @@ def test_urgent_event_adds_the_request(prepared):
     assert len(updated.requests) == len(scenario.requests) + 1
 
 
-def test_urgent_event_forces_urgent_priority(prepared):
-    """Заявка события — срочная по определению, даже если пришла как обычная."""
+def test_urgent_event_forces_emergency_priority(prepared):
+    """Заявка события URGENT_REQUEST — авария по определению, даже если пришла как подключение."""
     scenario, before = prepared
-    normal = req("RU", window=("13:30", "14:30"), dur=30, at=HOME, priority="normal")
+    connection = req("RU", window=("13:30", "14:30"), dur=30, at=HOME, priority="connection")
     updated, _notes = apply_event(
-        scenario, before, event(EventType.URGENT_REQUEST, EVENT_AT, request=normal)
+        scenario, before, event(EventType.URGENT_REQUEST, EVENT_AT, request=connection)
     )
-    assert requests_by_id(updated)["RU"].priority == Priority.URGENT
+    added = requests_by_id(updated)["RU"]
+    assert added.priority == Priority.EMERGENCY
+    assert added.is_emergency is True
+    assert added.received_at == t(EVENT_AT)
+
+
+def test_urgent_event_keeps_existing_received_at(prepared):
+    """Если поступление уже задано, apply_event не подменяет его временем события."""
+    scenario, before = prepared
+    stamped = req(
+        "RU",
+        window=("13:30", "14:30"),
+        dur=30,
+        at=HOME,
+        received_at="12:45",
+    )
+    updated, _notes = apply_event(
+        scenario, before, event(EventType.URGENT_REQUEST, EVENT_AT, request=stamped)
+    )
+    assert requests_by_id(updated)["RU"].received_at == t("12:45")
 
 
 def test_urgent_event_puts_the_request_last_in_input_order(prepared):
@@ -176,11 +202,11 @@ def test_urgent_event_does_not_touch_existing_requests(prepared):
     for request_id, request in requests_by_id(updated).items():
         if request_id == "RU":
             continue
-        assert request == original[request_id], f"{request_id} изменилась при вставке срочной"
+        assert request == original[request_id], f"{request_id} изменилась при вставке аварийной"
 
 
 def test_urgent_event_does_not_touch_engineers(prepared):
-    """Состав исполнителей событием срочной заявки не меняется."""
+    """Состав исполнителей событием аварийной заявки не меняется."""
     scenario, before = prepared
     urgent = req("RU", window=("13:30", "14:30"), dur=30, at=HOME)
     updated, _notes = apply_event(
@@ -199,7 +225,7 @@ def test_urgent_event_with_existing_id_replaces_instead_of_duplicating(prepared)
     ids = [r.id for r in updated.requests]
     assert len(ids) == len(set(ids)), f"дубликаты id: {ids}"
     assert requests_by_id(updated)["R3"].duration_minutes == 15
-    assert requests_by_id(updated)["R3"].priority == Priority.URGENT
+    assert requests_by_id(updated)["R3"].priority == Priority.EMERGENCY
 
 
 # --------------------------------------------------------------------------

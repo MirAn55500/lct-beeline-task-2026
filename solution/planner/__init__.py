@@ -24,6 +24,7 @@ from .enums import (
     Algorithm,
     AssignmentStatus,
     EventType,
+    ExecutionStatus,
     Priority,
     ReasonCode,
     Skill,
@@ -32,6 +33,16 @@ from .enums import (
 from .feasibility import FeasibilityResult, check_static
 from .manual import reassign
 from .metrics import compare
+from .ors import (
+    DEFAULT_PROFILES,
+    OrsClient,
+    OrsError,
+    OrsTravelModel,
+    Routing,
+    RoutingCache,
+    attach_route_geometry,
+    setup_routing,
+)
 from .models import (
     MSK,
     Engineer,
@@ -72,6 +83,7 @@ __all__ = [
     "Skill",
     "TransportMode",
     "Priority",
+    "ExecutionStatus",
     "Algorithm",
     "AssignmentStatus",
     "EventType",
@@ -96,6 +108,15 @@ __all__ = [
     "TravelModel",
     "HaversineTravelModel",
     "MatrixTravelModel",
+    # реальная маршрутизация по улицам (openrouteservice)
+    "OrsClient",
+    "OrsError",
+    "OrsTravelModel",
+    "RoutingCache",
+    "Routing",
+    "setup_routing",
+    "attach_route_geometry",
+    "DEFAULT_PROFILES",
     "PlanContext",
     "FeasibilityResult",
     "check_static",
