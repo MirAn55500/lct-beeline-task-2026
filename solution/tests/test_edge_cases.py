@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 
 from factories import (
@@ -16,13 +18,17 @@ from factories import (
     Priority,
     ReasonCode,
     Scenario,
+    TransportMode,
     WorkInterval,
     assigned_ids,
     assignments_by_id,
     eng,
+    event,
+    has_cyrillic,
     plan_baseline,
     plan_both,
     plan_optimized,
+    replan,
     req,
     sc,
     t,
@@ -244,10 +250,12 @@ def test_non_positive_duration_produces_warning():
     assert any("R1" in w for w in warnings), warnings
 
 
-def test_negative_duration_produces_warning():
-    """Отрицательная длительность обрабатывается так же, как нулевая."""
-    warnings = sc([req("R1", dur=-30, at=HOME)], [eng("E1", at=HOME)]).validate()
-    assert warnings
+def test_negative_duration_is_rejected():
+    """Отрицательная длительность отвергается в конструкторе Request."""
+    with pytest.raises(ValueError) as exc_info:
+        req("R1", dur=-30, at=HOME)
+    assert "R1" in str(exc_info.value)
+    assert "отрицательной" in str(exc_info.value)
 
 
 def test_request_outside_scenario_date_produces_warning():
@@ -435,3 +443,193 @@ def test_explanation_says_the_work_does_not_fit_even_an_empty_day():
 
     assert "не помещается даже в пустой день" in explanation, explanation
     assert "уже запланированных работ" not in explanation, explanation
+
+
+# --------------------------------------------------------------------------
+# Грязный вход: внятная диагностика вместо исключения из глубины расчёта
+# --------------------------------------------------------------------------
+
+
+def test_zero_speed_is_rejected_with_a_readable_message():
+    """Нулевая скорость — ошибка настроек, а не `ZeroDivisionError` из расчёта дороги."""
+    scenario = sc([req("R1", at=(55.71, 37.61))], [eng("E1", at=HOME)])
+    scenario.settings.speed_kmh = dict(scenario.settings.speed_kmh)
+    scenario.settings.speed_kmh[TransportMode.CAR] = 0
+
+    with pytest.raises(ValueError) as exc:
+        plan_optimized(scenario)
+
+    assert "car" in str(exc.value)
+    assert has_cyrillic(str(exc.value))
+
+
+def test_missing_transport_setting_is_rejected_with_a_readable_message():
+    """Неполный словарь режимов тоже ловится на входе, а не `KeyError` в горячем пути."""
+    scenario = sc([req("R1", at=(55.71, 37.61))], [eng("E1", at=HOME)])
+    scenario.settings.overhead_minutes = {TransportMode.CAR: 8.0}
+
+    with pytest.raises(ValueError) as exc:
+        plan_optimized(scenario)
+
+    assert "overhead_minutes" in str(exc.value)
+
+
+def _scenario_with_setting(field, value):
+    """Сценарий, у которого у автомобиля подменён один параметр перемещения."""
+    scenario = sc([req("R1", at=(55.71, 37.61))], [eng("E1", at=HOME)])
+    table = dict(getattr(scenario.settings, field))
+    table[TransportMode.CAR] = value
+    setattr(scenario.settings, field, table)
+    return scenario
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("speed_kmh", 0.0),
+        ("speed_kmh", -28.0),
+        ("speed_kmh", float("nan")),
+        ("speed_kmh", float("inf")),
+        ("detour_factor", 0.0),
+        ("detour_factor", -1.35),
+        ("detour_factor", float("nan")),
+        ("overhead_minutes", -20.0),
+        ("overhead_minutes", float("nan")),
+    ],
+)
+def test_broken_transport_settings_are_rejected_on_input(field, value):
+    """Мусор в параметрах перемещения ловится на входе, а не подделывает результат.
+
+    Каждый случай врал по-своему и молча: отрицательная извилистость давала
+    **отрицательный пробег** (и `compare()` счёл бы такой план улучшением), нулевая —
+    нулевой, `NaN` проходил любое сравнение с нулём и уводил заявки в отказ «не успевает
+    доехать», бесконечная скорость обнуляла дорогу, отрицательные сопутствующие затраты
+    роняли расчёт из календаря. Верификатор ничего из этого не ловит: знак километров
+    он не проверяет.
+    """
+    with pytest.raises(ValueError) as exc:
+        plan_optimized(_scenario_with_setting(field, value))
+
+    assert "car" in str(exc.value)
+    assert has_cyrillic(str(exc.value))
+
+
+def test_zero_overhead_is_allowed():
+    """Ноль допустим только у сопутствующих затрат: парковка бывает бесплатной по времени."""
+    result = plan_optimized(_scenario_with_setting("overhead_minutes", 0.0))
+    assert "R1" in assigned_ids(result)
+
+
+def test_naive_datetimes_are_normalized_instead_of_crashing():
+    """Время без зоны — не повод падать: недостающая зона достраивается до MSK.
+
+    Раньше `window_start` без `tzinfo` рядом с aware-сменой ронял расчёт
+    `TypeError: can't compare offset-naive and offset-aware datetimes`.
+    """
+    naive_start = datetime(2026, 8, 17, 10, 0)
+    naive_end = datetime(2026, 8, 17, 16, 0)
+    request = req("R1", window=(naive_start, naive_end), dur=60, at=(55.71, 37.61))
+
+    assert request.window_start.tzinfo is not None
+    assert request.window_end.tzinfo is not None
+    assert request.window_start == t("10:00")
+
+    result = plan_optimized(sc([request], [eng("E1", at=HOME)]))
+    assert "R1" in assigned_ids(result)
+
+
+def test_naive_work_interval_is_normalized():
+    """Смена, заданная без зоны, приводится к той же шкале, что и заявки."""
+    interval = WorkInterval(
+        start=datetime(2026, 8, 17, 9, 0), end=datetime(2026, 8, 17, 18, 0)
+    )
+    assert interval.start == t("09:00")
+    assert interval.end == t("18:00")
+
+
+def test_naive_snapshot_and_event_moment_are_normalized():
+    """`as_of` и момент события — тоже время, и зона у них достраивается так же."""
+    scenario = sc(
+        [req("R1", window=("10:00", "16:00"), dur=60, at=(55.71, 37.61))],
+        [eng("E1", at=HOME)],
+        as_of=datetime(2026, 8, 17, 9, 0),
+    )
+    assert scenario.as_of == t("09:00")
+
+    before = plan_optimized(scenario)
+    ev = event("cancel_request", datetime(2026, 8, 17, 11, 0), request_id="R1")
+    assert ev.at == t("11:00")
+    assert replan(before, scenario, ev) is not None
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_duration_is_rejected(value):
+    """`NaN` и бесконечность в длительности ловятся на конструкторе.
+
+    Порядок проверок имеет значение: `nan < 0` ложно, поэтому одной проверки знака мало.
+    Раньше `NaN` доходил до `int(...)` в объяснении отказа, а `inf` — до `timedelta`.
+    """
+    with pytest.raises(ValueError) as exc:
+        req("R1", dur=value, at=HOME)
+
+    assert "R1" in str(exc.value)
+    assert has_cyrillic(str(exc.value))
+
+
+@pytest.mark.parametrize("bad", [-5.0, float("nan"), float("inf")])
+def test_external_travel_matrix_is_validated(bad):
+    """Подставленная снаружи матрица проверяется так же, как настройки расчёта.
+
+    Отрицательный километр из чужого источника доходил до метрик молча: `compare()` счёл
+    бы такой план улучшением, а верификатор смотрит ту же матрицу и расхождения не видит.
+    """
+    from planner.travel import HaversineTravelModel, MatrixTravelModel
+
+    scenario = sc([req("R1", at=(55.71, 37.61))], [eng("E1", at=HOME)])
+    key = ("55.700000,37.600000", "55.710000,37.610000", TransportMode.CAR)
+
+    with pytest.raises(ValueError):
+        MatrixTravelModel({key: bad}, {key: 10.0}, HaversineTravelModel(scenario.settings))
+    with pytest.raises(ValueError):
+        MatrixTravelModel({key: 1.0}, {key: bad}, HaversineTravelModel(scenario.settings))
+
+
+@pytest.mark.parametrize("bad", [True, False])
+def test_boolean_duration_is_rejected(bad):
+    """`bool` — подкласс `int`, и `True` тихо становится работой на одну минуту.
+
+    Из JSON такое приходит буквально: `"duration_minutes": true`. Проверки на конечность
+    и на знак его пропускают обе, поэтому отсекать приходится по типу.
+    """
+    with pytest.raises(ValueError) as exc:
+        req("R1", dur=bad)
+    assert "R1" in str(exc.value)
+    assert has_cyrillic(str(exc.value))
+
+
+def test_travel_matrix_must_know_the_same_pairs():
+    """Половина пары из матрицы, половина из расчёта по прямой — это «100 км за 13 минут».
+
+    Расстояние и время обязаны приходить из одного источника: иначе скорость получается
+    любой, а поймать это некому — верификатор смотрит ту же модель.
+    """
+    from planner.travel import HaversineTravelModel, MatrixTravelModel
+
+    scenario = sc([req("R1", at=(55.71, 37.61))], [eng("E1", at=HOME)])
+    fallback = HaversineTravelModel(scenario.settings)
+    key = ("55.700000,37.600000", "55.710000,37.610000", TransportMode.CAR)
+
+    with pytest.raises(ValueError) as exc:
+        MatrixTravelModel({key: 100.0}, {}, fallback)
+    assert has_cyrillic(str(exc.value))
+    with pytest.raises(ValueError):
+        MatrixTravelModel({}, {key: 10.0}, fallback)
+
+    # Обе матрицы знают пару — расчёт согласован, модель создаётся.
+    model = MatrixTravelModel({key: 100.0}, {key: 120.0}, fallback)
+    assert model.distance_km(*_pair(scenario), TransportMode.CAR) == 100.0
+
+
+def _pair(scenario):
+    """Точки, по которым построен ключ матрицы: офис инженера и адрес заявки."""
+    return scenario.engineers[0].start_point, scenario.requests[0].point

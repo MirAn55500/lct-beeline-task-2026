@@ -354,6 +354,13 @@ class PlanResult:
     diff: PlanDiff | None = None
     name: str = ""
     created_at: datetime | None = None
+    not_before: datetime | None = None
+    """Момент «сейчас», от которого считался ремонт по событию.
+
+    Работа, которая к этому моменту не началась, не может быть назначена раньше него:
+    план после события — расписание остатка дня, а не задним числом переписанное утро.
+    У расчёта с нуля этого ограничения нет, там `None`.
+    """
 
     @property
     def unassigned(self) -> tuple[Assignment, ...]:
@@ -375,6 +382,18 @@ class PlanResult:
                 return r
         return None
 
+    def visit_of(self, request_id: str) -> Visit | None:
+        """Визит заявки в маршрутах. `None`, если заявка не назначена.
+
+        Отдельно от `assignment_of`, потому что `Assignment` не хранит `departure_at`:
+        решение «инженер уже выехал» строится именно на нём, а живёт оно только в визите.
+        """
+        for r in self.routes:
+            for v in r.visits:
+                if v.request_id == request_id:
+                    return v
+        return None
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "plan_id": self.plan_id,
@@ -382,6 +401,7 @@ class PlanResult:
             "algorithm": self.algorithm.value,
             "date": self.date.isoformat(),
             "created_at": _iso(self.created_at),
+            "not_before": _iso(self.not_before),
             "routes": [r.to_dict() for r in self.routes],
             "assignments": [a.to_dict() for a in self.assignments],
             "unassigned": [a.to_dict() for a in self.unassigned],

@@ -30,9 +30,14 @@ __all__ = ["reassign"]
 
 
 class _ManualEvent:
-    """Минимальная заглушка события: `build_diff` берёт из него только тип."""
+    """Минимальная заглушка события: `build_diff` берёт из него только тип.
 
-    type = EventType.URGENT_REQUEST
+    Тип отдельный, а не позаимствованный у аварии: `diff` отвечает на вопрос «почему
+    план изменился», и ручной ход, подписанный как `urgent_request`, попадал в журнал
+    и в статистику событий как поступившая авария.
+    """
+
+    type = EventType.MANUAL_REASSIGN
     at = None
 
 
@@ -145,12 +150,9 @@ def _finish(
         elapsed_ms=(_time.monotonic() - started) * 1000.0,
         plan_id=plan_id,
     )
+    # `explain_replan` сам подписывает ручной ход по типу события, поэтому первое
+    # предложение подменять больше не нужно — раньше это делалось хрупким split(". ").
     diff = build_diff(previous, result, _ManualEvent())
-    diff = _replace(
-        diff,
-        summary="Ручное переназначение диспетчером. "
-        + (diff.summary.split(". ", 1)[1] if ". " in diff.summary else diff.summary),
-    )
     return _replace(result, diff=diff)
 
 
@@ -161,7 +163,7 @@ def _refuse(previous: PlanResult, reason: str) -> PlanResult:
         warnings=previous.warnings + (f"Ручное переназначение отклонено: {reason}",),
         diff=PlanDiff(
             previous_plan_id=previous.plan_id,
-            event_type=EventType.URGENT_REQUEST,
+            event_type=EventType.MANUAL_REASSIGN,
             unchanged_route_engineer_ids=tuple(r.engineer_id for r in previous.routes),
             summary=f"Ручное переназначение отклонено: {reason}. План не изменён.",
         ),

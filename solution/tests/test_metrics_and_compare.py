@@ -368,3 +368,38 @@ def test_metrics_are_consistent_on_random_scenarios(seed):
                 route.service_minutes + route.travel_minutes + route.waiting_minutes, abs=1e-6
             )
             assert 0.0 <= route.utilization <= 1.0
+
+
+def test_constraints_valid_is_false_when_a_request_is_assigned_twice():
+    """Флаг ловит дубль визита, а не только несходящееся по времени расписание.
+
+    Раньше он смотрел ровно на одно: сходится ли каждый маршрут по времени. План с одной
+    заявкой в двух маршрутах это условие проходил, и `constraints_valid` оставался `True`
+    при том, что `validate_plan` честно возвращал нарушение инварианта.
+    """
+    from planner.context import PlanContext
+    from planner.enums import Algorithm
+    from planner.solution import Solution
+    from planner.solver import build_result
+
+    engineers = [
+        eng("E1", shift=("09:00", "18:00"), at=HOME, order=0),
+        eng("E2", shift=("09:00", "18:00"), at=HOME, order=1),
+    ]
+    requests = [req("D1", window=("09:00", "17:00"), dur=30, at=(55.71, 37.61), order=0)]
+    scenario = sc(requests, engineers, name="duplicate")
+
+    ctx = PlanContext(scenario)
+    solution = Solution(ctx)
+    # Дубль ставится в обход публичных путей: они его уже не пропускают, а проверить
+    # надо именно сам флаг.
+    for engineer_id in ("E1", "E2"):
+        route = solution.routes[engineer_id]
+        route.stops.append(requests[0])
+        assert route.recompute(), "стенд сломан: маршрут обязан сходиться по времени"
+
+    result = build_result(ctx, solution, Algorithm.OPTIMIZED)
+
+    assert all(r.feasible for r in solution), "стенд сломан: расписание должно сходиться"
+    assert result.metrics.constraints_valid is False
+    assert validate_plan(result, scenario) != []

@@ -92,6 +92,7 @@ class RouteState:
         "mode",
         "stops",
         "locked_count",
+        "floor_m",
         "_dep",
         "_arr",
         "_start",
@@ -123,6 +124,13 @@ class RouteState:
         self.mode = engineer.transport_mode
         self.stops: list[Request] = list(stops)
         self.locked_count = locked_count
+        self.floor_m: float = _NEG_INF
+        """Раньше этого момента новая работа начаться не может.
+
+        При перепланировании это «сейчас»: событие произошло в 13:00, и ставить
+        освободившуюся заявку на 09:00 — значит выдать расписание задним числом.
+        Замороженных визитов не касается: они уже факт.
+        """
         self._frozen: list[tuple[float, float, float, float, float, float, float]] = []
         self._static: dict[str, bool] = {}
         self.recompute()
@@ -153,6 +161,7 @@ class RouteState:
         copy.mode = self.mode
         copy.stops = list(self.stops)
         copy.locked_count = self.locked_count
+        copy.floor_m = self.floor_m
         copy._dep = list(self._dep)
         copy._arr = list(self._arr)
         copy._start = list(self._start)
@@ -194,9 +203,12 @@ class RouteState:
 
     def _time_before(self, position: int) -> float:
         if position > 0:
-            return self._end[position - 1]
+            end = self._end[position - 1]
+            return end if end > self.floor_m else self.floor_m
         start = self.cal.start_m
-        return start if start is not None else _NEG_INF
+        if start is None:
+            return _NEG_INF
+        return start if start > self.floor_m else self.floor_m
 
     # ------------------------------------------------------------------ прямой проход
 
@@ -260,7 +272,9 @@ class RouteState:
             timing = ctx.timing(request)
             km, minutes = travel.both(point, request.point, mode)
 
-            leg = schedule_leg(cal, timing, cursor, minutes, strict)
+            # Выехать раньше, чем наступило «сейчас», нельзя: см. `floor_m`.
+            free_from = cursor if cursor > self.floor_m else self.floor_m
+            leg = schedule_leg(cal, timing, free_from, minutes, strict)
             if leg is None:
                 self.feasible = False
                 return False
@@ -399,8 +413,14 @@ class RouteState:
 
         Быстрая оценка — фильтр; авторитетен прямой проход. Если он не сошёлся,
         изменение откатывается, и маршрут остаётся ровно таким, каким был.
+
+        Повторная вставка уже стоящей в маршруте заявки отклоняется: одна заявка —
+        один выезд. Проверка стоит обхода короткого списка, а без неё событие,
+        переобъявляющее уже назначенную заявку, размножало визит.
         """
         if position < self.locked_count or position > len(self.stops):
+            return False
+        if self.index_of(request.id) >= 0:
             return False
         if not self.accepts(request):
             return False

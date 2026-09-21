@@ -433,3 +433,212 @@ def test_unavailable_keeps_intervals_sorted_and_non_overlapping(prepared):
         assert interval.end > interval.start
     for prev, nxt in zip(intervals, intervals[1:]):
         assert prev.end <= nxt.start, "интервалы пересеклись после обрезки"
+
+
+# --------------------------------------------------------------------------
+# Статусы исполнения
+# --------------------------------------------------------------------------
+
+
+def test_completed_status_writes_the_actual_duration(prepared):
+    """«Работы завершены» переписывает норматив фактом — как и отказ клиента.
+
+    Длительность в сценарии после события — это то, сколько работа заняла на самом
+    деле: от неё считается остаток дня, и она же попадает в метрику объёма работ.
+    """
+    scenario, plan = prepared
+    assignment = plan.assignment_of("R1")
+    assert assignment.is_assigned, "сценарий собран неверно"
+
+    moment = assignment.service_start_at + timedelta(minutes=25)
+    updated, notes = apply_event(
+        scenario, plan, event(EventType.VISIT_COMPLETED, moment, request_id="R1")
+    )
+
+    assert requests_by_id(updated)["R1"].duration_minutes == 25
+    assert {r.id for r in updated.requests} == {r.id for r in scenario.requests}, (
+        "статус состав заявок не меняет: выполненная работа остаётся в плане дня"
+    )
+    assert notes and any(has_cyrillic(n) for n in notes)
+
+
+def test_arrival_status_does_not_touch_the_input(prepared):
+    """«Инженер на месте» меняет только расписание, но не сам вход.
+
+    Норматив работы от факта приезда не зависит: приехали позже — позже и начали,
+    но сама работа короче не стала.
+    """
+    scenario, plan = prepared
+    before = requests_by_id(scenario)["R1"].duration_minutes
+
+    updated, notes = apply_event(
+        scenario, plan, event(EventType.VISIT_ARRIVED, EVENT_AT, request_id="R1")
+    )
+
+    assert requests_by_id(updated)["R1"].duration_minutes == before
+    assert {r.id for r in updated.requests} == {r.id for r in scenario.requests}
+
+
+def test_status_event_requires_the_visit_id():
+    """Статус без заявки бессмыслен: событие обязано указывать визит."""
+    with pytest.raises(ValueError):
+        event(EventType.VISIT_COMPLETED, EVENT_AT)
+    with pytest.raises(ValueError):
+        event(EventType.VISIT_ARRIVED, EVENT_AT)
+
+
+def test_status_for_an_unknown_visit_is_reported(prepared):
+    """Статус по заявке, которой нет в маршрутах, не молчит — он попадает в примечания."""
+    scenario, plan = prepared
+    _updated, notes = apply_event(
+        scenario, plan, event(EventType.VISIT_COMPLETED, EVENT_AT, request_id="НЕТ-ТАКОЙ")
+    )
+    assert any("НЕТ-ТАКОЙ" in n for n in notes)
+
+
+# --------------------------------------------------------------------------------------
+# Отказ клиента считается по рабочим минутам, а не по часам на стене
+# --------------------------------------------------------------------------------------
+
+
+def lunch_scenario():
+    """Один инженер с обедом 13:00–14:00 и длинная работа, которая его пересекает."""
+    engineers = [eng("E1", shift=[("09:00", "13:00"), ("14:00", "18:00")], at=HOME)]
+    requests = [req("L1", window=("12:00", "16:00"), dur=180, at=HOME, order=0)]
+    return sc(requests, engineers, name="lunch")
+
+
+def test_refusal_across_a_break_counts_working_minutes_only():
+    """Обед посреди работы — не работа: в норматив идут рабочие минуты, а не стенные."""
+    scenario = lunch_scenario()
+    before = plan_optimized(scenario)
+    start = before.assignment_of("L1").service_start_at
+    assert hhmm(start).endswith("12:00:00"), f"предусловие: работа началась в 12:00, а не {hhmm(start)}"
+
+    # Отказ в 14:00: на стене прошло 120 минут, но час из них съел перерыв.
+    updated, _notes = apply_event(
+        scenario, before, event(EventType.CLIENT_REFUSAL, "14:00", request_id="L1")
+    )
+    assert requests_by_id(updated)["L1"].duration_minutes == 60, (
+        "перерыв не должен попадать в засчитанную работу"
+    )
+
+
+def test_refusal_and_completion_agree_on_the_duration():
+    """Отказ и завершение на одних данных дают одинаковую длительность — правило одно."""
+    scenario = lunch_scenario()
+    before = plan_optimized(scenario)
+
+    refused, _ = apply_event(
+        scenario, before, event(EventType.CLIENT_REFUSAL, "14:00", request_id="L1")
+    )
+    completed, _ = apply_event(
+        scenario, before, event(EventType.VISIT_COMPLETED, "14:00", request_id="L1")
+    )
+    assert (
+        requests_by_id(refused)["L1"].duration_minutes
+        == requests_by_id(completed)["L1"].duration_minutes
+    )
+
+
+def test_manual_reassign_is_not_a_replan_event():
+    """`manual_reassign` — метка diff, а не вход `replan()`: событием его не создать."""
+    with pytest.raises(ValueError):
+        event(EventType.MANUAL_REASSIGN, EVENT_AT, request_id="R1")
+
+
+def test_refusal_for_an_unknown_request_is_reported(prepared):
+    """Отказ по заявке, которой нет во входе, не молчит — как и отмена такой заявки.
+
+    Диспетчер считает, что снял работу; если событие ни к чему не применилось, он
+    обязан узнать об этом сразу, а не по расписанию, в котором ничего не изменилось.
+    """
+    scenario, before = prepared
+    _updated, notes = apply_event(
+        scenario, before, event(EventType.CLIENT_REFUSAL, EVENT_AT, request_id="НЕТ-ТАКОЙ")
+    )
+    assert any("НЕТ-ТАКОЙ" in n for n in notes), notes
+
+
+def test_cancel_and_refusal_both_report_an_unknown_request(prepared):
+    """Два события, снимающих работу, ведут себя одинаково на неизвестной заявке."""
+    scenario, before = prepared
+    notes = {}
+    for event_type in (EventType.CANCEL_REQUEST, EventType.CLIENT_REFUSAL):
+        _updated, produced = apply_event(
+            scenario, before, event(event_type, EVENT_AT, request_id="НЕТ-ТАКОЙ")
+        )
+        notes[event_type] = produced
+    assert all(n for n in notes.values()), notes
+
+
+def test_unavailable_unknown_engineer_is_reported(prepared):
+    """Выбытие инженера, которого нет во входе, не молчит.
+
+    Иначе смена никого не задевает, а `diff.summary` всё равно рапортует «Инженер стал
+    недоступен»: журнал расходится с тем, что произошло.
+    """
+    scenario, before = prepared
+    _updated, notes = apply_event(
+        scenario,
+        before,
+        event(EventType.ENGINEER_UNAVAILABLE, EVENT_AT, engineer_id="НЕТ-ТАКОГО"),
+    )
+    assert any("НЕТ-ТАКОГО" in n for n in notes), notes
+
+
+def test_completion_before_arrival_is_reported(prepared):
+    """Работы не могли завершиться раньше, чем инженер доехал — противоречие в журнал."""
+    scenario, before = prepared
+    arrival = before.assignment_of("R3").arrival_at
+    moment = arrival - timedelta(minutes=30)
+
+    _updated, notes = apply_event(
+        scenario, before, event(EventType.VISIT_COMPLETED, moment, request_id="R3")
+    )
+    assert any("до планового прибытия" in n for n in notes), notes
+
+
+def test_cancelling_started_work_keeps_the_request_in_the_scenario():
+    """Отмена начатой работы не стирает её из входа — иначе теряется адрес инженера.
+
+    Заявка остаётся с урезанным до отработанного нормативом, ровно как при отказе
+    клиента, и диспетчер узнаёт об этом из `warnings`, а не по странному пробегу.
+    """
+    scenario = lunch_scenario()
+    before = plan_optimized(scenario)
+
+    updated, notes = apply_event(
+        scenario, before, event(EventType.CANCEL_REQUEST, "14:00", request_id="L1")
+    )
+    assert "L1" in requests_by_id(updated), "начатая заявка не может исчезнуть из входа"
+    # Обед 13:00–14:00 посреди работы работой не является: 60 рабочих минут, не 120.
+    assert requests_by_id(updated)["L1"].duration_minutes == 60
+    assert any("L1" in n for n in notes), notes
+    assert all(has_cyrillic(n) for n in notes), notes
+
+
+def test_cancelling_pending_work_removes_it_from_the_scenario(prepared):
+    """Граница обратная: пока по заявке ничего не произошло, отмена её просто снимает."""
+    scenario, before = prepared
+    updated, _notes = apply_event(
+        scenario, before, event(EventType.CANCEL_REQUEST, EVENT_AT, request_id="R7")
+    )
+    assert "R7" not in requests_by_id(updated)
+
+
+def test_cancel_and_refusal_agree_on_the_duration():
+    """Отмена и отказ снимают работу по одному правилу — расхождению взяться неоткуда."""
+    scenario = lunch_scenario()
+    before = plan_optimized(scenario)
+
+    cancelled, _ = apply_event(
+        scenario, before, event(EventType.CANCEL_REQUEST, "14:00", request_id="L1")
+    )
+    refused, _ = apply_event(
+        scenario, before, event(EventType.CLIENT_REFUSAL, "14:00", request_id="L1")
+    )
+    assert (
+        requests_by_id(cancelled)["L1"].duration_minutes
+        == requests_by_id(refused)["L1"].duration_minutes
+    )

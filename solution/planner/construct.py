@@ -284,7 +284,12 @@ def place_single(
 
     Используется при перепланировании: существующие маршруты не пересобираются,
     меняется ровно один из них.
+
+    Заявка, уже стоящая в каком-то маршруте, второй раз не ставится: инвариант «одна
+    заявка — один визит» не должен зависеть от того, вспомнил ли о нём вызывающий.
     """
+    if request.id in solution.assigned_ids():
+        return None
     candidates = allowed_engineers if allowed_engineers is not None else solution.order
     best: tuple[InsertionCost, int, str] | None = None
     for engineer_id in candidates:
@@ -327,7 +332,11 @@ def place_with_ejection(
 
     Сначала ищется вытеснение, после которого **все** потеснённые заявки находят новое
     место. Только если такого нет, принимается честная потеря работ меньшего приоритета.
+
+    Как и `place_single`, уже назначенную заявку повторно не ставит.
     """
+    if request.id in solution.assigned_ids():
+        return None
     depth = max(0, ctx.settings.ejection_depth)
     if depth <= 0:
         return None
