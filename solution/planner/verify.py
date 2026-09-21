@@ -38,7 +38,9 @@ def validate_plan(
     problems += _check_no_duplicates(result)
 
     for route in result.routes:
-        problems += _check_route(route, scenario, requests, engineers, travel)
+        problems += _check_route(
+            route, scenario, requests, engineers, travel, result.not_before
+        )
 
     problems += _check_totals(result)
     problems += _check_unassigned(result)
@@ -81,7 +83,9 @@ def _check_no_duplicates(result: PlanResult) -> list[str]:
     return problems
 
 
-def _check_route(route, scenario, requests, engineers, travel) -> list[str]:
+def _check_route(
+    route, scenario, requests, engineers, travel, not_before=None
+) -> list[str]:
     problems: list[str] = []
     engineer = engineers.get(route.engineer_id)
     if engineer is None:
@@ -141,6 +145,14 @@ def _check_route(route, scenario, requests, engineers, travel) -> list[str]:
         if cursor is None:
             problems.append(f"Инженер {engineer.id}: рабочее время исчерпано до заявки {request.id}")
             break
+
+        # «Сейчас» после события: работа, которая ещё не началась, не могла быть назначена
+        # раньше него — верификатор обязан считать по тому же правилу, что и планировщик
+        # (`RouteState.floor_m`). Пол применяется к КАЖДОЙ незамороженной работе, а не
+        # только к началу маршрута: после начатого визита курсор встаёт в его окончание,
+        # и без пола верификатор ждал следующую работу сразу за ним — в прошлом.
+        if not_before is not None and cursor < not_before:
+            cursor = not_before
 
         minutes = travel.travel_minutes(point, request.point, engineer.transport_mode)
         km = travel.distance_km(point, request.point, engineer.transport_mode)

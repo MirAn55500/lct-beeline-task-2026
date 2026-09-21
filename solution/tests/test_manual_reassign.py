@@ -17,6 +17,7 @@ import pytest
 from factories import (
     Algorithm,
     AssignmentStatus,
+    EventType,
     assignments_by_id,
     eng,
     has_cyrillic,
@@ -492,3 +493,36 @@ def test_started_request_cannot_be_taken_away_by_hand(plan_with_locked_visit):
 
     assert result.assignment_of(request_id).status is AssignmentStatus.ASSIGNED
     assert len(result.warnings) > len(previous.warnings)
+
+
+# --------------------------------------------------------------------------
+# Тип изменения: ручной ход не притворяется аварией
+# --------------------------------------------------------------------------
+
+
+def test_diff_marks_the_change_as_manual(base, scenario):
+    """`diff.event_type` отвечает «почему план изменился» — значит, «руками диспетчера».
+
+    Раньше ручной ход подписывался чужим типом `urgent_request`, и в журнале событий
+    выглядел как поступившая авария: `summary` говорил правду, а машиночитаемое поле
+    врало.
+    """
+    result = reassign(base, scenario, "R1", "E2")
+
+    assert result.diff.event_type is EventType.MANUAL_REASSIGN
+    assert result.diff.to_dict()["event_type"] == "manual_reassign"
+
+
+def test_refused_move_is_also_marked_as_manual(base, scenario):
+    """Отклонённый ручной ход — тоже ручной ход, а не авария."""
+    result = reassign(base, scenario, "НЕТ-ТАКОЙ", "E2")
+
+    assert result.diff.event_type is EventType.MANUAL_REASSIGN
+
+
+def test_manual_summary_names_the_dispatcher(base, scenario):
+    """Пояснение по-прежнему начинается с того, кто изменил план."""
+    result = reassign(base, scenario, "R1", "E2")
+
+    assert has_cyrillic(result.diff.summary)
+    assert "ручное переназначение" in result.diff.summary.lower()

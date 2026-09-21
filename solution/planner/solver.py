@@ -359,6 +359,14 @@ def _build_metrics(
     connection_ids = {rid for rid, r in by_id.items() if r.priority is Priority.CONNECTION}
     utilizations = [m.utilization for m in per_engineer]
 
+    # Внутренняя согласованность решения: расписания сходятся по времени
+    # и ни одна заявка не назначена дважды. Полная проверка инвариантов — validate_plan.
+    # Уникальность добавлена потому, что без неё флаг оставался True на плане с дублем визита.
+    constraints_valid = (
+        all(state.feasible for state in solution)
+        and len(solution.assigned_ids()) == solution.assigned_count()
+    )
+
     return PlanMetrics(
         assigned_count=assigned,
         feasible_count=assigned,
@@ -376,6 +384,6 @@ def _build_metrics(
         total_waiting_minutes=sum(r.waiting_minutes for r in routes),
         avg_utilization=(sum(utilizations) / len(utilizations)) if utilizations else 0.0,
         computation_ms=elapsed_ms,
-        constraints_valid=all(state.feasible for state in solution),
+        constraints_valid=constraints_valid,
         per_engineer=per_engineer,
     )

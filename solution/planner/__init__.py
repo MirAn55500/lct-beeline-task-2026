@@ -24,6 +24,7 @@ from .enums import (
     Algorithm,
     AssignmentStatus,
     EventType,
+    ReplanScope,
     ExecutionStatus,
     Priority,
     ReasonCode,
@@ -87,6 +88,7 @@ __all__ = [
     "Algorithm",
     "AssignmentStatus",
     "EventType",
+    "ReplanScope",
     "ReasonCode",
     # выход
     "PlanResult",

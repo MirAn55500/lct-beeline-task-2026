@@ -155,6 +155,9 @@ def explain_replan(event_type: EventType, diff: PlanDiff, total_routes: int) -> 
         EventType.CANCEL_REQUEST: "Заявка отменена",
         EventType.ENGINEER_UNAVAILABLE: "Инженер стал недоступен",
         EventType.CLIENT_REFUSAL: "Клиент отказался на адресе",
+        EventType.VISIT_ARRIVED: "Инженер на месте",
+        EventType.VISIT_COMPLETED: "Работы завершены",
+        EventType.MANUAL_REASSIGN: "Ручное переназначение диспетчером",
     }
     head = titles.get(event_type, "План пересчитан")
 

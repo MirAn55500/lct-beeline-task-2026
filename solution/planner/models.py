@@ -13,7 +13,7 @@ from datetime import date as Date
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping, Sequence
 
-from .enums import EventType, ExecutionStatus, Priority, Skill, TransportMode
+from .enums import EventType, ExecutionStatus, Priority, ReplanScope, Skill, TransportMode
 
 __all__ = [
     "MSK",
@@ -86,6 +86,10 @@ class WorkInterval:
     end: datetime
 
     def __post_init__(self) -> None:
+        # Нормализуем tz-aware: смешение naive и aware роняет любое сравнение,
+        # поэтому недостающая зона достраивается здесь же, как у других полей.
+        object.__setattr__(self, "start", _parse_dt(self.start))
+        object.__setattr__(self, "end", _parse_dt(self.end))
         if self.end <= self.start:
             raise ValueError(f"Рабочий интервал пуст или вывернут: {self.start} .. {self.end}")
 
@@ -250,6 +254,10 @@ class Request:
     request_type_bk: str = ""
 
     def __post_init__(self) -> None:
+        # Нормализуем tz-aware: смешение naive и aware роняет любое сравнение,
+        # поэтому недостающая зона достраивается здесь же, как у других полей.
+        object.__setattr__(self, "window_start", _parse_dt(self.window_start))
+        object.__setattr__(self, "window_end", _parse_dt(self.window_end))
         object.__setattr__(self, "required_skill", Skill(self.required_skill))
         object.__setattr__(self, "priority", Priority(self.priority))
         object.__setattr__(self, "execution_status", ExecutionStatus(self.execution_status))
@@ -258,6 +266,26 @@ class Request:
             object.__setattr__(self, "required_transport", TransportMode(self.required_transport))
         if self.received_at is not None:
             object.__setattr__(self, "received_at", _parse_dt(self.received_at))
+        # `bool` — подкласс `int`, и `True` тихо становится длительностью в одну минуту,
+        # а `False` — нулевой. Обе величины проходят и проверку на конечность, и проверку
+        # знака, поэтому отсекать их приходится по типу и раньше всех.
+        if isinstance(self.duration_minutes, bool):
+            raise ValueError(
+                f"Заявка {self.id}: длительность должна быть числом минут, "
+                f"а не логическим значением ({self.duration_minutes})"
+            )
+        # Порядок важен: `nan < 0` ложно, поэтому проверка на конечность идёт первой.
+        # Иначе `NaN` доходит до `int(timing.duration)` в объяснении отказа, а `inf` —
+        # до `timedelta`, и вместо внятного отказа получается ошибка из глубины расчёта.
+        if not math.isfinite(self.duration_minutes):
+            raise ValueError(
+                f"Заявка {self.id}: длительность должна быть конечным числом, "
+                f"задано {self.duration_minutes}"
+            )
+        if self.duration_minutes < 0:
+            raise ValueError(
+                f"Заявка {self.id}: длительность не может быть отрицательной ({self.duration_minutes})"
+            )
 
     @property
     def window_width_minutes(self) -> float:
@@ -383,10 +411,26 @@ class Settings:
     enable_fleet_minimization: bool = True
     max_local_search_rounds: int = 30
     or_opt_max_segment: int = 3
-    ejection_depth: int = 1
+    ejection_depth: int = 3
 
     # --- перепланирование ---
     stabilize_after_replan: bool = True
+    replan_scope: ReplanScope = ReplanScope.HIGH
+    """Степень изменения плана при событии: `low` / `medium` / `high`.
+
+    Ремонт всегда идёт снизу вверх — сначала вставка в свободное окно, потом
+    перестроение затронутого маршрута, потом пересчёт остатка дня. Этот параметр
+    задаёт только **потолок**: до какой ступени разрешено дойти, если дешёвые не
+    справились. По умолчанию доступны все три ступени: сохранённая заявка важнее
+    неподвижности картинки, а тай-брейк на число изменённых маршрутов и так не даёт
+    трогать лишнее.
+    """
+    global_replan_time_share: float = 0.4
+    """Доля `time_limit_seconds`, зарезервированная под пересчёт остатка дня.
+
+    Без собственного бюджета дешёвые ступени успевают съесть весь лимит, и страховка
+    не запускается вовсе.
+    """
 
     timezone_offset_hours: int = 3
 
@@ -406,6 +450,8 @@ class Settings:
             or_opt_max_segment=self.or_opt_max_segment,
             ejection_depth=self.ejection_depth,
             stabilize_after_replan=self.stabilize_after_replan,
+            replan_scope=ReplanScope(self.replan_scope),
+            global_replan_time_share=self.global_replan_time_share,
             timezone_offset_hours=self.timezone_offset_hours,
         )
 
@@ -425,6 +471,8 @@ class Settings:
             "or_opt_max_segment": self.or_opt_max_segment,
             "ejection_depth": self.ejection_depth,
             "stabilize_after_replan": self.stabilize_after_replan,
+            "replan_scope": ReplanScope(self.replan_scope).value,
+            "global_replan_time_share": self.global_replan_time_share,
             "timezone_offset_hours": self.timezone_offset_hours,
         }
 
@@ -452,6 +500,10 @@ class Scenario:
     def __post_init__(self) -> None:
         object.__setattr__(self, "requests", tuple(self.requests))
         object.__setattr__(self, "engineers", tuple(self.engineers))
+        # Нормализуем tz-aware: смешение naive и aware роняет любое сравнение,
+        # поэтому недостающая зона достраивается здесь же, как у других полей.
+        if self.as_of is not None:
+            object.__setattr__(self, "as_of", _parse_dt(self.as_of))
         _require_unique("заявок", (r.id for r in self.requests))
         _require_unique("инженеров", (e.id for e in self.engineers))
 
@@ -633,7 +685,17 @@ class ReplanEvent:
     comment: str = ""
 
     def __post_init__(self) -> None:
+        # Нормализуем tz-aware: смешение naive и aware роняет любое сравнение,
+        # поэтому недостающая зона достраивается здесь же, как у других полей.
+        object.__setattr__(self, "at", _parse_dt(self.at))
         object.__setattr__(self, "type", EventType(self.type))
+        if not self.type.is_event:
+            # `MANUAL_REASSIGN` — метка diff, а не событие: ручной ход делает `reassign()`,
+            # у которого нет ни момента события, ни заморозки по нему.
+            raise ValueError(
+                "Ручное переназначение не является событием перепланирования: "
+                "используйте reassign()"
+            )
         if self.type is EventType.URGENT_REQUEST and self.request is None:
             raise ValueError("Для аварийной заявки нужен полный набор полей заявки (поле request)")
         if self.type in (EventType.CANCEL_REQUEST, EventType.CLIENT_REFUSAL):
@@ -641,6 +703,8 @@ class ReplanEvent:
                 raise ValueError("Для отмены или отказа клиента нужен request_id")
         if self.type is EventType.ENGINEER_UNAVAILABLE and not self.engineer_id:
             raise ValueError("Для недоступности инженера нужен engineer_id")
+        if self.type.is_status and not (self.request_id or (self.request and self.request.id)):
+            raise ValueError("Для статуса исполнения нужен request_id визита")
 
     @property
     def target_request_id(self) -> str | None:
