@@ -15,6 +15,7 @@ from .enums import Algorithm, AssignmentStatus, EventType, ReasonCode, Skill, Tr
 from .models import GeoPoint
 
 __all__ = [
+    "TransitLeg",
     "Visit",
     "RouteResult",
     "Assignment",
@@ -34,6 +35,97 @@ def _r(value: float, digits: int = 3) -> float:
 
 
 # --------------------------------------------------------------------------------------
+
+TRANSIT_KIND_TITLES: dict[str, str] = {
+    "walk": "пешком",
+    "tram": "трамвай",
+    "subway": "метро",
+    "rail": "электричка",
+    "bus": "автобус",
+    "ferry": "паром",
+    "cable": "кабельный трамвай",
+    "gondola": "канатная дорога",
+    "funicular": "фуникулёр",
+    "trolleybus": "троллейбус",
+    "monorail": "монорельс",
+}
+"""Коды `route_type` GTFS словами. Названия нужны диспетчеру: «сесть на 903» без
+«автобус» читается хуже, а «Калужско-Рижская линия» без «метро» — непонятно вовсе."""
+
+_NAMED_BY_LINE = frozenset({"subway", "rail", "monorail"})
+"""Виды транспорта, которые называют линией, а не номером маршрута."""
+
+
+@dataclass(frozen=True, slots=True)
+class TransitLeg:
+    """Участок поездки на общественном транспорте: пешком до остановки или в вагоне.
+
+    Заполняется только для маршрутов с режимом `public_transport` и только тогда, когда
+    подключён маршрутный сервис с GTFS-фидом: расчёт по координатам знает лишь время в
+    пути, а на чём именно человек едет — не знает и придумывать не должен.
+
+    Зачем это в плане. Время в пути на общественном транспорте — не свойство пары точек,
+    а свойство конкретной поездки: 40 минут складываются из «6 минут до остановки,
+    ждать 4, ехать 18 на 903-м, пересесть, ещё 12 на метро». Диспетчер, который видит
+    только «40 минут», не может ни проверить расчёт, ни объяснить инженеру, куда идти.
+
+    Почему сумма участков не обязана совпадать с `Visit.travel_minutes`. Расписание
+    планирования одно на день и считается на опорный час (`ors.PT_DEPARTURE_HOUR`), а
+    поездка показывается на фактическое время выезда — в девять утра рейсы ходят чаще,
+    чем в восемь вечера, и ждать приходится по-разному. Расхождение — минуты, и оно
+    заложено в модель, а не ошибка: иначе время в пути зависело бы от расписания,
+    которое само от него и строится. Плюс `travel_minutes` включает сопутствующие
+    затраты (`Settings.overhead_minutes`), которых маршрутный сервис не знает.
+    """
+
+    kind: str
+    """`walk` — пешком, иначе вид транспорта: `bus`, `tram`, `subway`, `rail`…"""
+    route: str = ""
+    """Номер маршрута: «903», «м2», «6», «D3»."""
+    line: str = ""
+    """Полное название маршрута: «Метро «Озёрная» — Метро «Ясенево»», «Калужско-Рижская
+    линия». У метро и электрички в подписи идёт оно, а не номер: «метро 6» понятно не
+    всякому, «Калужско-Рижская линия» — всякому."""
+    headsign: str = ""
+    """Куда идёт этот рейс — то, что написано на лобовом стекле."""
+    from_stop: str = ""
+    """Остановка посадки. Для пешего участка пусто."""
+    to_stop: str = ""
+    """Остановка высадки."""
+    departure_at: datetime | None = None
+    arrival_at: datetime | None = None
+    minutes: float = 0.0
+    distance_km: float = 0.0
+    stops: int = 0
+    """Сколько остановок ехать. Ноль для пешего участка."""
+
+    @property
+    def title(self) -> str:
+        """Человекочитаемое описание участка — то, что показывается диспетчеру."""
+        if self.kind == "walk":
+            return f"пешком {round(self.minutes)} мин"
+        what = TRANSIT_KIND_TITLES.get(self.kind, self.kind)
+        # У наземного маршрута опознавательный знак — номер на борту, у рельсового —
+        # название линии: «метро 6» не читается, «Калужско-Рижская линия» читается.
+        mark = self.line if self.kind in _NAMED_BY_LINE and self.line else self.route
+        where = f" от «{self.from_stop}»" if self.from_stop else ""
+        return f"{what} {mark}{where}, {self.stops} ост., {round(self.minutes)} мин"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "route": self.route,
+            "line": self.line,
+            "headsign": self.headsign,
+            "from_stop": self.from_stop,
+            "to_stop": self.to_stop,
+            "departure_at": _iso(self.departure_at),
+            "arrival_at": _iso(self.arrival_at),
+            "minutes": _r(self.minutes, 1),
+            "distance_km": _r(self.distance_km),
+            "stops": self.stops,
+            "title": self.title,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +167,10 @@ class Visit:
     хранить её дважды (целиком и по участкам) значит удвоить JSON плана без пользы.
     `None` — реальной геометрии нет, участок рисуется прямой.
     """
+    transit: tuple["TransitLeg", ...] = ()
+    """Из чего сложилась дорога сюда на общественном транспорте: пешие подходы,
+    поездки, пересадки. Пусто для остальных способов передвижения и тогда, когда
+    маршрутный сервис недоступен — см. `TransitLeg`."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -99,6 +195,7 @@ class Visit:
             "priority": self.priority,
             "required_skill": self.required_skill.value,
             "geometry_range": list(self.geometry_range) if self.geometry_range else None,
+            "transit": [leg.to_dict() for leg in self.transit],
         }
 
 

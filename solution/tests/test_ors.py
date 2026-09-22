@@ -16,7 +16,10 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import urllib.error
+from datetime import timedelta
+from pathlib import Path
 
 import pytest
 
@@ -25,17 +28,20 @@ from factories import Algorithm, TransportMode, eng, gp, plan, req, routes_by_en
 from planner.models import GeoPoint
 from planner.ors import (
     DEFAULT_PROFILES,
-    GEOMETRY_ONLY_PROFILES,
+    NO_MATRIX_PROFILES,
     OrsClient,
     OrsError,
     OrsTravelModel,
     RoutingCache,
     attach_route_geometry,
     collect_points,
+    departure_moment,
     fetch_matrix,
     point_key,
+    scenario_departure,
     scenario_modes,
     setup_routing,
+    transit_profile,
 )
 
 A = gp((55.7000, 37.6000))
@@ -56,16 +62,33 @@ def _km(i: int, j: int) -> float:
 class FakeOrs:
     """Ответы ORS без сети. Считает вызовы — нарезку матрицы иначе не проверить."""
 
-    def __init__(self, *, holes: set[tuple[int, int]] = frozenset(), error: Exception | None = None):
+    def __init__(
+        self,
+        *,
+        holes: set[tuple[int, int]] = frozenset(),
+        error: Exception | None = None,
+        summary: dict | None = None,
+        bad_geometry: bool = False,
+        row_width: int | None = None,
+        rows_dropped: int = 0,
+    ):
         self.calls: list[tuple[str, dict]] = []
         self.holes = set(holes)
         self.error = error
+        # Ответ 200 неожиданной формы — не выдумка: у ORS 10 поле summary приходит
+        # пустым, когда маршрут построен, но не измерен, а нечисловое значение в нём
+        # встречается на сборках с локализованными полями. Заглушка обязана уметь и то
+        # и другое, иначе проверять откат на прямую не на чем.
+        self.summary = summary
+        self.bad_geometry = bad_geometry
+        self.row_width = row_width
+        self.rows_dropped = rows_dropped
 
     def __call__(self, url, body, headers, timeout):
         payload = json.loads(body.decode("utf-8"))
         self.calls.append((url, payload))
         if self.error is not None:
-            raise self.error
+            raise self.error() if callable(self.error) else self.error
         if "/matrix/" in url:
             return json.dumps(self._matrix(payload)).encode("utf-8")
         return json.dumps(self._directions(payload)).encode("utf-8")
@@ -85,8 +108,14 @@ class FakeOrs:
                 km = _km(i, j)
                 row_km.append(km)
                 row_sec.append(km * 60.0)  # 1 км = 1 минута, считать в уме проще
+            if self.row_width is not None:
+                row_km = row_km[: self.row_width]
+                row_sec = row_sec[: self.row_width]
             distances.append(row_km)
             durations.append(row_sec)
+        if self.rows_dropped:
+            distances = distances[: -self.rows_dropped]
+            durations = durations[: -self.rows_dropped]
         return {"distances": distances, "durations": durations}
 
     def _directions(self, payload):
@@ -99,15 +128,48 @@ class FakeOrs:
             coordinates.append([lon, lat])
             if index:
                 way_points.append(len(coordinates) - 1)
+        if self.bad_geometry:
+            coordinates[-1] = ["нет", "нет"]
+        properties = {
+            "way_points": way_points,
+            # Числа круглые нарочно: 30 минут и 12 км ни при каком коэффициенте
+            # извилистости не совпадут с расчётом по прямой, поэтому в тестах сразу
+            # видно, чей ответ попал в модель.
+            "summary": {"distance": 12000.0, "duration": 1800.0}
+            if self.summary is None else self.summary,
+        }
+        if "departure" in payload:
+            properties["legs"] = self._transit_legs(payload["departure"])
         return {
             "type": "FeatureCollection",
             "features": [
                 {
                     "geometry": {"type": "LineString", "coordinates": coordinates},
-                    "properties": {"way_points": way_points, "summary": {}},
+                    "properties": properties,
                 }
             ],
         }
+
+    @staticmethod
+    def _transit_legs(departure: str):
+        """Поездка «пешком — автобус — метро»: так же, как её отдаёт ORS с GTFS."""
+        return [
+            {"type": "walk", "departure_location": "Walk",
+             "distance": 400.0, "duration": 300.0, "route_type": -1,
+             "departure": departure, "arrival": departure},
+            {"type": "pt", "departure_location": "Улица Лескова",
+             "route_short_name": "903", "trip_headsign": "Метро «Проспект Мира»",
+             "route_type": 3, "distance": 6500.0, "duration": 900.0,
+             "departure": departure, "arrival": departure,
+             "stops": [{"name": "Улица Лескова"}, {"name": "Медведково"},
+                       {"name": "Метро «ВДНХ»"}]},
+            {"type": "pt", "departure_location": "ВДНХ",
+             "route_short_name": "6", "trip_headsign": "Новоясеневская",
+             "route_type": 1, "distance": 5100.0, "duration": 600.0,
+             "departure": departure, "arrival": departure,
+             "stops": [{"name": "ВДНХ"}, {"name": "Алексеевская"},
+                       {"name": "Рижская"}]},
+        ]
 
 
 
@@ -345,7 +407,7 @@ def test_public_transport_matrix_is_not_requested():
 def test_public_transport_legs_in_an_old_cache_are_ignored():
     """Кэш мог успеть набрать такие участки до того, как выяснилось, чего они стоят."""
     profile = DEFAULT_PROFILES[TransportMode.PUBLIC_TRANSPORT]
-    assert profile in GEOMETRY_ONLY_PROFILES
+    assert profile in NO_MATRIX_PROFILES
 
     cache = RoutingCache()
     cache.put_leg(profile, A, B, km=1.0, minutes=999.0)
@@ -356,6 +418,227 @@ def test_public_transport_legs_in_an_old_cache_are_ignored():
 
     expected = HaversineTravelModel(cfg).travel_minutes(A, B, TransportMode.PUBLIC_TRANSPORT)
     assert model.travel_minutes(A, B, TransportMode.PUBLIC_TRANSPORT) == pytest.approx(expected)
+
+
+def _public_transport_scenario():
+    return sc(
+        [req("R1", window=("09:00", "17:00"), dur=30, at=(55.80, 37.75))],
+        [eng("E1", shift=("09:00", "18:00"), at=(55.70, 37.60), transport="public_transport")],
+    )
+
+
+def test_public_transport_is_counted_by_schedule_when_asked():
+    """Главное про общественный транспорт: с `transit=True` числа берутся из расписания.
+
+    Матрица для него по-прежнему не запрашивается — вместо неё идут запросы
+    `/directions` со временем отправления, по одному на пару точек.
+    """
+    scenario = _public_transport_scenario()
+    fake = FakeOrs()
+    travel = OrsTravelModel.for_scenario(scenario, client(fake), transit=True)
+
+    urls = [url for url, _ in fake.calls]
+    assert not any("/matrix/" in url for url in urls)
+    assert all("/directions/public-transport" in url for url in urls)
+    assert all("departure" in payload for _, payload in fake.calls)
+
+    a = scenario.engineers[0].start_point
+    b = scenario.requests[0].point
+    overhead = scenario.settings.overhead_minutes[TransportMode.PUBLIC_TRANSPORT]
+    assert travel.travel_minutes(a, b, TransportMode.PUBLIC_TRANSPORT) == pytest.approx(
+        30.0 + overhead
+    )
+    assert travel.distance_km(a, b, TransportMode.PUBLIC_TRANSPORT) == pytest.approx(12.0)
+
+
+def test_transit_cache_is_keyed_by_departure_time():
+    """Одна и та же пара точек утром и вечером — разные автобусы и разное время.
+
+    Если бы раздел кэша не включал время, вечерний расчёт молча взял бы утренние числа.
+    """
+    scenario = _public_transport_scenario()
+    cache = RoutingCache()
+    OrsTravelModel.for_scenario(scenario, client(), cache=cache, transit=True)
+
+    morning = scenario_departure(scenario)
+    assert cache.legs_of(transit_profile("public-transport", morning))
+    assert not cache.legs_of("public-transport")
+    assert not cache.legs_of(transit_profile("public-transport", "2026-01-01T21:00:00"))
+
+
+def test_transit_legs_reach_the_visit():
+    """Диспетчеру нужен не только итог в минутах, но и на чём ехать и где садиться."""
+    scenario = _public_transport_scenario()
+    api = client(FakeOrs())
+    travel = OrsTravelModel.for_scenario(scenario, api, transit=True)
+    result = attach_route_geometry(plan(scenario, Algorithm.OPTIMIZED, travel=travel), api)
+
+    legs = routes_by_engineer(result)["E1"].visits[0].transit
+    assert [leg.kind for leg in legs] == ["walk", "bus", "subway"]
+    assert [leg.route for leg in legs] == ["", "903", "6"]
+    assert legs[1].from_stop == "Улица Лескова"
+    assert legs[1].to_stop == "Метро «ВДНХ»"
+    assert legs[1].stops == 2
+    assert "автобус 903" in legs[1].title
+    assert legs[2].to_dict()["kind"] == "subway"
+
+
+def _verdict(code: int, message: str):
+    """Фабрика отказов ORS: 404 с кодом ORS в теле, свежий экземпляр на каждый вызов.
+
+    Именно фабрика, а не готовое исключение: тело `HTTPError` — файловый объект, и
+    разбор вычитывает его до конца. Один экземпляр на два запроса означал бы, что во
+    второй раз код ORS потерян и отказ неотличим от обрыва связи.
+    """
+    def make() -> urllib.error.HTTPError:
+        return urllib.error.HTTPError(
+            "http://ors.test/ors", 404, message, {},
+            _body(json.dumps({"error": {"code": code, "message": message}})),
+        )
+
+    return make
+
+
+def test_transit_falls_back_to_straight_line_for_unreachable_pairs():
+    """Адрес вне зоны действия фида не должен ни ломать прогон, ни врать числом."""
+    scenario = _public_transport_scenario()
+    fake = FakeOrs(error=_verdict(2010, "Point 1 was not found in the graph"))
+    travel = OrsTravelModel.for_scenario(scenario, client(fake), transit=True)
+
+    from planner.travel import HaversineTravelModel
+
+    a = scenario.engineers[0].start_point
+    b = scenario.requests[0].point
+    expected = HaversineTravelModel(scenario.settings).travel_minutes(
+        a, b, TransportMode.PUBLIC_TRANSPORT
+    )
+    assert travel.travel_minutes(a, b, TransportMode.PUBLIC_TRANSPORT) == pytest.approx(expected)
+    assert any("вне зоны действия фида" in w for w in travel.warnings)
+
+
+@pytest.mark.parametrize("code, message", [
+    (2014, "PT exit point cannot be reached within given street time."),
+    (2013, "PT entry point cannot be reached within given street time."),
+    (7777, "неизвестный нам вердикт"),
+])
+def test_a_routing_verdict_is_a_boundary_of_the_feed(code, message):
+    """Регрессия живого прогона: «до остановки не дойти» — вне фида, а не отказ сервиса.
+
+    2014 — вне фида прибытие, 2013 — вне фида отправление. Сервис при этом жив и
+    ответил. Пока список перечислял коды «про пару точек», каждый неучтённый код молча
+    становился поломкой профиля: 2538 пар «Юго-востока» уехали в отчёт с советом
+    пересчитать план, когда сервис поднимут, — а он и не падал.
+
+    Поэтому третий случай в списке — заведомо незнакомый код: умолчание обязано быть
+    безопасным, то есть «вердикт о паре точек», иначе история повторится на следующем
+    типе местности.
+    """
+    scenario = _public_transport_scenario()
+    fake = FakeOrs(error=_verdict(
+        code, f"Route could not be found - Unable to find a route between points. {message}"
+    ))
+    travel = OrsTravelModel.for_scenario(scenario, client(fake), transit=True)
+
+    text = " ".join(travel.warnings)
+    assert "вне зоны действия фида" in text
+    assert "отказа сервиса" not in text
+    assert "отклонил" not in text
+
+
+def test_a_routing_verdict_does_not_disable_the_profile():
+    """То же самое в геометрии: вердикт о паре точек не выключает профиль целиком.
+
+    Счётчик `PROFILE_STRIKES` считает только отказы про сам запрос. Пока 2014 в них
+    попадал, трёх адресов вне фида подряд хватало, чтобы у всего набора перестала
+    строиться линия общественного транспорта: на «Юго-востоке» из сотни участков
+    построилось два.
+    """
+    scenario = sc(
+        [req(f"R{i}", window=("09:00", "09:30"), dur=55, at=(55.70 + 0.002 * i, 37.60))
+         for i in range(1, 6)],
+        [eng(f"C{i}", shift=("09:00", "18:00"), at=(55.70, 37.60), transport="car")
+         for i in range(1, 6)],
+    )
+    result = plan(scenario, Algorithm.OPTIMIZED)
+
+    class OutOfFeed(FakeOrs):
+        """Первые четыре участка вне фида, пятый — обычный."""
+
+        def __call__(self, url, body, headers, timeout):
+            if "/directions/" in url and len(self.calls) < 4:
+                self.calls.append((url, None))
+                raise _verdict(2014, "PT exit point cannot be reached")()
+            return super().__call__(url, body, headers, timeout)
+
+    enriched = attach_route_geometry(result, client(OutOfFeed()))
+
+    assert any(r.geometry_source == "ors" for r in enriched.routes), (
+        "после отказов по конкретным адресам профиль должен остаться рабочим"
+    )
+
+
+def test_a_request_level_verdict_is_its_own_case():
+    """«Нет такого профиля» (2003) — не граница фида и не оборванная связь.
+
+    Результат тот же (пары уходят на координаты), а вывод третий: сервис отвечает,
+    пересчитывать план бесполезно, чинить надо конфигурацию инстанса. Совет «смиритесь,
+    адрес вне зоны фида» увёл бы ровно от той строки в `ors-config.yml`, которой всё
+    лечится.
+    """
+    scenario = _public_transport_scenario()
+    fake = FakeOrs(error=_verdict(2003, "Unable to find an appropriate routing profile"))
+    travel = OrsTravelModel.for_scenario(scenario, client(fake), transit=True)
+
+    text = " ".join(travel.warnings)
+    assert "отклонил" in text
+    assert "routing profile" in text
+    assert "вне зоны действия фида" not in text
+    assert "отказа сервиса" not in text
+
+
+def test_transit_outage_is_not_reported_as_a_boundary_of_the_feed():
+    """Лежащий сервис и Кашира дают одинаковые числа и противоположный вывод.
+
+    В первом случае план станет точным сам собой, стоит поднять контейнер, и его надо
+    пересчитать. Во втором пересчитывать нечего: адрес вне зоны действия фида не
+    свяжется никогда. Одна строка на оба случая — это ровно та подсказка, которой
+    диспетчер не может воспользоваться.
+    """
+    scenario = _public_transport_scenario()
+    fake = FakeOrs(error=urllib.error.URLError("connection refused"))
+    travel = OrsTravelModel.for_scenario(scenario, client(fake), transit=True)
+
+    text = " ".join(travel.warnings)
+    assert "отказа сервиса" in text
+    assert "connection refused" in text
+    assert "вне зоны действия фида" not in text
+
+
+def test_empty_summary_is_not_a_free_ride():
+    """Ответ без summary — «сервис не сказал, сколько ехать», а не «ехать ноль».
+
+    Нули попали бы в кэш, то есть навсегда, и пара точек стала бы бесплатным
+    переездом через весь город — причём в плане это выглядело бы как удача.
+    """
+    scenario = _public_transport_scenario()
+    cache = RoutingCache()
+    fake = FakeOrs(summary={})
+    travel = OrsTravelModel.for_scenario(
+        scenario, client(fake), cache=cache, transit=True
+    )
+
+    departure = scenario_departure(scenario)
+    assert not cache.legs_of(transit_profile("public-transport", departure))
+    assert any("без расстояния" in w for w in travel.warnings)
+
+    from planner.travel import HaversineTravelModel
+
+    a = scenario.engineers[0].start_point
+    b = scenario.requests[0].point
+    expected = HaversineTravelModel(scenario.settings).travel_minutes(
+        a, b, TransportMode.PUBLIC_TRANSPORT
+    )
+    assert travel.travel_minutes(a, b, TransportMode.PUBLIC_TRANSPORT) == pytest.approx(expected)
 
 
 def test_public_transport_geometry_is_still_drawn():
@@ -725,3 +1008,194 @@ def test_deterministic_service_verdict_is_not_retried():
         OrsClient("http://ors.test/ors", transport=fake, retries=3).matrix("driving-car", [A, B])
     assert exc.value.code == 6020
     assert len(fake.calls) == 1, "детерминированный отказ сервиса повторялся"
+
+
+# --------------------------------------------------------------------------
+# Ответ 200 неожиданной формы
+#
+# Контракт модуля обещает ровно две вещи: откат на расчёт по координатам (или на
+# прямую линию) и предупреждение в плане. Ошибка сети его выполняет — а ответ с кодом
+# 200, в котором сервис написал что-то своё, раньше выполнял иначе: `ValueError` и
+# `IndexError` доходили до вызывающей стороны и роняли уже посчитанный план.
+# --------------------------------------------------------------------------
+
+
+def test_non_numeric_distance_does_not_break_the_plan():
+    """`{"distance": "нет"}` приходит с кодом 200 — и это отказ участка, не падение."""
+    _scenario, result = three_stop_plan()
+    fake = FakeOrs(summary={"distance": "нет", "duration": "нет"})
+
+    route = attach_route_geometry(result, client(fake)).routes[0]
+
+    # Линия к summary отношения не имеет: она пришла и обязана доехать до карты.
+    assert route.geometry_source == "ors"
+    assert route.geometry[-1] == route.visits[-1].to_point
+
+
+def test_unparsable_geometry_falls_back_to_a_straight_line():
+    """Координата, которая не число, — это отсутствие линии, а не повод уронить план."""
+    _scenario, result = three_stop_plan()
+    enriched = attach_route_geometry(result, client(FakeOrs(bad_geometry=True)))
+    route = enriched.routes[0]
+
+    assert route.geometry_source == "straight"
+    assert any("неразбираемая геометрия" in w for w in enriched.warnings)
+    assert route.geometry == (), "прямую рисует сам фронт по polyline, подделывать её не надо"
+
+
+def test_any_unexpected_shape_of_a_200_answer_is_still_only_a_failed_leg():
+    """Разобрать все формы чужого JSON заранее нельзя — уронить план ими тоже нельзя.
+
+    Поэтому у запроса участка стоит широкий перехват: ответ, на котором спотыкается
+    сам разбор, кончается тем же, чем ошибка сети, — прямой и строкой в `warnings`.
+    """
+    _scenario, result = three_stop_plan()
+
+    class Nonsense(FakeOrs):
+        def __call__(self, url, body, headers, timeout):
+            self.calls.append((url, json.loads(body.decode("utf-8"))))
+            return json.dumps({"features": {"нет": "списка"}}).encode("utf-8")
+
+    enriched = attach_route_geometry(result, client(Nonsense()))
+
+    assert enriched.routes[0].geometry_source == "straight"
+    assert any("неразбираемый ответ сервиса" in w for w in enriched.warnings)
+
+
+def test_short_matrix_row_leaves_the_pair_to_the_coordinates():
+    """Ряд короче матрицы — это несчитанные пары, а не `IndexError` посреди сборки."""
+    points = [A, B, C]
+    table = fetch_matrix(client(FakeOrs(row_width=1)), "driving-car", points)
+
+    assert (point_key(B), point_key(A)) in table, "то, что пришло, должно попасть в матрицу"
+    assert (point_key(A), point_key(B)) not in table
+    assert (point_key(A), point_key(C)) not in table
+
+
+def test_matrix_without_all_the_rows_is_a_service_failure():
+    """Строк меньше, чем источников, — разложить такой ответ по парам невозможно.
+
+    Какие именно источники пропущены, ответ не сообщает, поэтому раскладка стала бы
+    угадыванием. Ошибка уходит наверх, где режим честно откатывается на координаты.
+    """
+    with pytest.raises(OrsError):
+        fetch_matrix(client(FakeOrs(rows_dropped=1)), "driving-car", [A, B, C])
+
+
+def test_broken_matrix_leaves_the_mode_on_coordinates_with_a_warning():
+    """Тот же ответ, но на уровне сценария: план считается, предупреждение есть."""
+    scenario = two_point_scenario()
+    travel = OrsTravelModel.for_scenario(scenario, client(FakeOrs(rows_dropped=1)))
+
+    assert travel.warnings
+    assert not travel.has_matrix
+    result = plan(scenario, Algorithm.OPTIMIZED, travel=travel)
+    assert result.metrics.assigned_count == 1
+
+
+# --------------------------------------------------------------------------
+# Дата плана и раздел кэша расписаний
+#
+# Раздел кэша расписаний включает дату (иначе утренние числа выдавали бы себя за
+# вечерние). Отсюда обратная беда: план на другой день не находит в кэше НИЧЕГО,
+# внешне ничем не отличаясь — меняются только числа. Поэтому тихого исхода здесь нет
+# ни одного, и это проверяется.
+# --------------------------------------------------------------------------
+
+
+def _warm_transit_cache(scenario, when: str) -> RoutingCache:
+    """Кэш, прогретый расписаниями на произвольный момент."""
+    cache = RoutingCache()
+    OrsTravelModel.for_scenario(
+        scenario, client(), cache=cache, transit=True, departure=when
+    )
+    assert cache.legs_of(transit_profile("public-transport", when))
+    return cache
+
+
+def test_same_weekday_and_hour_is_reused_as_a_stated_approximation():
+    """17.08.2026 и 21.09.2026 — оба понедельника, и разница между ними несравнимо
+    меньше, чем между поездкой по расписанию и расчётом по прямой.
+
+    Но подмена, о которой не сказали, — это не приближение, а ошибка: обе даты обязаны
+    быть названы в предупреждении.
+    """
+    scenario = _public_transport_scenario()          # план на 2026-09-21, понедельник
+    other_monday = departure_moment(
+        scenario.date - timedelta(days=35), scenario.settings.timezone_offset_hours
+    )
+    cache = _warm_transit_cache(scenario, other_monday)
+
+    travel = OrsTravelModel.for_scenario(scenario, client(), cache=cache, transit=False)
+
+    a = scenario.engineers[0].start_point
+    b = scenario.requests[0].point
+    overhead = scenario.settings.overhead_minutes[TransportMode.PUBLIC_TRANSPORT]
+    assert travel.travel_minutes(a, b, TransportMode.PUBLIC_TRANSPORT) == pytest.approx(
+        30.0 + overhead
+    ), "числа должны остаться расписанием, а не съехать на прямую"
+
+    text = " ".join(travel.warnings)
+    assert "приближение" in text
+    assert f"{scenario.date:%d.%m.%Y}" in text, "не названа дата плана"
+    assert f"{(scenario.date - timedelta(days=35)):%d.%m.%Y}" in text, "не названа дата кэша"
+
+
+def test_schedule_from_another_weekday_is_not_passed_off_as_this_one():
+    """Вторник вместо понедельника — уже другое расписание, и брать его нельзя."""
+    scenario = _public_transport_scenario()
+    tuesday = departure_moment(
+        scenario.date - timedelta(days=34), scenario.settings.timezone_offset_hours
+    )
+    cache = _warm_transit_cache(scenario, tuesday)
+
+    travel = OrsTravelModel.for_scenario(scenario, client(), cache=cache, transit=False)
+
+    from planner.travel import HaversineTravelModel
+
+    a = scenario.engineers[0].start_point
+    b = scenario.requests[0].point
+    expected = HaversineTravelModel(scenario.settings).travel_minutes(
+        a, b, TransportMode.PUBLIC_TRANSPORT
+    )
+    assert travel.travel_minutes(a, b, TransportMode.PUBLIC_TRANSPORT) == pytest.approx(expected)
+
+    text = " ".join(travel.warnings)
+    assert "другой день недели" in text
+    assert f"{(scenario.date - timedelta(days=34)):%d.%m.%Y}" in text, "не сказано, что в кэше"
+    assert "--date" in text, "совет по прогреву без даты бесполезен ровно в этом случае"
+
+
+def test_offline_plan_on_another_date_never_stays_silent():
+    """Тот же случай офлайн (`setup_routing` без адреса сервиса) — раньше молчал."""
+    scenario = _public_transport_scenario()
+    cache = _warm_transit_cache(
+        scenario,
+        departure_moment(
+            scenario.date - timedelta(days=34), scenario.settings.timezone_offset_hours
+        ),
+    )
+    path = Path(tempfile.mkdtemp()) / "routing.json"
+    cache.save(path)
+
+    routing = setup_routing(scenario, url=None, cache_path=path)
+    result = routing.attach(plan(scenario, Algorithm.OPTIMIZED, travel=routing.travel))
+
+    assert any("расписаний" in w for w in result.warnings)
+
+
+def test_report_names_the_mode_and_the_moment_of_the_schedule():
+    """«Посчитаны по координатам» без режима и без даты не отвечает ни на один вопрос."""
+    scenario = _public_transport_scenario()
+    travel = OrsTravelModel.for_scenario(scenario, client(), transit=False)
+    travel.both(
+        scenario.engineers[0].start_point,
+        scenario.requests[0].point,
+        TransportMode.PUBLIC_TRANSPORT,
+    )
+    report = " ".join(travel.report())
+
+    assert "общественный транспорт" in report
+    assert "по расписанию на" in report
+    assert f"{scenario.date:%d.%m.%Y}" in report
+    assert "понедельник" in report

@@ -229,8 +229,11 @@ __marimo__/
 /plan.json
 
 # Выгрузки data.mos.ru, из которых tools/mosdata_to_gtfs.py собирает gtfs.zip:
-# полгигабайта исходников, которые скачиваются заново по ссылкам из README.
-# Производные кэши (geocache.json, routing_cache.json, work_types.json) остаются.
+# полгигабайта исходников (расписания наземного транспорта, станции метро и вестибюли),
+# которые скачиваются заново по ссылкам из README.
+# Производные остаются: geocache.json, routing_cache.json, work_types.json и
+# метро.json — последний лежит в репозитории специально, чтобы фид собирался без
+# выгрузки OSM на 877 МБ (см. tools/osm_metro.py).
 /data/*.csv
 
 # Windows

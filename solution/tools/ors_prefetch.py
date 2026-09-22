@@ -9,17 +9,33 @@
     python tools/ors_prefetch.py                         # все три региона, матрицы
     python tools/ors_prefetch.py --region east           # один регион
     python tools/ors_prefetch.py --with-geometry         # ещё и линии маршрутов плана
+    python tools/ors_prefetch.py --transit               # ещё и расписания транспорта
+    python tools/ors_prefetch.py --transit --date 2026-09-21   # на конкретный день
     python tools/ors_prefetch.py --url http://host:8080/ors
     python tools/ors_prefetch.py --dry-run               # что будет запрошено
 
 Матрица считается «все со всеми» по точкам сценария: старты инженеров плюс адреса
 заявок. Для набора из ~100 точек это ~10 000 пар на профиль — один-два запроса.
+
+Общественный транспорт — исключение, и `--transit` вынесен отдельным флагом именно
+поэтому. Его матрицу приходится собирать по одной паре точек за запрос (у `/v2/matrix`
+нет времени отправления, см. `planner/ors.py: NO_MATRIX_PROFILES`), то есть теми же
+~4 000 пар, но четырьмя тысячами запросов вместо одного. На нашем инстансе это около
+получаса на все три региона в восемь потоков. Платится один раз: дальше расписания
+лежат в кэше, и расчёт идёт по ним офлайн, без флага и без контейнера.
+
+Раздел кэша расписаний включает ДАТУ отправления: одна и та же пара точек в будний
+день и в воскресенье — разные интервалы движения. Поэтому у прогрева есть `--date`: без
+него греется день из самой выгрузки, а план могут строить на другой. План, не нашедший
+своей даты, об этом скажет (и подставит ближайший тот же день недели как приближение),
+но точные числа даёт только прогрев на нужный день. `--date` можно повторять.
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+from datetime import date as _date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -36,6 +52,9 @@ from planner.ors import (  # noqa: E402
     RoutingCache,
     attach_route_geometry,
     collect_points,
+    departure_moment,
+    moment_title,
+    scenario_departure,
     scenario_modes,
 )
 
@@ -84,6 +103,24 @@ def main() -> int:
     parser.add_argument("--lunch", default="13:00-14:00")
     parser.add_argument("--limit", type=float, default=5.0, help="лимит поиска, секунд")
     parser.add_argument("--with-geometry", action="store_true", help="ещё и линии маршрутов")
+    parser.add_argument(
+        "--transit",
+        action="store_true",
+        help="ещё и общественный транспорт по расписанию (десятки минут, см. ниже)",
+    )
+    parser.add_argument(
+        "--date",
+        action="append",
+        metavar="ГГГГ-ММ-ДД",
+        help="день, на который греть расписания (можно повторять); "
+             "по умолчанию — день из выгрузки",
+    )
+    parser.add_argument(
+        "--transit-workers",
+        type=int,
+        default=8,
+        help="сколько запросов расписания держать одновременно",
+    )
     parser.add_argument("--refresh", action="store_true", help="перезапросить уже закэшированное")
     parser.add_argument("--dry-run", action="store_true", help="показать план работ и выйти")
     parser.add_argument(
@@ -93,6 +130,13 @@ def main() -> int:
         help="лимит maximum_routes инстанса; матрица режется на блоки под него",
     )
     args = parser.parse_args()
+
+    try:
+        days = [_date.fromisoformat(value) for value in (args.date or [])]
+    except ValueError as exc:
+        parser.error(f"--date: {exc}")
+    if days and not args.transit:
+        parser.error("--date имеет смысл только вместе с --transit")
 
     regions = args.region or sorted(SOURCES)
     client = OrsClient(
@@ -119,12 +163,34 @@ def main() -> int:
             continue
 
         scenario.settings.time_limit_seconds = args.limit
-        travel = OrsTravelModel.for_scenario(
-            scenario, client, cache=cache, refresh=args.refresh
+
+        def progress(done: int, total: int, failed: int, title: str = title) -> None:
+            share = done / total * 100 if total else 100.0
+            print(f"    {title}: расписания {done}/{total} ({share:.0f}%), "
+                  f"не связано {failed}", end="\r", flush=True)
+
+        # Дни греются по очереди и каждый в свой раздел кэша: расписание зависит от
+        # дня недели, и складывать понедельник с воскресеньем в одну таблицу нельзя.
+        offset = scenario.settings.timezone_offset_hours
+        moments = (
+            [departure_moment(day, offset) for day in days]
+            if days else [scenario_departure(scenario)]
         )
-        for warning in travel.warnings:
-            print(f"    ! {warning}")
-            failures += 1
+        travel = None
+        for moment in moments:
+            if len(moments) > 1 or days:
+                print(f"    день отправления: {moment_title(moment, offset)}")
+            travel = OrsTravelModel.for_scenario(
+                scenario, client, cache=cache, refresh=args.refresh,
+                transit=args.transit, transit_workers=args.transit_workers,
+                on_progress=progress if args.transit else None,
+                departure=moment,
+            )
+            if args.transit:
+                print()  # закрыть строку прогресса
+            for warning in travel.warnings:
+                print(f"    ! {warning}")
+                failures += 1
 
         if args.with_geometry:
             # Греются ОБА плана. Карта показывает базовый и оптимизированный по
@@ -147,7 +213,8 @@ def main() -> int:
 
         stats = cache.stats()
         print(f"    в кэше: {stats['legs']} участков матрицы, "
-              f"{stats['geometry']} участков геометрии")
+              f"{stats['geometry']} участков геометрии, "
+              f"{stats['transit']} поездок на транспорте")
 
     if args.dry_run:
         print("\nЭто был --dry-run: в сервис не ходили, кэш не менялся.")

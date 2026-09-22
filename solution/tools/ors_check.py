@@ -16,35 +16,57 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime, time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from planner.enums import TRANSPORT_TITLES, TransportMode  # noqa: E402
-from planner.models import GeoPoint  # noqa: E402
+from planner.models import MSK, GeoPoint  # noqa: E402
 from planner.ors import (  # noqa: E402
     DEFAULT_BASE_URL,
     DEFAULT_PROFILES,
-    GEOMETRY_ONLY_PROFILES,
+    NO_MATRIX_PROFILES,
+    PT_DEPARTURE_HOUR,
+    PT_WALKING_TIME,
     OrsClient,
     OrsError,
+    as_number,
+    transit_moment,
 )
 
-# Две точки в пределах Москвы: Таганка и Автозаводская. Достаточно близко, чтобы
-# маршрут строился любым профилем, включая пеший.
-PROBE = (GeoPoint(lat=55.742, lon=37.655), GeoPoint(lat=55.707, lon=37.657))
+# Две точки в пределах Москвы: Медведково и Ясенево. Разные концы города и разные
+# линии метро: пара строится любым профилем, но у общественного транспорта отвечает
+# на главный вопрос — работает ли рельсовый каркас в фиде. Без метро этот маршрут
+# занимает 151 минуту, с метро — около часа.
+PROBE = (GeoPoint(lat=55.8875, lon=37.6375), GeoPoint(lat=55.6064, lon=37.5333))
+
+
+def probe_departure() -> str:
+    """Время отправления для пробы общественного транспорта.
+
+    День — сегодняшний: проверять надо тот календарь, по которому фид действует прямо
+    сейчас. Час — тот же опорный, что у планировщика, и через тот же `transit_moment`,
+    иначе проба уехала бы на три часа мимо (ORS читает время без зоны как UTC).
+    """
+    local = datetime.combine(datetime.now(MSK).date(), time(hour=PT_DEPARTURE_HOUR), tzinfo=MSK)
+    return transit_moment(local)
 
 
 def _check(client: OrsClient, profile: str) -> tuple[str, str]:
     """Пара «матрица, маршрут»: либо результат, либо причина отказа."""
+    schedule_based = profile in NO_MATRIX_PROFILES
     try:
         payload = client.matrix(profile, PROBE)
-        km = payload["distances"][0][1]
-        minutes = payload["durations"][0][1] / 60.0
-        if km is None:
+        km = as_number(payload["distances"][0][1])
+        seconds = as_number(payload["durations"][0][1])
+        minutes = (seconds or 0.0) / 60.0
+        if km is None or seconds is None:
+            # null — недостижимо, не число — ответ 200 с мусором в поле. Для проверки
+            # инстанса это одно и то же: чисел, на которые можно опереться, нет.
             matrix = "ok  (недостижимо)"
-        elif profile in GEOMETRY_ONLY_PROFILES:
+        elif schedule_based:
             # Ответ приходит, но это пешее время: у /matrix нет времени отправления.
             # Показывать его как «ok» — значит предлагать взять заведомо неверные числа.
             matrix = f"пешком! {km:.2f} км / {minutes:.0f} мин"
@@ -53,14 +75,45 @@ def _check(client: OrsClient, profile: str) -> tuple[str, str]:
     except (OrsError, KeyError, IndexError, TypeError) as exc:
         matrix = f"нет ({_short(exc)})"
 
+    options = {}
+    if schedule_based:
+        # Ровно тот запрос, которым планировщик считает общественный транспорт:
+        # со временем отправления, иначе ответ снова придёт пешим.
+        options = {"walking_time": PT_WALKING_TIME, "departure": probe_departure()}
     try:
-        response = client.directions(profile, PROBE)
-        points = len(response["features"][0]["geometry"]["coordinates"])
-        directions = f"ok  {points} точек линии"
+        response = client.directions(profile, PROBE, **options)
+        feature = response["features"][0]
+        if schedule_based:
+            directions = _transit_summary(feature["properties"])
+        else:
+            points = len(feature["geometry"]["coordinates"])
+            directions = f"ok  {points} точек линии"
     except (OrsError, KeyError, IndexError, TypeError) as exc:
         directions = f"нет ({_short(exc)})"
 
     return matrix, directions
+
+
+def _transit_summary(properties: dict) -> str:
+    """Итог поездки по расписанию: время и на чём ехать.
+
+    Это и есть проверка фида. Пустой список поездок при построенном маршруте означает,
+    что расписания не загрузились и сервис провёл человека пешком, — такой ответ выглядит
+    успешным, но им не является.
+    """
+    seconds = as_number((properties.get("summary") or {}).get("duration"))
+    # Ответ без длительности — не поездка длиной ноль, а «сервис не сказал»: показать
+    # тут «0 мин» значило бы выдать сломанный ответ за самый быстрый маршрут.
+    duration = "время не указано" if seconds is None else f"{seconds / 60.0:.0f} мин"
+    rides = [
+        leg for leg in properties.get("legs") or []
+        if isinstance(leg, dict) and leg.get("type") == "pt"
+    ]
+    if not rides:
+        return f"пешком! {duration}, ни одного рейса — расписания не загрузились"
+    names = ", ".join(str(leg.get("route_short_name") or "?") for leg in rides[:4])
+    tail = "…" if len(rides) > 4 else ""
+    return f"ok  {duration} по расписанию: {names}{tail}"
 
 
 def _short(exc: Exception, limit: int = 60) -> str:
@@ -85,7 +138,12 @@ def main() -> int:
     for mode in TransportMode:
         profile = DEFAULT_PROFILES.get(mode, "—")
         matrix, directions = _check(client, profile)
-        if matrix.startswith("ok") and directions.startswith("ok"):
+        # У общественного транспорта источник чисел — маршрут, а не матрица, поэтому
+        # и пригодность профиля определяется по нему: требовать «ok» от матрицы,
+        # которую планировщик заведомо не берёт, значило бы считать рабочий профиль
+        # сломанным.
+        needed = (directions,) if profile in NO_MATRIX_PROFILES else (matrix, directions)
+        if all(answer.startswith("ok") for answer in needed):
             usable += 1
         if matrix.startswith("пешком!"):
             geometry_only = True
@@ -98,10 +156,13 @@ def main() -> int:
         print("и напишет об этом в warnings плана — расчёт не сломается.")
         if geometry_only:
             print()
-            print("Пометка «пешком!» — матрица профиля не учитывает расписания и отдаёт")
-            print("пешее время. Планировщик такую матрицу не берёт: время и расстояние")
-            print("считаются по координатам, а линия на карте строится через /directions,")
-            print("где расписания учитываются (planner/ors.py: GEOMETRY_ONLY_PROFILES).")
+            print("Пометка «пешком!» в колонке матрицы — норма: у /matrix нет времени")
+            print("отправления, и она отдаёт пешее время. Планировщик такую матрицу не")
+            print("берёт, а считает общественный транспорт через /directions со временем")
+            print("отправления — это колонка «маршрут» (planner/ors.py: NO_MATRIX_PROFILES).")
+            print()
+            print("А вот «пешком!» в колонке маршрута — уже поломка: профиль собран, но")
+            print("расписания в него не попали. Проверьте фид: python tools/gtfs_check.py")
         return 0
 
     print("Ни один профиль не ответил. Проверьте, что контейнер поднят и графы собраны:")

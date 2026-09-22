@@ -1,7 +1,11 @@
 """Сборка GTFS-фида из выгрузок data.mos.ru.
 
-Портал отдаёт расписания наземного транспорта Москвы шестью отдельными CSV, каждый
-со своим ключом. Состав ровно соответствует минимальному GTFS, только разложен иначе:
+Фид состоит из двух частей, собранных по-разному, и разницу между ними важно не
+потерять.
+
+**Наземный транспорт — настоящие расписания.** Портал отдаёт их шестью отдельными CSV,
+каждый со своим ключом. Состав ровно соответствует минимальному GTFS, только разложен
+иначе:
 
     маршруты.csv                  -> routes.txt
     рейсы маршрутов.csv           -> trips.txt
@@ -15,9 +19,18 @@
 троллейбуса), пункт назначения (в выгрузке пуст у всех 203 791 рейса) и адрес сайта
 перевозчика (GTFS требует непустой, у четырёх из пяти предприятий его нет).
 
+**Метро, МЦК и МЦД — тактовое расписание по интервалам.** Машиночитаемых расписаний
+рельсового транспорта Москвы не существует: на портале есть станции, вестибюли и
+рейтинг пассажиропотока, но ни одного времени отправления. Расписание синтезируется
+по официальным интервалам движения, порядок станций берётся из OSM. Все допущения —
+в `tools/metro_gtfs.py`, каждое отдельной константой. Без этой части фид бесполезен
+для Москвы: маршрут «Медведково — Ясенево» на одном наземном транспорте занимает
+151 минуту против 63 с метро.
+
 Запуск:
     python tools/mosdata_to_gtfs.py
     python tools/mosdata_to_gtfs.py --data data --out deploy/ors/files/gtfs.zip
+    python tools/mosdata_to_gtfs.py --no-metro       # только наземный транспорт
 
 После сборки архив стоит прогнать через `tools/gtfs_check.py` — он проверит то, чего
 конвертер по построению проверить не может: действует ли календарь сегодня и
@@ -32,7 +45,12 @@ import io
 import sys
 import zipfile
 from collections import defaultdict
+from itertools import chain
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from metro_gtfs import build_metro  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -143,19 +161,29 @@ def _normalize_times(rows: list[tuple[int, str, str, str]]) -> list[tuple[int, s
 
 
 def _write(archive: zipfile.ZipFile, name: str, columns: list[str], rows) -> int:
-    """Запись таблицы в архив. Возвращает число строк."""
-    buffer = io.StringIO(newline="")
-    writer = csv.writer(buffer, lineterminator="\n")
-    writer.writerow(columns)
+    """Запись таблицы прямо в поток архива. Возвращает число строк.
+
+    Не через промежуточную строку в памяти: `stop_times.txt` — это 5.8 млн строк и
+    около 300 МБ текста, а перед записью в архив она существовала бы дважды (сама
+    строка и её utf-8 копия). Сборка укладывалась в `MemoryError` — причём уже ПОСЛЕ
+    того, как архив был открыт на запись, то есть портила предыдущий фид.
+    """
     count = 0
-    for row in rows:
-        writer.writerow(row)
-        count += 1
-    archive.writestr(name, buffer.getvalue().encode("utf-8"))
+    with archive.open(name, "w") as raw:
+        stream = io.TextIOWrapper(raw, encoding="utf-8", newline="")
+        writer = csv.writer(stream, lineterminator="\n")
+        writer.writerow(columns)
+        for row in rows:
+            writer.writerow(row)
+            count += 1
+        stream.flush()
+        # Отцепляем обёртку до выхода из `with`: иначе поток архива закрылся бы дважды —
+        # здесь и при сборке мусора у `TextIOWrapper`.
+        stream.detach()
     return count
 
 
-def build(data_dir: Path, out: Path) -> int:
+def build(data_dir: Path, out: Path, *, with_metro: bool = True) -> int:
     missing = [n for n in SOURCES.values() if not (data_dir / n).exists()]
     if missing:
         print(f"Не хватает выгрузок в {data_dir}:")
@@ -288,29 +316,63 @@ def build(data_dir: Path, out: Path) -> int:
     used_services = {trips[t][1] for t in by_trip}
     used_routes = {trips[t][0] for t in by_trip}
 
+    # --- метро, МЦК и МЦД --------------------------------------------------------
+    # Границы календаря берутся у наземного транспорта: рельсовая часть должна
+    # действовать ровно в те же дни, иначе в одни даты фид будет с метро, в другие без.
+    span = [(row[8], row[9]) for row in calendar if row[0] in used_services]
+    start_date = min(s for s, _ in span) if span else "20240101"
+    end_date = max(e for _, e in span) if span else "20301231"
+    metro = build_metro(data_dir, start_date, end_date) if with_metro else None
+    if metro is None:
+        print("    метро: не добавлено" + ("" if with_metro else " (--no-metro)"))
+        if with_metro:
+            print(f"      нет {data_dir / 'метро.json'} — соберите: python tools/osm_metro.py")
+    else:
+        for note in metro.notes:
+            print(f"    метро: {note}")
+
     # --- запись ------------------------------------------------------------------
+    # Каждая таблица склеивается из двух источников, и порядок везде один: сначала
+    # наземный транспорт, затем рельсовый. Не ради красоты — иначе архив от прогона
+    # к прогону получался бы разным побайтово при тех же данных.
     out.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
         n_agency = _write(archive, "agency.txt",
                           ["agency_id", "agency_name", "agency_url", "agency_timezone"],
-                          agencies)
+                          chain(agencies, metro.agency if metro else ()))
         n_stops = _write(archive, "stops.txt",
                          ["stop_id", "stop_name", "stop_lat", "stop_lon"],
-                         ((code, stops[code][0], f"{stops[code][1]:.6f}", f"{stops[code][2]:.6f}")
-                          for code in sorted(used_stops)))
+                         chain(
+                             ((code, stops[code][0],
+                               f"{stops[code][1]:.6f}", f"{stops[code][2]:.6f}")
+                              for code in sorted(used_stops)),
+                             metro.stops if metro else (),
+                         ))
+        # `route_color` — единственная колонка сверх минимального GTFS. На расчёт она не
+        # влияет, но без неё карта не может покрасить линию метро в её собственный цвет,
+        # а у наземного транспорта в выгрузке цвета нет — поле остаётся пустым.
         n_routes = _write(archive, "routes.txt",
                           ["route_id", "agency_id", "route_short_name",
-                           "route_long_name", "route_type"],
-                          ((code, *routes[code]) for code in sorted(used_routes)))
+                           "route_long_name", "route_type", "route_color"],
+                          chain(
+                              ((code, *routes[code], "") for code in sorted(used_routes)),
+                              metro.routes if metro else (),
+                          ))
         n_cal = _write(archive, "calendar.txt",
                        ["service_id", "monday", "tuesday", "wednesday", "thursday",
                         "friday", "saturday", "sunday", "start_date", "end_date"],
-                       (row for row in calendar if row[0] in used_services))
+                       chain(
+                           (row for row in calendar if row[0] in used_services),
+                           metro.calendar if metro else (),
+                       ))
         n_trips = _write(archive, "trips.txt",
                          ["route_id", "service_id", "trip_id", "direction_id", "trip_headsign"],
-                         ((trips[t][0], trips[t][1], t, trips[t][2],
-                           _headsign(routes[trips[t][0]][2], trips[t][2]))
-                          for t in sorted(by_trip)))
+                         chain(
+                             ((trips[t][0], trips[t][1], t, trips[t][2],
+                               _headsign(routes[trips[t][0]][2], trips[t][2]))
+                              for t in sorted(by_trip)),
+                             metro.trips if metro else (),
+                         ))
 
         def stop_time_rows():
             for trip in sorted(by_trip):
@@ -320,7 +382,13 @@ def build(data_dir: Path, out: Path) -> int:
         n_times = _write(archive, "stop_times.txt",
                          ["trip_id", "arrival_time", "departure_time",
                           "stop_id", "stop_sequence"],
-                         stop_time_rows())
+                         chain(stop_time_rows(), metro.stop_times if metro else ()))
+        n_transfers = 0
+        if metro and metro.transfers:
+            n_transfers = _write(archive, "transfers.txt",
+                                 ["from_stop_id", "to_stop_id",
+                                  "transfer_type", "min_transfer_time"],
+                                 metro.transfers)
 
     size = out.stat().st_size / 1024 / 1024
     print(f"\nСобрано: {out} ({size:.1f} МБ)")
@@ -330,6 +398,8 @@ def build(data_dir: Path, out: Path) -> int:
     print(f"    calendar.txt   {n_cal}")
     print(f"    trips.txt      {n_trips}")
     print(f"    stop_times.txt {n_times}")
+    if n_transfers:
+        print(f"    transfers.txt  {n_transfers}")
     print(f"\nДальше: python tools/gtfs_check.py {out}")
     return 0
 
@@ -340,8 +410,10 @@ def main() -> int:
                         help="каталог с выгрузками портала")
     parser.add_argument("--out", type=Path, default=ROOT / "deploy" / "ors" / "files" / "gtfs.zip",
                         help="куда положить архив")
+    parser.add_argument("--no-metro", dest="metro", action="store_false",
+                        help="собрать только наземный транспорт")
     args = parser.parse_args()
-    return build(args.data, args.out)
+    return build(args.data, args.out, with_metro=args.metro)
 
 
 if __name__ == "__main__":
