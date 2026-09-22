@@ -1,3 +1,6 @@
+import type { CalendarDate } from '@internationalized/date'
+import { getLocalTimeZone } from '@internationalized/date'
+
 const timeFormatter = new Intl.DateTimeFormat('ru-RU', {
   hour: '2-digit',
   minute: '2-digit',
@@ -11,6 +14,12 @@ const dateTimeFormatter = new Intl.DateTimeFormat('ru-RU', {
   minute: '2-digit',
 })
 
+const dayLabelFormatter = new Intl.DateTimeFormat('ru-RU', {
+  day: 'numeric',
+  month: 'long',
+  weekday: 'short',
+})
+
 export function formatTime(value: string | Date): string {
   const date = typeof value === 'string' ? new Date(value) : value
   return timeFormatter.format(date)
@@ -19,4 +28,14 @@ export function formatTime(value: string | Date): string {
 export function formatDateTime(value: string | Date): string {
   const date = typeof value === 'string' ? new Date(value) : value
   return dateTimeFormatter.format(date)
+}
+
+export function formatDayLabel(value: CalendarDate | Date): string {
+  const date =
+    value instanceof Date ? value : value.toDate(getLocalTimeZone())
+  const parts = dayLabelFormatter.formatToParts(date)
+  const day = parts.find((part) => part.type === 'day')?.value ?? ''
+  const month = parts.find((part) => part.type === 'month')?.value ?? ''
+  const weekday = parts.find((part) => part.type === 'weekday')?.value ?? ''
+  return `${day} ${month}, ${weekday}`
 }

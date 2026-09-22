@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { AppNav, AppPanel, BrandBar } from '@/shared/ui'
+import { AppNav, AppPanel, BrandBar, ContextHeader } from '@/shared/ui'
 
 type HomeAreaLayoutProps = {
   children?: ReactNode
@@ -15,7 +15,7 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col gap-4">
-        <AppPanel className="h-[60px] shrink-0" />
+        <ContextHeader />
         <div className="flex min-h-0 flex-1 flex-col gap-4">
           {children ?? <AppPanel className="min-h-0 flex-1" />}
         </div>

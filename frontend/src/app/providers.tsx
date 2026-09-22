@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { I18nProvider } from '@heroui/react'
 import { Provider } from 'react-redux'
 import { BrowserRouter } from 'react-router'
 
@@ -11,7 +12,9 @@ type AppProvidersProps = {
 export function AppProviders({ children }: AppProvidersProps) {
   return (
     <Provider store={store}>
-      <BrowserRouter>{children}</BrowserRouter>
+      <I18nProvider locale="ru-RU">
+        <BrowserRouter>{children}</BrowserRouter>
+      </I18nProvider>
     </Provider>
   )
 }
