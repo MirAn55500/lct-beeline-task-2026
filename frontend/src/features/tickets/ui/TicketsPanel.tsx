@@ -1,13 +1,18 @@
-import { useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { ScrollShadow } from '@heroui/react'
 import {
-  RiEqualizer2Line,
   RiErrorWarningLine,
   RiSearchLine,
   RiTimeLine,
 } from '@remixicon/react'
 
 import { cn } from '@/shared/lib/cn'
+import {
+  EMPTY_TICKETS_FILTERS,
+  ticketMatchesTimeWindow,
+  TicketsFiltersPopover,
+  type TicketsFiltersState,
+} from './TicketsFiltersPopover'
 
 export type UnassignedTicket = {
   id: string
@@ -23,23 +28,23 @@ const MOCK_TICKETS: UnassignedTicket[] = [
     id: '1',
     number: '74198',
     category: 'Подключение',
-    reason: 'Нет инженера на время',
+    reason: 'Нет рабочего времени',
     window: '10:00 - 12:00',
     address: 'Волгоградский пр-т, 128, корп. 5',
   },
   {
     id: '2',
     number: '24980',
-    category: 'Авария',
-    reason: 'Нет инженера с нужным навыком',
+    category: 'Аварийные работы',
+    reason: 'Нет нужного навыка',
     window: '12:00 - 14:00',
     address: 'Семёновская набережная, д. 3/1, корп. 2',
   },
   {
     id: '3',
     number: '48227',
-    category: 'Локальная заявка',
-    reason: 'Работа не помещается в смену',
+    category: 'Ремонт',
+    reason: 'Конфликт времени',
     window: '18:00 - 20:00',
     address: 'ул. Саратовская, 16',
   },
@@ -47,39 +52,39 @@ const MOCK_TICKETS: UnassignedTicket[] = [
     id: '4',
     number: '86160',
     category: 'Подключение',
-    reason: 'Нет свободного инженера',
+    reason: 'Нет инженера в регионе',
     window: '18:00 - 20:00',
     address: 'пер. Маяковского, 2',
   },
   {
     id: '5',
     number: '24981',
-    category: 'Авария',
-    reason: 'Работа не помещается в смену',
+    category: 'Аварийные работы',
+    reason: 'Конфликт времени',
     window: '20:00 - 22:00',
     address: 'ул. Артюхиной, 3',
   },
   {
     id: '6',
     number: '30512',
-    category: 'Подключение',
-    reason: 'Нет инженера на время',
+    category: 'Дозаказ',
+    reason: 'Нет рабочего времени',
     window: '09:00 - 11:00',
     address: 'ул. Юных Ленинцев, 83, стр. 4',
   },
   {
     id: '7',
     number: '11844',
-    category: 'Локальная заявка',
-    reason: 'Нет свободного инженера',
+    category: 'Ремонт',
+    reason: 'Нет нужного снаряжения',
     window: '14:00 - 16:00',
     address: 'Рязанский пр-т, 46',
   },
   {
     id: '8',
     number: '67201',
-    category: 'Авария',
-    reason: 'Нет инженера с нужным навыком',
+    category: 'Аварийные работы',
+    reason: 'Нет нужного навыка',
     window: '16:00 - 18:00',
     address: 'ул. Авиамоторная, 12',
   },
@@ -152,30 +157,65 @@ function TicketCard({ ticket }: { ticket: UnassignedTicket }) {
   )
 }
 
+function applyTicketFilters(
+  tickets: UnassignedTicket[],
+  query: string,
+  filters: TicketsFiltersState,
+) {
+  const q = query.trim().toLowerCase()
+
+  return tickets.filter((ticket) => {
+    if (q) {
+      const matchesQuery =
+        ticket.number.toLowerCase().includes(q) ||
+        ticket.address.toLowerCase().includes(q) ||
+        ticket.category.toLowerCase().includes(q) ||
+        ticket.reason.toLowerCase().includes(q)
+      if (!matchesQuery) return false
+    }
+
+    if (
+      filters.workTypes.length > 0 &&
+      !filters.workTypes.includes(ticket.category)
+    ) {
+      return false
+    }
+
+    if (
+      filters.reasons.length > 0 &&
+      !filters.reasons.includes(ticket.reason)
+    ) {
+      return false
+    }
+
+    return ticketMatchesTimeWindow(
+      ticket.window,
+      filters.timeFrom,
+      filters.timeTo,
+    )
+  })
+}
+
 type TicketsPanelProps = {
   className?: string
   tickets?: UnassignedTicket[]
-  totalCount?: number
 }
 
 export function TicketsPanel({
   className,
   tickets = MOCK_TICKETS,
-  totalCount,
 }: TicketsPanelProps) {
   const [query, setQuery] = useState('')
-  const count = totalCount ?? tickets.length
+  const [filters, setFilters] = useState<TicketsFiltersState>(
+    EMPTY_TICKETS_FILTERS,
+  )
 
-  const filtered = query.trim()
-    ? tickets.filter((ticket) => {
-        const q = query.trim().toLowerCase()
-        return (
-          ticket.number.toLowerCase().includes(q) ||
-          ticket.address.toLowerCase().includes(q) ||
-          ticket.category.toLowerCase().includes(q)
-        )
-      })
-    : tickets
+  const filtered = useMemo(
+    () => applyTicketFilters(tickets, query, filters),
+    [tickets, query, filters],
+  )
+
+  const count = filtered.length
 
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col', className)}>
@@ -204,13 +244,7 @@ export function TicketsPanel({
           />
         </label>
 
-        <button
-          type="button"
-          className="inline-flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-[8px] border border-[#dedee0] bg-white px-4 text-sm font-medium leading-5 text-[#18181b] transition-colors hover:bg-[#f5f5f5]"
-        >
-          <RiEqualizer2Line size={16} className="shrink-0 text-[#18181b]" />
-          Фильтры
-        </button>
+        <TicketsFiltersPopover value={filters} onChange={setFilters} />
       </div>
 
       <ScrollShadow
@@ -220,9 +254,15 @@ export function TicketsPanel({
         orientation="vertical"
       >
         <div>
-          {filtered.map((ticket) => (
-            <TicketCard key={ticket.id} ticket={ticket} />
-          ))}
+          {filtered.length > 0 ? (
+            filtered.map((ticket) => (
+              <TicketCard key={ticket.id} ticket={ticket} />
+            ))
+          ) : (
+            <p className="px-5 py-8 text-center text-sm text-[#71717a]">
+              Нет заявок по выбранным фильтрам
+            </p>
+          )}
         </div>
       </ScrollShadow>
     </div>

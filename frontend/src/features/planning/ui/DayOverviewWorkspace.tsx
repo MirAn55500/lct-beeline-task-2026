@@ -89,7 +89,7 @@ export function DayOverviewWorkspace({
       <div className="flex min-h-0 flex-1 gap-4">
         <AppPanel className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {hasTickets ? (
-            <TicketsPanel tickets={tickets} totalCount={52} />
+            <TicketsPanel tickets={tickets} />
           ) : (
             <>
               <PanelHeading
