@@ -1,6 +1,7 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Optional
 
+from sqlalchemy import Column, Date, text
 from sqlmodel import Field, Relationship
 
 from core.base_model import BaseTable
@@ -21,6 +22,9 @@ class Request(BaseTable, table=True):
 
     request_id: Optional[int] = Field(default=None, primary_key=True)
     address_id: int = Field(foreign_key="addresses.address_id")
+    date: date = Field(
+        sa_column=Column(Date, nullable=False, server_default=text("now()"))
+    )
     plan_start_time: datetime
     plan_end_time: datetime
     priority_id: int = Field(foreign_key="dicts.dict_id")

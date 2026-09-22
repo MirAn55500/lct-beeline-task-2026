@@ -1,6 +1,7 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Optional
 
+from sqlalchemy import Column, Date, text
 from sqlmodel import Field, Relationship
 
 from core.base_model import BaseTable
@@ -16,6 +17,9 @@ class Plan(BaseTable, table=True):
 
     plan_id: Optional[int] = Field(default=None, primary_key=True)
     version: int
+    date: date = Field(
+        sa_column=Column(Date, nullable=False, server_default=text("now()"))
+    )
     created_at: datetime
     reference_plan_id: Optional[int] = Field(default=None, foreign_key="plans.plan_id")
 
