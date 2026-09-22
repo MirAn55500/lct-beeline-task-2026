@@ -7,6 +7,8 @@ import {
   RiSettings4Line,
 } from '@remixicon/react'
 
+import { routes } from '@/shared/config/routes'
+
 export type NavIcon = ComponentType<{ size?: number | string; className?: string }>
 
 export type NavItem = {
@@ -18,32 +20,31 @@ export type NavItem = {
 
 export const navPrimaryItems: NavItem[] = [
   {
-    to: '/layouts/home',
+    to: routes.overview,
     label: 'Обзор дня',
     icon: RiHome5Line,
-    match: (pathname) => pathname === '/layouts/home',
+    match: (pathname) => pathname === routes.overview,
   },
   {
-    to: '/layouts/gantt',
+    to: routes.planGantt,
     label: 'План работ',
     icon: RiCalendarScheduleLine,
-    match: (pathname) =>
-      pathname.startsWith('/layouts/gantt') || pathname.startsWith('/layouts/map'),
+    match: (pathname) => pathname.startsWith(routes.plan),
   },
   {
-    to: '/layouts/personnel',
+    to: routes.personnel,
     label: 'Персонал',
     icon: RiGroupLine,
   },
   {
-    to: '/layouts/config',
+    to: routes.config,
     label: 'Конфигурация',
     icon: RiSettings4Line,
   },
 ]
 
 export const navHelpItem: NavItem = {
-  to: '/layouts/help',
+  to: routes.help,
   label: 'Помощь',
   icon: RiQuestionLine,
 }

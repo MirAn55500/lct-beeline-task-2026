@@ -9,6 +9,7 @@ import {
 import { Link } from 'react-router'
 import type { ComponentType } from 'react'
 
+import { routes } from '@/shared/config/routes'
 import { cn } from '@/shared/lib/cn'
 
 type TransportKind = 'public' | 'bike' | 'car'
@@ -166,10 +167,11 @@ export function EngineersPanel({
 
       <div className="shrink-0 px-5 pb-5 pt-2">
         <Link
-          to="/layouts/personnel"
+          to={routes.personnel}
           className="flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-[var(--border-radius-button-md)] border border-[#dedee0] text-sm font-medium text-foreground transition-colors hover:bg-[#f5f5f5]"
         >
           Перейти к инженерам
+          <RiArrowRightSLine size={16} className="shrink-0" />
         </Link>
       </div>
     </div>
