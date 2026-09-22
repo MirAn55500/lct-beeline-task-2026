@@ -5,12 +5,20 @@ import {
   WorkAreaGanttLayout,
   WorkAreaMapLayout,
 } from '@/app/layouts'
+import { DayOverviewWorkspace } from '@/features/planning'
 
 export function AppRouter() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/layouts/home" replace />} />
-      <Route path="/layouts/home" element={<HomeAreaLayout />} />
+      <Route
+        path="/layouts/home"
+        element={
+          <HomeAreaLayout>
+            <DayOverviewWorkspace />
+          </HomeAreaLayout>
+        }
+      />
       <Route path="/layouts/gantt" element={<WorkAreaGanttLayout />} />
       <Route path="/layouts/map" element={<WorkAreaMapLayout />} />
       <Route path="/layouts/personnel" element={<HomeAreaLayout />} />
