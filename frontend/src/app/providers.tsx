@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Provider } from 'react-redux'
+import { BrowserRouter } from 'react-router'
 
 import { store } from '@/app/store'
 
@@ -8,5 +9,9 @@ type AppProvidersProps = {
 }
 
 export function AppProviders({ children }: AppProvidersProps) {
-  return <Provider store={store}>{children}</Provider>
+  return (
+    <Provider store={store}>
+      <BrowserRouter>{children}</BrowserRouter>
+    </Provider>
+  )
 }

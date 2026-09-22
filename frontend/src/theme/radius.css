@@ -4,7 +4,7 @@
     --border-radius-button-sm: 6px;
     --border-radius-button-md: 8px;
     --border-radius-button-lg: 12px;
-    --border-radius-panel: 20px;
+    --border-radius-panel: 16px;
 
     /* HeroUI's native base radius drives the remaining component scale. */
     --radius: var(--border-radius);
