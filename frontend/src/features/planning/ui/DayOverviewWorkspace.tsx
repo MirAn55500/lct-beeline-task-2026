@@ -1,6 +1,11 @@
 import beesPromo from '@/shared/assets/day-overview-bees-promo.png'
 import { EngineersPanel } from '@/features/personnel'
-import { TicketsDropzone } from '@/features/tickets'
+import {
+  MOCK_TICKETS,
+  TicketsDropzone,
+  TicketsPanel,
+  type UnassignedTicket,
+} from '@/features/tickets'
 import { DEFAULT_REGION } from '@/shared/config/context'
 import { cn } from '@/shared/lib/cn'
 import { AppPanel } from '@/shared/ui'
@@ -42,7 +47,23 @@ function SummaryCounter({
   )
 }
 
-export function DayOverviewWorkspace({ className }: { className?: string }) {
+type DayOverviewWorkspaceProps = {
+  className?: string
+  isUploading?: boolean
+  onFiles?: (files: File[]) => void | Promise<void>
+  /** Временно: мок загруженных заявок. Пустой массив → uploader. */
+  tickets?: UnassignedTicket[]
+}
+
+export function DayOverviewWorkspace({
+  className,
+  isUploading = false,
+  onFiles,
+  // Временно показываем заполненное состояние списка заявок
+  tickets = MOCK_TICKETS,
+}: DayOverviewWorkspaceProps) {
+  const hasTickets = tickets.length > 0
+
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col gap-4', className)}>
       <AppPanel className="flex h-24 shrink-0 items-center justify-between gap-4 px-5">
@@ -56,18 +77,28 @@ export function DayOverviewWorkspace({ className }: { className?: string }) {
         </div>
 
         <div className="flex min-w-0 flex-1 gap-4">
-          <SummaryCounter value={0} total={0} label="заявок назначено" />
+          <SummaryCounter
+            value={0}
+            total={hasTickets ? tickets.length : 0}
+            label="заявок назначено"
+          />
           <SummaryCounter value={0} total={0} label="инженеров задействовано" />
         </div>
       </AppPanel>
 
       <div className="flex min-h-0 flex-1 gap-4">
-        <AppPanel className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <PanelHeading
-            title="Нет ни одной заявки"
-            description="Загрузите заявки для начала работы алгоритма"
-          />
-          <TicketsDropzone />
+        <AppPanel className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          {hasTickets ? (
+            <TicketsPanel tickets={tickets} totalCount={52} />
+          ) : (
+            <>
+              <PanelHeading
+                title="Нет ни одной заявки"
+                description="Загрузите заявки для начала работы алгоритма"
+              />
+              <TicketsDropzone isUploading={isUploading} onFiles={onFiles} />
+            </>
+          )}
         </AppPanel>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">

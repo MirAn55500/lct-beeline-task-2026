@@ -46,7 +46,17 @@ function ContextSelect({
   )
 }
 
-export function ContextHeader({ className }: { className?: string }) {
+type ContextHeaderProps = {
+  className?: string
+  isUploadDisabled?: boolean
+  onUploadClick?: () => void
+}
+
+export function ContextHeader({
+  className,
+  isUploadDisabled = false,
+  onUploadClick,
+}: ContextHeaderProps) {
   const [region, setRegion] = useState<Region>(DEFAULT_REGION)
   const [date, setDate] = useState<CalendarDate>(DEFAULT_DATE)
   const [regionOpen, setRegionOpen] = useState(false)
@@ -207,7 +217,9 @@ export function ContextHeader({ className }: { className?: string }) {
 
         <button
           type="button"
-          className="flex h-9 cursor-pointer items-center gap-2 rounded-[var(--border-radius-button-md)] bg-[#0485f7] px-4 text-sm font-medium text-[#fcfcfc] transition-colors hover:bg-[#0374d9]"
+          disabled={isUploadDisabled}
+          onClick={onUploadClick}
+          className="flex h-9 cursor-pointer items-center gap-2 rounded-[var(--border-radius-button-md)] bg-[#0485f7] px-4 text-sm font-medium text-[#fcfcfc] transition-colors hover:bg-[#0374d9] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[#0485f7]"
         >
           <RiUploadCloud2Line size={16} className="shrink-0" />
           Загрузить заявки
