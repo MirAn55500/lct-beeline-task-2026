@@ -11,8 +11,8 @@
    называют GTFS, хотя времён в них нет. Без `stop_times.txt` профиль бесполезен.
 2. Расписание ещё действует? Календарь с истёкшим сроком даёт пустую выдачу.
 3. Покрывает ли фид наши адреса? Городской фид закрывает малую часть области, и на
-   остальном линия маршрута просто не построится. Времени и расстояния это не
-   затрагивает: матрица у этого профиля не берётся в любом случае (planner/ors.py).
+   остальном маршрут просто не построится — такая пара точек уйдёт на расчёт по
+   координатам с пометкой в `warnings` плана (planner/ors.py).
 
 Запуск:
     python tools/gtfs_check.py deploy/ors/files/gtfs.zip
@@ -29,6 +29,7 @@ import csv
 import io
 import sys
 import zipfile
+from collections import Counter
 from datetime import date
 from pathlib import Path
 
@@ -41,6 +42,14 @@ from planner.io_csv import build_scenario, find_dataset_dir  # noqa: E402
 # взаимозаменяемы, поэтому проверяются отдельно.
 REQUIRED = ("agency.txt", "routes.txt", "trips.txt", "stops.txt", "stop_times.txt")
 CALENDARS = ("calendar.txt", "calendar_dates.txt")
+
+# `route_type` по спецификации GTFS. Троллейбус (11) и монорельс (12) — из расширенного
+# набора: валидатор conveyal внутри ORS о них не знает и ругается, но фид принимает.
+ROUTE_TYPES = {
+    "0": "трамвай", "1": "метро", "2": "электричка", "3": "автобус", "4": "паром",
+    "5": "кабельный трамвай", "6": "канатная дорога", "7": "фуникулёр",
+    "11": "троллейбус", "12": "монорельс",
+}
 
 
 def _rows(archive: zipfile.ZipFile, name: str):
@@ -131,10 +140,20 @@ def check(path: Path, wanted: tuple[float, float, float, float] | None) -> bool:
 
         stops = sum(1 for _ in _rows(archive, "stops.txt"))
         trips = sum(1 for _ in _rows(archive, "trips.txt"))
-        routes = sum(1 for _ in _rows(archive, "routes.txt"))
+        kinds: Counter[str] = Counter()
+        routes = 0
+        for row in _rows(archive, "routes.txt"):
+            routes += 1
+            kinds[ROUTE_TYPES.get((row.get("route_type") or "").strip(), "прочее")] += 1
         agencies = [(r.get("agency_name") or "?").strip() for r in _rows(archive, "agency.txt")]
         print(f"    состав: {routes} маршрутов, {trips} рейсов, {stops} остановок")
+        # Разбивка по видам транспорта — самая быстрая проверка того, что в фид попало
+        # всё, что должно: отсутствие метро в московском фиде видно сразу, а по общему
+        # числу маршрутов — нет.
+        print("    виды: " + ", ".join(f"{name} {count}" for name, count in kinds.most_common()))
         print(f"    перевозчики: {', '.join(agencies[:5])}{'…' if len(agencies) > 5 else ''}")
+        if "transfers.txt" in names:
+            print(f"    пересадки: {sum(1 for _ in _rows(archive, 'transfers.txt'))} записей")
 
         usable = True
         span = _service_dates(archive, names)

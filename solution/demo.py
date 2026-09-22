@@ -86,6 +86,12 @@ def main() -> int:
         f"(по умолчанию {DEFAULT_BASE_URL}); без флага берётся кэш data/routing_cache.json, "
         "а если и его нет — расчёт по координатам",
     )
+    parser.add_argument(
+        "--transit",
+        action="store_true",
+        help="досчитать общественный транспорт по расписанию (десятки минут; "
+             "обычно кэш греют через tools/ors_prefetch.py --transit)",
+    )
     args = parser.parse_args()
 
     title, synthetic, control = SOURCES[args.region]
@@ -108,7 +114,7 @@ def main() -> int:
 
     # Модель перемещения — единственное, что меняется от подключения ORS:
     # алгоритм, расписание и метрики считаются ровно теми же функциями.
-    routing = setup_routing(scenario, url=args.ors)
+    routing = setup_routing(scenario, url=args.ors, transit=args.transit)
     print(
         "  Расстояния: "
         + ("по улицам (openrouteservice)" if routing.enabled else "по координатам (гаверсинус)")
@@ -145,6 +151,10 @@ def main() -> int:
                 f"прибытие {visit.arrival_at:%H:%M}, работа {visit.service_start_at:%H:%M}–"
                 f"{visit.service_end_at:%H:%M}"
             )
+            # Для общественного транспорта «40 минут в пути» — это ещё не ответ:
+            # инженеру нужно знать, на чём ехать и где садиться.
+            for leg in visit.transit:
+                print(f"         · {leg.title}")
         if len(route.visits) > 3:
             print(f"      … ещё {len(route.visits) - 3}")
     if len(optimized.routes) > 4:
