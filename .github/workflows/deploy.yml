@@ -34,5 +34,14 @@ jobs:
           CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
         run: |
           set -e
+          if [ -z "$DATABASE_URL" ]; then
+            echo "Set repository secret DATABASE_URL (same remote Postgres as local)."
+            exit 1
+          fi
           docker compose up -d --build backend frontend
           docker compose ps
+          docker compose logs --tail=80 backend
+          curl -fsS "http://127.0.0.1:${FRONTEND_PORT:-8080}/api/catalogs/health"
+          echo
+          curl -fsS "http://127.0.0.1:${BACKEND_PORT:-8000}/health"
+          echo
