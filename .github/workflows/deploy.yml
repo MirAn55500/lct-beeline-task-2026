@@ -1,12 +1,13 @@
-name: Deploy frontend
+name: Deploy
 
 on:
   push:
     branches: [main]
     paths:
+      - "backend/**"
       - "frontend/**"
       - "docker-compose.yml"
-      - ".github/workflows/deploy-frontend.yml"
+      - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
 concurrency:
