@@ -64,6 +64,7 @@ def _matches_query(
 
 class TicketsService:
     def __init__(self, session: AsyncSession) -> None:
+        self._session = session
         self._repo = TicketsRepository(session)
 
     def health(self) -> dict[str, str]:
