@@ -5,11 +5,12 @@ on:
     branches: [main]
     paths:
       - "frontend/**"
+      - "docker-compose.yml"
       - ".github/workflows/deploy-frontend.yml"
   workflow_dispatch:
 
 concurrency:
-  group: deploy-frontend
+  group: deploy-app
   cancel-in-progress: true
 
 jobs:
@@ -19,11 +20,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Deploy frontend
+      - name: Deploy app
         env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          POSTGRES_USER: ${{ vars.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ vars.POSTGRES_DB }}
+          POSTGRES_PORT: ${{ vars.POSTGRES_PORT }}
+          DEBUG: ${{ vars.DEBUG }}
+          BACKEND_PORT: ${{ vars.BACKEND_PORT }}
           FRONTEND_PORT: ${{ vars.FRONTEND_PORT }}
+          CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
         run: |
           set -e
-          docker compose build frontend
-          docker compose up -d --no-deps frontend
-          docker compose ps frontend
+          docker compose up -d --build backend frontend
+          docker compose ps

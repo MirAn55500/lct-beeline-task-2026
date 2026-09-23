@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-backend
+  group: deploy-app
   cancel-in-progress: true
 
 jobs:
@@ -20,16 +20,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Deploy backend
+      - name: Deploy app
         env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           POSTGRES_USER: ${{ vars.POSTGRES_USER }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           POSTGRES_DB: ${{ vars.POSTGRES_DB }}
           POSTGRES_PORT: ${{ vars.POSTGRES_PORT }}
           DEBUG: ${{ vars.DEBUG }}
           BACKEND_PORT: ${{ vars.BACKEND_PORT }}
+          FRONTEND_PORT: ${{ vars.FRONTEND_PORT }}
           CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
         run: |
           set -e
-          docker compose up -d --build backend
+          docker compose up -d --build backend frontend
           docker compose ps
