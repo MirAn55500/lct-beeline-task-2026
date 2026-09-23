@@ -23,10 +23,10 @@ jobs:
 
       - name: Deploy app
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           POSTGRES_USER: ${{ vars.POSTGRES_USER }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           POSTGRES_DB: ${{ vars.POSTGRES_DB }}
+          POSTGRES_HOST: ${{ vars.POSTGRES_HOST }}
           POSTGRES_PORT: ${{ vars.POSTGRES_PORT }}
           DEBUG: ${{ vars.DEBUG }}
           BACKEND_PORT: ${{ vars.BACKEND_PORT }}
@@ -34,8 +34,14 @@ jobs:
           CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
         run: |
           set -e
-          if [ -z "$DATABASE_URL" ]; then
-            echo "Set repository secret DATABASE_URL (same remote Postgres as local)."
+          missing=
+          [ -n "$POSTGRES_USER" ] || missing="$missing POSTGRES_USER"
+          [ -n "$POSTGRES_PASSWORD" ] || missing="$missing POSTGRES_PASSWORD"
+          [ -n "$POSTGRES_DB" ] || missing="$missing POSTGRES_DB"
+          [ -n "$POSTGRES_HOST" ] || missing="$missing POSTGRES_HOST"
+          if [ -n "$missing" ]; then
+            echo "Missing required settings:$missing"
+            echo "Need vars POSTGRES_USER/DB/HOST/PORT and secret POSTGRES_PASSWORD."
             exit 1
           fi
           docker compose up -d --build backend frontend
