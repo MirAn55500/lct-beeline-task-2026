@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date as date_type, datetime
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import Column, Date, text
@@ -21,8 +21,9 @@ class Request(BaseTable, table=True):
     __tablename__ = "requests"
 
     request_id: Optional[int] = Field(default=None, primary_key=True)
+    external_id: str
     address_id: int = Field(foreign_key="addresses.address_id")
-    date: date = Field(
+    date: date_type = Field(
         sa_column=Column(Date, nullable=False, server_default=text("now()"))
     )
     plan_start_time: datetime

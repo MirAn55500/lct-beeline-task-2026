@@ -16,6 +16,21 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/lct"
     cors_origins: list[str] = ["http://localhost:5173"]
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def use_asyncpg_driver(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        for prefix in (
+            "postgresql+psycopg2://",
+            "postgresql+psycopg://",
+            "postgresql://",
+            "postgres://",
+        ):
+            if value.startswith(prefix):
+                return "postgresql+asyncpg://" + value[len(prefix) :]
+        return value
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: object) -> object:

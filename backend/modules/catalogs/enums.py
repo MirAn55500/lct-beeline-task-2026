@@ -14,3 +14,4 @@ class DictGroup(StrEnum):
     UPLOAD_TYPE = "upload_type"
     FILE_TYPE = "file_type"
     SNAPSHOT_ACTION = "snapshot_action"
+    UNASSIGNED_REASON = "unassigned_reason"

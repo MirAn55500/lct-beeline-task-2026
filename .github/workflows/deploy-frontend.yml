@@ -1,0 +1,29 @@
+name: Deploy frontend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/deploy-frontend.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-frontend
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy frontend
+        env:
+          FRONTEND_PORT: ${{ vars.FRONTEND_PORT }}
+        run: |
+          set -e
+          docker compose build frontend
+          docker compose up -d --no-deps frontend
+          docker compose ps frontend

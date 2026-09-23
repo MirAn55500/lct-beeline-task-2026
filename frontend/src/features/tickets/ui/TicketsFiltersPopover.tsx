@@ -4,6 +4,7 @@ import {
   ListBox,
   Popover,
   Select,
+  Switch,
   TimeField,
 } from '@heroui/react'
 import { Time } from '@internationalized/date'
@@ -31,7 +32,10 @@ export const REASON_OPTIONS = [
   'Нет инженера в регионе',
 ] as const
 
+export type TicketAssignmentFilter = 'all' | 'assigned' | 'unassigned'
+
 export type TicketsFiltersState = {
+  assignment: TicketAssignmentFilter
   workTypes: string[]
   reasons: string[]
   timeFrom: string | null
@@ -39,10 +43,21 @@ export type TicketsFiltersState = {
 }
 
 export const EMPTY_TICKETS_FILTERS: TicketsFiltersState = {
+  assignment: 'all',
   workTypes: [],
   reasons: [],
   timeFrom: null,
   timeTo: null,
+}
+
+export function hasActiveTicketFilters(filters: TicketsFiltersState) {
+  return (
+    filters.assignment !== 'all' ||
+    filters.workTypes.length > 0 ||
+    filters.reasons.length > 0 ||
+    filters.timeFrom !== null ||
+    filters.timeTo !== null
+  )
 }
 
 function parseTime(value: string | null): Time | null {
@@ -250,16 +265,36 @@ export function TicketsFiltersPopover({
     if (open) setDraft(value)
   }, [open, value])
 
+  const filtersActive = hasActiveTicketFilters(value)
+
   return (
     <Popover isOpen={open} onOpenChange={setOpen}>
       <Popover.Trigger
+        aria-label={filtersActive ? 'Фильтры, есть выбранные' : 'Фильтры'}
         className={cn(
           'inline-flex h-9 shrink-0 cursor-pointer items-center gap-2 border border-[#dedee0] text-sm font-medium leading-5 text-[#18181b] transition-colors outline-none',
           open ? 'bg-[#ebebec]' : 'bg-white hover:bg-[#f5f5f5]',
         )}
         style={{ borderRadius: 8, padding: '8px 16px' }}
       >
-        <RiEqualizer2Line size={16} className="shrink-0 text-[#18181b]" />
+        <span className="relative inline-flex size-4 shrink-0">
+          <RiEqualizer2Line size={16} className="text-[#18181b]" />
+          {filtersActive ? (
+            <span
+              aria-hidden
+              className="absolute"
+              style={{
+                top: 0,
+                right: 1,
+                width: 4,
+                height: 4,
+                borderRadius: 999,
+                backgroundColor: '#ef2c56',
+                boxShadow: '0 0 0 1px #ffffff',
+              }}
+            />
+          ) : null}
+        </span>
         Фильтры
       </Popover.Trigger>
 
@@ -286,10 +321,33 @@ export function TicketsFiltersPopover({
               className="text-sm leading-6 text-[#71717a]"
               style={{ marginTop: 4 }}
             >
-              Найдите нераспределенные заявки
+              Найдите заявки в рабочем плане
             </p>
 
             <div className="flex flex-col" style={{ marginTop: 16, gap: 16 }}>
+              <Switch
+                className="w-full gap-0"
+                style={{ ['--switch-control-bg-checked' as string]: '#0485f7' }}
+                isSelected={draft.assignment === 'unassigned'}
+                onChange={(isSelected) =>
+                  setDraft((prev) => ({
+                    ...prev,
+                    assignment: isSelected ? 'unassigned' : 'all',
+                  }))
+                }
+              >
+                <Switch.Content className="flex h-6 w-full items-center justify-between">
+                  <span className="text-sm font-medium leading-6 text-[#18181b]">
+                    Только нераспределенные
+                  </span>
+                  <Switch.Control>
+                    <Switch.Thumb style={{ backgroundColor: '#ffffff' }} />
+                  </Switch.Control>
+                </Switch.Content>
+              </Switch>
+
+              <div className="h-px w-full bg-[#dedee0]" />
+
               <MultiFilterSelect
                 label="Вид работы"
                 placeholder="Выберите вид работы"

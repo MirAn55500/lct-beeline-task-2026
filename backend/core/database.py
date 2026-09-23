@@ -11,6 +11,8 @@ engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
     future=True,
+    pool_pre_ping=True,
+    pool_recycle=300,
 )
 
 async_session_factory = async_sessionmaker(

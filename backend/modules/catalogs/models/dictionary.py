@@ -1,5 +1,6 @@
 from typing import Optional
 
+from sqlalchemy import Column, String
 from sqlmodel import Field
 
 from core.base_model import BaseTable
@@ -13,4 +14,4 @@ class Dictionary(BaseTable, table=True):
 
     dict_id: Optional[int] = Field(default=None, primary_key=True)
     value: str
-    group: DictGroup = Field(index=True)
+    group: DictGroup = Field(sa_column=Column(String, nullable=False, index=True))

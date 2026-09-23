@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from modules.catalogs.models.area import Area
     from modules.catalogs.models.city import City
     from modules.personnel.models.brigade import Brigade
+    from modules.planning.models.plan import Plan
     from modules.tickets.models.request import Request
     from modules.tickets.models.upload_snapshot import UploadSnapshot
 
@@ -25,4 +26,5 @@ class Region(BaseTable, table=True):
     areas: list["Area"] = Relationship(back_populates="region")
     brigades: list["Brigade"] = Relationship(back_populates="region")
     requests: list["Request"] = Relationship(back_populates="region")
+    plans: list["Plan"] = Relationship(back_populates="region")
     upload_snapshots: list["UploadSnapshot"] = Relationship(back_populates="region")

@@ -9,8 +9,4 @@ export {
   WORK_TYPE_OPTIONS,
   type TicketsFiltersState,
 } from './ui/TicketsFiltersPopover'
-export {
-  MOCK_TICKETS,
-  TicketsPanel,
-  type UnassignedTicket,
-} from './ui/TicketsPanel'
+export { TicketsPanel, type Ticket } from './ui/TicketsPanel'

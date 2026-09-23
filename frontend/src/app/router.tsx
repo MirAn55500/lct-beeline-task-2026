@@ -12,12 +12,7 @@ import { routes } from '@/shared/config/routes'
 
 function isAcceptedTicketFile(file: File) {
   const name = file.name.toLowerCase()
-  return (
-    name.endsWith('.json') ||
-    name.endsWith('.csv') ||
-    file.type === 'application/json' ||
-    file.type === 'text/csv'
-  )
+  return name.endsWith('.csv') || file.type === 'text/csv'
 }
 
 function OverviewPage() {
@@ -26,18 +21,26 @@ function OverviewPage() {
   const [uploadTickets, { isLoading }] = useUploadTicketsMutation()
   const isUploading = pending || isLoading
 
-  const handleFiles = async (files: File[]) => {
+  const handleFiles = async (
+    files: File[],
+    regionId: number,
+    date: string,
+    focusDay: (isoDate: string) => void,
+  ) => {
     const file = files.find(isAcceptedTicketFile)
     if (!file || isUploading) return
 
     const body = new FormData()
     body.append('file', file)
+    body.append('region_id', String(regionId))
+    body.append('date', date)
 
     setPending(true)
     try {
-      await uploadTickets(body).unwrap()
+      const result = await uploadTickets(body).unwrap()
+      if (result.date) focusDay(result.date)
     } catch {
-      // Endpoint may not be ready yet — UI returns to idle either way.
+      // Ошибка загрузки возвращает дропзону в покой.
     } finally {
       setPending(false)
     }
@@ -50,20 +53,37 @@ function OverviewPage() {
         if (!isUploading) inputRef.current?.click()
       }}
     >
-      <input
-        ref={inputRef}
-        type="file"
-        accept=".json,.csv,application/json,text/csv"
-        className="sr-only"
-        tabIndex={-1}
-        disabled={isUploading}
-        onChange={async (event) => {
-          const files = Array.from(event.target.files ?? [])
-          event.target.value = ''
-          if (files.length > 0) await handleFiles(files)
-        }}
-      />
-      <DayOverviewWorkspace isUploading={isUploading} onFiles={handleFiles} />
+      {({ regionId, regionName, date, planId, focusDay }) => (
+        <>
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="sr-only"
+            tabIndex={-1}
+            disabled={isUploading || regionId == null}
+            onChange={async (event) => {
+              const files = Array.from(event.target.files ?? [])
+              event.target.value = ''
+              if (files.length > 0 && regionId != null) {
+                await handleFiles(files, regionId, date, focusDay)
+              }
+            }}
+          />
+          <DayOverviewWorkspace
+            regionId={regionId}
+            regionName={regionName}
+            date={date}
+            planId={planId}
+            isUploading={isUploading}
+            onFiles={
+              regionId == null
+                ? undefined
+                : (files) => handleFiles(files, regionId, date, focusDay)
+            }
+          />
+        </>
+      )}
     </HomeAreaLayout>
   )
 }

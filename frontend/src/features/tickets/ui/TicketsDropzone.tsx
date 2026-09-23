@@ -11,8 +11,6 @@ import {
 
 import { cn } from '@/shared/lib/cn'
 
-const ACCEPTED_TYPES = ['application/json', 'text/csv'] as const
-
 type TicketsDropzoneProps = {
   className?: string
   isUploading?: boolean
@@ -21,11 +19,7 @@ type TicketsDropzoneProps = {
 
 function isAccepted(file: File) {
   const name = file.name.toLowerCase()
-  return (
-    name.endsWith('.json') ||
-    name.endsWith('.csv') ||
-    ACCEPTED_TYPES.includes(file.type as (typeof ACCEPTED_TYPES)[number])
-  )
+  return name.endsWith('.csv') || file.type === 'text/csv'
 }
 
 function DropzoneSurface({
@@ -119,7 +113,7 @@ export function TicketsDropzone({
           )}
         >
           <FileTrigger
-            acceptedFileTypes={[...ACCEPTED_TYPES]}
+            acceptedFileTypes={['.csv', 'text/csv']}
             onSelect={async (list) => {
               if (!list) return
               await handleFiles(Array.from(list))
@@ -139,7 +133,7 @@ export function TicketsDropzone({
                 </Text>
                 <span className="text-xs leading-5 text-[#71717a]">
                   Нажмите на это поле или перетащите
-                  <br />в него json или csv файл
+                  <br />в него csv файл
                 </span>
               </div>
             </Button>
