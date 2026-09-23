@@ -12,7 +12,7 @@
 * интервал движения зависит от часа и от дня недели;
 * пересадочный узел — это разные остановки разных линий плюс явная пересадка;
 * ответвление линии не заводит вторых платформ на тех же станциях;
-* кольцевой рейс позволяет доехать с конца цепочки в её начало;
+* кольцевой рейс позволяет доехать с конца цепочки в её начало и не повторяет станций;
 * оба хода линии останавливаются на одних и тех же станциях;
 * координата остановки принадлежит её собственной линии, а не станции-однофамильцу;
 * цвет линии доезжает до фида в обеих записях, которыми его задаёт OSM.
@@ -268,18 +268,44 @@ def test_line_colour_survives_both_notations(feed):
 
 
 def test_circular_trip_lets_you_ride_past_the_start(feed):
-    """У кольца конечной нет, и рейс обязан это отражать.
+    """У кольца конечной нет, и рейсы обязаны это отражать.
 
     Иначе пассажиру с конца цепочки недоступно её начало: по данным поезд там уже
-    закончил ход. На Кольцевой это каждая десятая пара станций.
+    закончил ход. На Кольцевой это каждая десятая пара станций. Любая поездка до
+    полукруга по ходу должна укладываться в один рейс без пересадки.
     """
-    circle = [row for row in feed.routes if row[0] == "m_metro_5"]
-    assert circle, "Кольцевая линия должна быть в фиде"
-    trips = [trip[2] for trip in feed.trips if trip[0] == "m_metro_5"]
-    rows = _by_trip(feed)[trips[0]]
-    stops = [row[3] for row in rows]
-    assert stops[0] == stops[-1], "рейс кольца должен возвращаться на ту же станцию"
-    assert len(stops) > len(set(stops)) + 1, "круг должен проезжаться дважды"
+    by_trip = _by_trip(feed)
+    trips = [
+        trip[2] for trip in feed.trips if trip[0] == "m_metro_5" and trip[3] == "0"
+    ]
+    assert trips, "Кольцевая линия должна быть в фиде"
+    circle = [row[3] for row in by_trip[trips[0]]]
+    size = len(circle)
+    rides: set[tuple[str, str]] = set()
+    for trip in trips[:2]:
+        stops = [row[3] for row in by_trip[trip]]
+        rides |= {(a, b) for k, a in enumerate(stops) for b in stops[k + 1:]}
+    for start in range(size):
+        for hops in range(1, (size + 1) // 2 + 1):
+            pair = (circle[start], circle[(start + hops) % size])
+            assert pair in rides, f"{pair} не доехать одним рейсом"
+
+
+def test_circular_trip_never_repeats_a_station(feed):
+    """Станция в рейсе кольца не повторяется.
+
+    GraphHopper в ORS не умеет рейсы с повтором остановки: у поездки по такому рейсу
+    ломаная проходит перегон дважды с прыжком назад, а расстояние втрое больше
+    настоящего. Бригада на карте «уезжала» в дальнюю точку и возвращалась.
+    """
+    rings = {"m_metro_5", "m_metro_11", "m_mcc_14"}
+    route_of = {trip[2]: trip[0] for trip in feed.trips}
+    assert rings <= set(route_of.values()), "все три кольца должны быть в фиде"
+    for trip, rows in _by_trip(feed).items():
+        if route_of[trip] not in rings:
+            continue
+        stops = [row[3] for row in rows]
+        assert len(stops) == len(set(stops)), f"{trip}: станция в рейсе повторяется"
 
 
 # --------------------------------------------------------------------------

@@ -491,20 +491,31 @@ def _mirror_missing_stations(line: dict) -> list[str]:
     return notes
 
 
-def _loop_twice(stations: list[dict]) -> list[dict]:
-    """Кольцевой ход, проезжающий круг дважды.
+def _ring_runs(stations: list[dict], kind: str) -> list[tuple[list[dict], int]]:
+    """Кольцевой ход как два рейса по кругу со сдвигом на полкруга.
 
     Круг в GTFS задаётся рейсом, который начинается и кончается на одной станции. Но
     рейс — это цепочка «сел не раньше, вышел не позже», и пассажиру, севшему у конца
     цепочки, ни одна станция у её начала недоступна: по данным поезд там уже закончил
     ход. На Кольцевой это каждая десятая пара станций.
 
-    Настоящий поезд кольца конечной не имеет и идёт круг за кругом, поэтому цепочка
-    продлевается на второй круг: сесть можно где угодно и доехать куда угодно, не
-    пересаживаясь. Это не допущение в пользу расчёта, а снятие ложного ограничения.
+    Раньше цепочка продлевалась на второй круг, и каждая станция встречалась в рейсе
+    дважды. GTFS это допускает, а маршрутизатор ORS (GraphHopper) — нет: у поездки по
+    такому рейсу ломаная проходит перегон дважды с прыжком назад между проходами, а
+    расстояние втрое больше настоящего. На карте бригада «уезжала» в дальнюю точку и
+    возвращалась, а километраж участков по кольцам (Кольцевая, БКЛ, МЦК) был завышен.
+
+    Поэтому станции в рейсе теперь не повторяются: на каждый поезд два рейса, по кругу
+    от первой станции и от станции напротив, второй — ровно тогда, когда тот же поезд
+    там проходит. Любая поездка до полукруга включительно укладывается целиком в один
+    из них, а длиннее полукруга по кольцу ехать незачем: встречный ход короче.
+
+    Возвращает пары «станции рейса, сдвиг его отправления от первого, секунды».
     """
     circle = stations[:-1]                      # без повтора первой станции в конце
-    return circle + circle + [circle[0]]
+    half = len(circle) // 2
+    _arrival, shift = _offsets(circle, kind)[half]
+    return [(circle, 0), (circle[half:] + circle[:half], shift)]
 
 
 def _offsets(stations: list[dict], kind: str) -> list[tuple[int, int]]:
@@ -577,26 +588,39 @@ def build_metro(data_dir: Path, start_date: str, end_date: str) -> MetroFeed | N
         for direction_id, direction in enumerate(line["directions"]):
             stations = direction["stations"]
             if line["circular"]:
-                stations = _loop_twice(stations)
-            offsets = _offsets(stations, kind)
+                runs = _ring_runs(stations, kind)
+            else:
+                runs = [(stations, 0)]
             group = line_group(line["ref"])
-            sequence = [stop_ids[(group, normalize(s["name"]))] for s in stations]
+            plans = [
+                (
+                    [stop_ids[(group, normalize(s["name"]))] for s in run],
+                    _offsets(run, kind),
+                    shift,
+                )
+                for run, shift in runs
+            ]
             for service_id, days in CALENDAR.items():
                 weekday = days[0] == 1
                 moment = window_start
                 index = 0
                 while moment <= window_end:
-                    trip_id = f"{route_id}_{direction_id}_{service_id}_{index}"
-                    feed.trips.append((
-                        route_id, service_id, trip_id, str(direction_id), direction["headsign"],
-                    ))
-                    for order, (stop_id, (arrival, departure)) in enumerate(
-                        zip(sequence, offsets), start=1
-                    ):
-                        feed.stop_times.append((
-                            trip_id, clock(moment + arrival), clock(moment + departure),
-                            stop_id, str(order),
+                    for part, (sequence, offsets, shift) in enumerate(plans):
+                        trip_id = f"{route_id}_{direction_id}_{service_id}_{index}"
+                        if part:
+                            trip_id += f"_{part}"
+                        feed.trips.append((
+                            route_id, service_id, trip_id, str(direction_id),
+                            direction["headsign"],
                         ))
+                        start = moment + shift
+                        for order, (stop_id, (arrival, departure)) in enumerate(
+                            zip(sequence, offsets), start=1
+                        ):
+                            feed.stop_times.append((
+                                trip_id, clock(start + arrival), clock(start + departure),
+                                stop_id, str(order),
+                            ))
                     moment += headway(kind, weekday, moment)
                     index += 1
 

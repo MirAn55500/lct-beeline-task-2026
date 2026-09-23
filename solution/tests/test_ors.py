@@ -834,6 +834,32 @@ def test_broken_cache_file_is_treated_as_empty(tmp_path):
     assert setup_routing(two_point_scenario(), url=None, cache_path=path).travel is None
 
 
+def test_same_address_leg_is_not_asked_from_the_service():
+    """Заявки по одному адресу дают участок нулевой длины, и сервис о нём не спрашивают.
+
+    Регрессия живого прогона: три заявки в Кашире на Кржижановского, 5/1–5/3, геокодер
+    положил в одну точку. Общественный транспорт отвечал на участок «из точки в неё же»
+    HTTP 500, пеший и автомобильный профили — ответом без линии, и каждый такой отказ
+    шёл в счётчик, выключающий линии профилю целиком.
+    """
+    scenario = sc(
+        [
+            req("R1", window=("09:00", "10:00"), dur=30, at=(55.75, 37.65)),
+            req("R2", window=("11:00", "12:00"), dur=30, at=(55.75, 37.65)),
+        ],
+        [eng("E1", shift=("09:00", "18:00"), at=(55.70, 37.60), transport="car")],
+    )
+    result = plan(scenario, Algorithm.OPTIMIZED)
+    fake = FakeOrs()
+    route = attach_route_geometry(result, client(fake)).routes[0]
+
+    assert [v.request_id for v in route.visits] == ["R1", "R2"]
+    assert len(fake.calls) == 1, "участок между одинаковыми точками ушёл в сервис"
+    assert route.geometry_source == "ors"
+    start, end = route.visits[1].geometry_range
+    assert all(point == route.visits[1].to_point for point in route.geometry[start:end + 1])
+
+
 def test_geometry_failure_of_one_profile_does_not_disable_the_others():
     """Несобранный профиль гасит только свои маршруты. Регрессия живого прогона:
     общий счётчик отказов выключал геометрию всему плану из-за пеших инженеров."""
