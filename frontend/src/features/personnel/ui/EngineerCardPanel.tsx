@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { RiCloseLine, RiVipCrown2Fill } from '@remixicon/react'
+import { RiCloseLine } from '@remixicon/react'
 
 import {
   SKILL_LABEL,
@@ -82,19 +82,10 @@ export function EngineerCardPanel({
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-4">
         <div className="flex flex-col items-center gap-3 pt-1">
           <span
-            className="relative flex size-16 items-center justify-center bg-[#ebebec] text-lg font-semibold leading-7 text-[#18181b]"
+            className="flex size-16 items-center justify-center bg-[#ebebec] text-lg font-semibold leading-7 text-[#18181b]"
             style={{ borderRadius: 999 }}
           >
             {getInitials(engineer.name)}
-            {engineer.isLead ? (
-              <span
-                title="Бригадир"
-                className="absolute -bottom-0.5 -left-0.5 flex size-5 items-center justify-center bg-white text-[#52525b] shadow-sm"
-                style={{ borderRadius: 6 }}
-              >
-                <RiVipCrown2Fill size={12} />
-              </span>
-            ) : null}
           </span>
           <div className="flex flex-col items-center gap-0.5 text-center">
             <span className="text-base font-semibold leading-6 text-[#18181b]">

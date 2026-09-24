@@ -5,7 +5,6 @@ import {
   RiInformationLine,
   RiPencilLine,
   RiSearchLine,
-  RiVipCrown2Fill,
 } from '@remixicon/react'
 
 import { useDeleteEngineerMutation } from '@/features/personnel/api'
@@ -211,19 +210,10 @@ function EngineerRow({
           />
         </span>
         <span
-          className="relative flex size-8 shrink-0 items-center justify-center bg-[#ebebec] text-xs font-medium leading-5 text-[#18181b]"
+          className="flex size-8 shrink-0 items-center justify-center bg-[#ebebec] text-xs font-medium leading-5 text-[#18181b]"
           style={{ borderRadius: 999 }}
         >
           {getInitials(engineer.name)}
-          {engineer.isLead ? (
-            <span
-              title="Бригадир"
-              className="absolute -bottom-1 -left-1 flex size-3.5 items-center justify-center bg-white text-[#52525b]"
-              style={{ borderRadius: 4 }}
-            >
-              <RiVipCrown2Fill size={10} />
-            </span>
-          ) : null}
         </span>
         <span className="flex min-w-0 flex-col">
           <span className="truncate text-sm font-medium leading-5 text-[#18181b]">
