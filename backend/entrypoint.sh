@@ -1,11 +1,9 @@
 #!/bin/sh
 set -e
 
-# Кэш маршрутов живёт в volume; пустой volume заполняется кэшем из репозитория
-if [ -n "${ROUTING_CACHE_PATH:-}" ] && [ ! -f "$ROUTING_CACHE_PATH" ]; then
-  mkdir -p "$(dirname "$ROUTING_CACHE_PATH")"
-  cp /solution/data/routing_cache.json "$ROUTING_CACHE_PATH"
-  echo "Routing cache seeded: $ROUTING_CACHE_PATH"
+# Кэш маршрутов живёт в volume; новые участки из репозитория в него доливаются
+if [ -n "${ROUTING_CACHE_PATH:-}" ]; then
+  python -m core.merge_routing_cache /solution/data/routing_cache.json "$ROUTING_CACHE_PATH"
 fi
 
 echo "Running migrations..."

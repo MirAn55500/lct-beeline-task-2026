@@ -1189,6 +1189,18 @@ def _covers(table: Mapping[tuple[str, str], tuple[float, float]], points: Sequen
     return True
 
 
+SYMMETRIC_PROFILES: frozenset[str] = frozenset({"foot-walking", "cycling-regular"})
+"""Профили, где путь «туда» считается равным пути «обратно» при дозапросе новых точек.
+
+Пешеходу одностороннее движение не мешает, высоты не учитываются (`elevation: false`),
+поэтому для него это точно. Для велосипеда — приближение: часть улиц с односторонним
+движением для него закрыта в обратную сторону, и обратный путь бывает чуть длиннее.
+Взамен дозапрос нового адреса идёт секунду вместо десяти: без contraction hierarchies
+запрос «все → новые» стоит по поиску на каждую из десятков точек. Полная матрица
+(`fetch_matrix` без `sources`) по-прежнему считается честно в обе стороны.
+"""
+
+
 def _missing_points(
     table: Mapping[tuple[str, str], tuple[float, float]], points: Sequence[GeoPoint]
 ) -> list[int]:
@@ -1235,9 +1247,15 @@ def fetch_missing(
         return {}
     if len(missing) * 2 >= len(points):
         return fetch_matrix(client, profile, points)
+    fetched = fetch_matrix(client, profile, points, sources=missing)
+    if profile in SYMMETRIC_PROFILES:
+        # Столбец = транспонированная строка: запрос «все → новые» у профилей без
+        # contraction hierarchies стоит по поиску на каждый источник (десятки секунд)
+        for (ka, kb), value in list(fetched.items()):
+            fetched.setdefault((kb, ka), value)
+        return fetched
     missing_set = set(missing)
     others = [i for i in range(len(points)) if i not in missing_set]
-    fetched = fetch_matrix(client, profile, points, sources=missing)
     fetched.update(fetch_matrix(client, profile, points, sources=others, destinations=missing))
     return fetched
 
