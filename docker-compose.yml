@@ -39,6 +39,11 @@ services:
       ORS_URL: ${ORS_URL-http://ors:8082/ors}
       # Кэш ответов ORS переживает пересборку образа; при первом старте берётся из образа
       ROUTING_CACHE_PATH: /cache/routing_cache.json
+      # Геокодирование новых адресов: DaData, при промахе — Photon/Nominatim (OSM)
+      DADATA_API_KEY: ${DADATA_API_KEY:-}
+      DADATA_SECRET_KEY: ${DADATA_SECRET_KEY:-}
+      GEOCODER_OSM_ENABLED: ${GEOCODER_OSM_ENABLED:-true}
+      GEOCODER_TIMEOUT: ${GEOCODER_TIMEOUT:-10}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:

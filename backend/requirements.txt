@@ -5,3 +5,5 @@ asyncpg==0.31.0
 alembic==1.20.0
 pydantic-settings==2.15.0
 python-multipart==0.0.32
+dadata==25.10.0
+geopy==2.5.0

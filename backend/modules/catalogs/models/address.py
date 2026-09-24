@@ -21,6 +21,10 @@ class Address(BaseTable, table=True):
     address: str
     latitude: float
     longitude: float
+    # Точность координаты («дом», «улица», «населённый пункт», «район») и её источник.
+    # Пусто — записано до онлайн-геокодирования, перепроверяется при старте
+    geo_precision: Optional[str] = None
+    geo_source: Optional[str] = None
 
     area_ref: Optional["Area"] = Relationship(back_populates="addresses")
     brigades: list["Brigade"] = Relationship(back_populates="office_address")

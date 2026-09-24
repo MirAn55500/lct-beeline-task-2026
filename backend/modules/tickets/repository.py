@@ -92,14 +92,27 @@ class TicketsRepository:
         await self._session.flush()
         return row.dict_id or 0
 
+    async def find_addresses(self, region_id: int) -> dict[tuple[str, str], Address]:
+        """Сохранённые адреса региона по ключу (район, адрес) — как в ensure_address."""
+        rows = (
+            await self._session.exec(
+                select(Area.area, Address)
+                .join(Address, Address.area_id == Area.id)
+                .where(Area.region_id == region_id)
+            )
+        ).all()
+        return {(area, address.address): address for area, address in rows}
+
     async def ensure_address(
         self,
         *,
         region_id: int,
         district: str,
         address: str,
-        latitude: float,
-        longitude: float,
+        latitude: float | None,
+        longitude: float | None,
+        geo_precision: str | None = None,
+        geo_source: str | None = None,
     ) -> int:
         area_name = district.strip() or "—"
         area_result = await self._session.exec(
@@ -119,12 +132,21 @@ class TicketsRepository:
         )
         found = address_result.first()
         if found is not None and found.address_id is not None:
+            # Геокодер нашёл точнее, чем записано (или записанное было ошибочным)
+            if geo_precision is not None and latitude is not None and longitude is not None:
+                found.latitude, found.longitude = latitude, longitude
+                found.geo_precision, found.geo_source = geo_precision, geo_source
+                self._session.add(found)
             return found.address_id
+        if latitude is None or longitude is None:
+            raise ValueError(f"Нет координат для адреса: {address}")
         created = Address(
             area_id=area.id or 0,
             address=address,
             latitude=latitude,
             longitude=longitude,
+            geo_precision=geo_precision,
+            geo_source=geo_source,
         )
         self._session.add(created)
         await self._session.flush()
@@ -175,6 +197,8 @@ class TicketsRepository:
                 address=ticket.address,
                 latitude=ticket.latitude,
                 longitude=ticket.longitude,
+                geo_precision=ticket.geo_precision,
+                geo_source=ticket.geo_source,
             )
             priority_id = await self.ensure_dict(DictGroup.PRIORITY, ticket.priority)
             status_id = await self.ensure_dict(DictGroup.STATUS, ticket.status)

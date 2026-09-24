@@ -38,6 +38,9 @@ jobs:
           ORS_URL: ${{ vars.ORS_URL }}
           ORS_XMS: ${{ vars.ORS_XMS }}
           ORS_XMX: ${{ vars.ORS_XMX }}
+          DADATA_API_KEY: ${{ secrets.DADATA_API_KEY }}
+          DADATA_SECRET_KEY: ${{ secrets.DADATA_SECRET_KEY }}
+          GEOCODER_OSM_ENABLED: ${{ vars.GEOCODER_OSM_ENABLED }}
         run: |
           set -e
           missing=
@@ -71,6 +74,11 @@ jobs:
           ors_url = os.environ.get("ORS_URL") or "http://ors:8082/ors"
           ors_xms = os.environ.get("ORS_XMS") or "4g"
           ors_xmx = os.environ.get("ORS_XMX") or "10g"
+          dadata_key = os.environ.get("DADATA_API_KEY") or ""
+          dadata_secret = os.environ.get("DADATA_SECRET_KEY") or ""
+          osm_geocoder = os.environ.get("GEOCODER_OSM_ENABLED") or "true"
+          if not dadata_key:
+              print("DADATA_API_KEY не задан — геокодирование только через кэш и OSM")
 
           database_url = (
               "postgresql+asyncpg://"
@@ -99,6 +107,9 @@ jobs:
               q("ORS_URL", ors_url),
               q("ORS_XMS", ors_xms),
               q("ORS_XMX", ors_xmx),
+              q("DADATA_API_KEY", dadata_key),
+              q("DADATA_SECRET_KEY", dadata_secret),
+              q("GEOCODER_OSM_ENABLED", osm_geocoder),
           ]
           with open(".env", "w", encoding="utf-8") as fh:
               fh.write("\n".join(lines) + "\n")

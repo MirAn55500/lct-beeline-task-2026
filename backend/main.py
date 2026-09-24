@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
@@ -8,11 +10,19 @@ from api.router import api_router
 from core.config import get_settings
 from core.database import engine
 from core.exceptions import register_exception_handlers
+from modules.geocoding.recheck import recheck_addresses
+
+# Сообщения модулей (геокодер, маршрутизация) — в лог контейнера рядом с uvicorn
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s: %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)  # строка на каждый запрос к DaData
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # В фоне: старт и healthcheck не ждут геокодера
+    recheck = asyncio.create_task(recheck_addresses())
     yield
+    recheck.cancel()
     await engine.dispose()
 
 

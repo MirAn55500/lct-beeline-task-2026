@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     ors_url: str | None = None
     # Где хранить кэш ответов ORS; не задан — solution/data/routing_cache.json
     routing_cache_path: str | None = None
+    # Геокодирование: DaData (ключ с dadata.ru; секрет включает стандартизацию), резерв — OSM
+    dadata_api_key: str | None = None
+    dadata_secret_key: str | None = None
+    geocoder_osm_enabled: bool = True
+    geocoder_user_agent: str = "lct-beeline-planner/1.0"
+    geocoder_timeout: float = 10.0
 
     @field_validator("database_url", mode="before")
     @classmethod

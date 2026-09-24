@@ -13,8 +13,7 @@ _SOLUTION = Path(__file__).resolve().parents[3] / "solution"
 if str(_SOLUTION) not in sys.path:
     sys.path.insert(0, str(_SOLUTION))
 
-from planner.io_csv import Geocoder, WorkTypeCatalog  # noqa: E402
-from planner.models import GeoPoint  # noqa: E402
+from planner.io_csv import WorkTypeCatalog  # noqa: E402
 
 _OFFICE_MARKERS = ("адрес офиса",)
 _CLOSED = {"выполнена", "отменена", "completed", "cancelled"}
@@ -42,8 +41,6 @@ class ParsedTicket:
     external_id: str
     address: str
     district: str
-    latitude: float
-    longitude: float
     window_start: datetime
     window_end: datetime
     category: str
@@ -51,6 +48,11 @@ class ParsedTicket:
     status: str
     skill: str
     priority: str
+    # Заполняются геокодером в TicketsService.upload
+    latitude: float | None = None
+    longitude: float | None = None
+    geo_precision: str | None = None
+    geo_source: str | None = None
 
 
 def _category(bk: str) -> str:
@@ -112,7 +114,6 @@ def parse_upload(raw: bytes, filename: str, day: date) -> tuple[list[ParsedTicke
         rows = _rows_from_csv(raw)
 
     catalog = WorkTypeCatalog.load()
-    geocoder = Geocoder.load()
     tickets: list[ParsedTicket] = []
     skipped = 0
 
@@ -135,7 +136,6 @@ def parse_upload(raw: bytes, filename: str, day: date) -> tuple[list[ParsedTicke
         spec = catalog.resolve(bk, hd)
         address = row.get("Адрес", "").strip() or "—"
         district = row.get("Район", "").strip() or "—"
-        point: GeoPoint = geocoder.locate(address, district)
 
         start = _parse_moment(row["Начало"], day)
         end = _parse_moment(row["Окончание"], start.date())
@@ -147,8 +147,6 @@ def parse_upload(raw: bytes, filename: str, day: date) -> tuple[list[ParsedTicke
                 external_id=external_id,
                 address=address,
                 district=district,
-                latitude=point.lat,
-                longitude=point.lon,
                 window_start=start,
                 window_end=end,
                 category=_category(bk),

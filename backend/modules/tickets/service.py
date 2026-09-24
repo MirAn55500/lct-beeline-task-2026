@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from dataclasses import replace
 from datetime import date, time
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from core.config import get_settings
 from core.exceptions import AppError
+from modules.geocoding.anchors import district_anchors
+from modules.geocoding.geocoder import DISTRICT, SETTLED, AddressGeocoder
 from modules.planning.models.assignment import Assignment
 from modules.planning.service import PlanningService
-from modules.tickets.importer import parse_upload
+from modules.tickets.importer import ParsedTicket, parse_upload
 from modules.tickets.models.request import Request
 from modules.tickets.repository import TicketsRepository
 from modules.tickets.schemas import (
@@ -186,6 +190,8 @@ class TicketsService:
         except (ValueError, json.JSONDecodeError) as exc:
             raise AppError(str(exc)) from exc
 
+        tickets = await self._geocode(region_id, tickets)
+
         file_type = "json" if filename.lower().endswith(".json") else "csv"
         created, updated, skipped = await self._repo.save_upload(
             region_id=region_id,
@@ -218,3 +224,51 @@ class TicketsService:
             plan_id=plan_id,
             plan_version=plan_version,
         )
+
+    async def _geocode(self, region_id: int, tickets: list[ParsedTicket]) -> list[ParsedTicket]:
+        """Координаты новых адресов и тех, что записаны без точности или по району.
+
+        Адрес, уже найденный с точностью до дома или улицы, повторно не геокодируется.
+        """
+        known = await self._repo.find_addresses(region_id)
+
+        def key(ticket: ParsedTicket) -> tuple[str, str]:
+            return (ticket.district.strip() or "—", ticket.address)
+
+        pending = [
+            key(t)
+            for t in tickets
+            if key(t) not in known or known[key(t)].geo_precision not in SETTLED
+        ]
+        if not pending:
+            return tickets
+
+        anchors = await district_anchors(self._session, region_id)
+        async with AddressGeocoder(get_settings(), anchors) as geocoder:
+            hits = await geocoder.locate_many(pending)
+            result: list[ParsedTicket] = []
+            for ticket in tickets:
+                hit = hits.get(key(ticket))
+                stored = known.get(key(ticket))
+                if hit is None:
+                    result.append(ticket)
+                    continue
+                if (
+                    stored is not None
+                    and hit.precision == DISTRICT
+                    and geocoder.plausible(
+                        stored.latitude, stored.longitude, stored.address, key(ticket)[0]
+                    )
+                ):
+                    result.append(ticket)  # лучше не нашлось, записанная точка правдоподобна
+                    continue
+                result.append(
+                    replace(
+                        ticket,
+                        latitude=hit.lat,
+                        longitude=hit.lon,
+                        geo_precision=hit.precision,
+                        geo_source=hit.source,
+                    )
+                )
+        return result
