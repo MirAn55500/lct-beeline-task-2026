@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
@@ -16,6 +17,21 @@ class CounterPair(BaseModel):
 class EngineersCounter(BaseModel):
     engaged: int | None = None
     total: int
+
+
+class RemakeLevel(StrEnum):
+    """Уровень перестроения плана (Figma: Фикс / Инженерный / Свободный)."""
+
+    FIX = "fix"
+    ENGINEER = "engineer"
+    FREE = "free"
+
+
+class Distribution(StrEnum):
+    """Распределение заявок (Figma: Равномерное / Эффективное)."""
+
+    EVEN = "even"
+    EFFICIENT = "efficient"
 
 
 class RecalculateResponse(BaseModel):

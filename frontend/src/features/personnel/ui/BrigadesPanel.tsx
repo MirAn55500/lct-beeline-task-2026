@@ -1,7 +1,7 @@
 import { ScrollShadow } from '@heroui/react'
 import { RiAddCircleLine, RiUser3Line, RiVipCrown2Line } from '@remixicon/react'
 
-import type { PersonnelBrigade } from '@/features/personnel/mocks'
+import type { PersonnelBrigade } from '@/features/personnel/types'
 import { cn } from '@/shared/lib/cn'
 import { pluralRu } from '@/shared/lib/text'
 import { AppPanel } from '@/shared/ui'
@@ -60,6 +60,7 @@ type BrigadesPanelProps = {
   /** Подпись бригадира, например «Белый С.». */
   leaderById?: Record<number, string | undefined>
   selectedId: number | null
+  isLoading?: boolean
   onSelect: (brigadeId: number) => void
 }
 
@@ -68,6 +69,7 @@ export function BrigadesPanel({
   countById,
   leaderById,
   selectedId,
+  isLoading = false,
   onSelect,
 }: BrigadesPanelProps) {
   return (
@@ -80,13 +82,15 @@ export function BrigadesPanel({
       >
         <div className="flex flex-col gap-3 p-3">
           {brigades.length === 0 ? (
-            <p className="px-2 py-3 text-sm leading-6 text-[#71717a]">Бригад пока нет</p>
+            <p className="px-2 py-3 text-sm leading-6 text-[#71717a]">
+              {isLoading ? 'Загружаем бригады…' : 'Бригад пока нет'}
+            </p>
           ) : (
             brigades.map((brigade) => (
               <BrigadeCard
                 key={brigade.id}
                 brigade={brigade}
-                count={countById[brigade.id] ?? 0}
+                count={countById[brigade.id] ?? brigade.engineersCount ?? 0}
                 leader={leaderById?.[brigade.id]}
                 selected={brigade.id === selectedId}
                 onSelect={() => onSelect(brigade.id)}

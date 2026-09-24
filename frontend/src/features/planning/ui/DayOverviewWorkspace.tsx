@@ -104,18 +104,16 @@ export function DayOverviewWorkspace({
       <AppPanel className="flex h-24 shrink-0 items-center gap-12 px-5">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <h2 className="text-xl font-semibold leading-7 text-foreground">
-            {hasTickets ? 'План работ' : 'Создайте план работ'}
+            {hasTickets ? 'План работ составлен' : 'Создайте план работ'}
           </h2>
           {hasTickets ? (
-            <p className="flex min-w-0 items-center text-sm leading-6 text-[#71717a]">
-              <span className="truncate">
-                Расписание и маршруты инженеров доступны в плане работ
-              </span>
+            <p className="min-w-0 text-sm leading-6 text-[#71717a]">
+              Расписание и маршруты инженеров доступны в{' '}
               <Link
                 to={routes.planGantt}
-                className="ms-1 shrink-0 font-medium text-[#0485f7] hover:underline"
+                className="font-medium text-[#0485f7] hover:underline"
               >
-                Перейти к плану
+                плане работ
               </Link>
             </p>
           ) : (

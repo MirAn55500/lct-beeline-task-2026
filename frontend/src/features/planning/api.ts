@@ -1,7 +1,12 @@
 import { baseApi } from '@/shared/api/baseApi'
 import type { ModuleHealth } from '@/shared/types'
 
-import type { DayOverview, RecalculateResult } from './types'
+import type {
+  DayOverview,
+  PlanDistribution,
+  RecalculateResult,
+  RemakeLevel,
+} from './types'
 
 export const planningApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
@@ -24,12 +29,22 @@ export const planningApi = baseApi.injectEndpoints({
     }),
     recalculatePlan: build.mutation<
       RecalculateResult,
-      { regionId: number; date: string }
+      {
+        regionId: number
+        date: string
+        remakeLevel?: RemakeLevel
+        distribution?: PlanDistribution
+      }
     >({
-      query: ({ regionId, date }) => ({
+      query: ({ regionId, date, remakeLevel, distribution }) => ({
         url: '/api/planning/recalculate',
         method: 'POST',
-        params: { region_id: regionId, date },
+        params: {
+          region_id: regionId,
+          date,
+          ...(remakeLevel != null ? { remake_level: remakeLevel } : {}),
+          ...(distribution != null ? { distribution } : {}),
+        },
       }),
       invalidatesTags: ['Plan', 'Ticket'],
     }),

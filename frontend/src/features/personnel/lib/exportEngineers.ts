@@ -10,7 +10,6 @@ function toRows(engineers: PersonnelEngineer[]) {
   return engineers.map((item) => ({
     id: item.id,
     name: item.name,
-    qualification: item.position,
     skills: item.skills.map((code) => SKILL_LABEL[code]),
     transport: TRANSPORT_LABEL[item.transport],
   }))
@@ -26,11 +25,9 @@ function serialize(engineers: PersonnelEngineer[], format: EngineersExportFormat
   if (format === 'json') {
     return { body: JSON.stringify(rows, null, 2), type: 'application/json' }
   }
-  const header = ['id', 'ФИО', 'Квалификация', 'Навыки', 'Транспорт']
+  const header = ['id', 'ФИО', 'Навыки', 'Транспорт']
   const lines = rows.map((row) =>
-    [row.id, row.name, row.qualification, row.skills.join(', '), row.transport]
-      .map(csvCell)
-      .join(';'),
+    [row.id, row.name, row.skills.join(', '), row.transport].map(csvCell).join(';'),
   )
   // BOM — чтобы Excel открыл кириллицу без кракозябр.
   return { body: `﻿${[header.join(';'), ...lines].join('\n')}`, type: 'text/csv' }

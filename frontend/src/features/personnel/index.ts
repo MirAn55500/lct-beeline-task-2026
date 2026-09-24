@@ -1,7 +1,30 @@
-export { personnelApi, useGetEngineersQuery, useGetPersonnelHealthQuery } from './api'
-export type { BrigadeId, Engineer, EngineerId } from './types'
-export { MOCK_BRIGADES, MOCK_ENGINEERS, shortName } from './mocks'
-export type { PersonnelBrigade, PersonnelEngineer } from './mocks'
+export {
+  personnelApi,
+  useCreateEngineerMutation,
+  useDeleteEngineerMutation,
+  useGetBrigadesQuery,
+  useGetEngineersQuery,
+  useGetPersonnelEngineersQuery,
+  useGetPersonnelFilterOptionsQuery,
+  useGetPersonnelHealthQuery,
+} from './api'
+export type {
+  BrigadeId,
+  CreateEngineerBody,
+  Engineer,
+  EngineerId,
+  PersonnelBrigade,
+  PersonnelEngineer,
+  PersonnelFilterOptions,
+  SkillCode,
+  TransportCode,
+} from './types'
+export {
+  SKILL_LABEL,
+  TRANSPORT_LABEL,
+  createUploadBatch,
+  shortName,
+} from './mocks'
 export { downloadEngineers } from './lib/exportEngineers'
 export { AddEngineerPanel } from './ui/AddEngineerPanel'
 export { BrigadesPanel } from './ui/BrigadesPanel'

@@ -31,12 +31,16 @@ class TicketResponse(BaseModel):
     number: str
     category: str
     reason: str | None = None
+    reason_hint: str | None = None
     engineer: str | None = None
     assigned: bool = False
     window: str
     window_start: datetime
     window_end: datetime
     address: str
+    status: str | None = None
+    hd: str | None = None
+    district: str | None = None
 
 
 class TicketsQuery(BaseModel):

@@ -16,6 +16,7 @@ from planner import (  # noqa: E402
     Engineer as PlannerEngineer,
 )
 from planner import (  # noqa: E402
+    Algorithm,
     GeoPoint,
     OrsTravelModel,
     Priority,
@@ -48,6 +49,7 @@ _CLOSED_STATUS = {
     "отменена",
 }
 
+# Подписи для матчинга старых строк словаря; канон в БД — код (см. catalogs.seed_values).
 _REASON_LABELS = {
     "no_engineers": "нет инженеров",
     "no_region": "нет инженера в регионе",
@@ -213,14 +215,17 @@ logger = logging.getLogger(__name__)
 routing_cache_lock = threading.Lock()
 
 
-def run_plan(scenario: Scenario) -> PlanResult:
+def run_plan(
+    scenario: Scenario,
+    algorithm: Algorithm = Algorithm.OPTIMIZED,
+) -> PlanResult:
     # Без ORS_URL берутся сохранённые ответы сервиса, без кэша — расстояния по координатам
     settings = get_settings()
     options = {"cache_path": settings.routing_cache_path} if settings.routing_cache_path else {}
     url, api_key = ors_endpoint.pick(settings)  # основной или запасной ORS
     with routing_cache_lock:
         routing = setup_routing(scenario, url=url, api_key=api_key, **options)
-    result = plan(scenario, travel=routing.travel)
+    result = plan(scenario, algorithm, travel=routing.travel)
     notes = list(routing.notes)
     if isinstance(routing.travel, OrsTravelModel):
         notes += [n for n in routing.travel.report() if n not in notes]

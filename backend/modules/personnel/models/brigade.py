@@ -18,6 +18,8 @@ class Brigade(BaseTable, table=True):
 
     brigade_id: Optional[int] = Field(default=None, primary_key=True)
     region_id: int = Field(foreign_key="regions.region_id")
+    name: str = Field(default="Бригада")
+    number: str = Field(default="01")
     start_work: time
     end_work: time
     office_address_id: int = Field(foreign_key="addresses.address_id")

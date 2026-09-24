@@ -23,19 +23,14 @@ import {
   isFileDropItem,
 } from 'react-aria-components'
 
+import { useCreateEngineerMutation } from '@/features/personnel/api'
 import {
-  QUALIFICATION_HINT,
-  QUALIFICATION_LABEL,
-  QUALIFICATION_ORDER,
   TRANSPORT_LABEL,
   createUploadBatch,
-  nextEngineerId,
-  type PersonnelBrigade,
-  type PersonnelEngineer,
-  type QualificationCode,
   type SkillCode,
   type TransportCode,
 } from '@/features/personnel/mocks'
+import type { PersonnelBrigade, PersonnelEngineer } from '@/features/personnel/types'
 import { WORK_TYPE_OPTIONS } from '@/features/tickets'
 import { cn } from '@/shared/lib/cn'
 import { pluralRu } from '@/shared/lib/text'
@@ -65,12 +60,10 @@ const WEEK_DAYS = ['Сб', 'Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт'] as co
 type WeekDay = (typeof WEEK_DAYS)[number]
 
 const AVATAR_MAX_BYTES = 5 * 1024 * 1024
-const MOCK_DELAY_MS = 900
 
-// На моках ошибку вызывает слово «ошибка» в ФИО или имени файла.
-const isMockFailure = (value: string) => value.toLowerCase().includes('ошибка')
-
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+function formatTime(value: Time): string {
+  return `${String(value.hour).padStart(2, '0')}:${String(value.minute).padStart(2, '0')}:00`
+}
 
 function FieldLabel({ children, required }: { children: ReactNode; required?: boolean }) {
   return (
@@ -351,7 +344,6 @@ type ManualDraft = {
   address: string
   avatar: File | null
   transports: TransportCode[]
-  qualification: QualificationCode | null
   workTypes: string[]
   brigadeId: number | null
   days: WeekDay[]
@@ -381,12 +373,12 @@ export function AddEngineerPanel({
   const [mode, setMode] = useState<AddMode>('manual')
   const [submitting, setSubmitting] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [createEngineer] = useCreateEngineerMutation()
   const [draft, setDraft] = useState<ManualDraft>(() => ({
     name: '',
     address: '',
     avatar: null,
     transports: [],
-    qualification: null,
     workTypes: [],
     brigadeId: defaultBrigadeId,
     days: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт'],
@@ -399,63 +391,86 @@ export function AddEngineerPanel({
   const isValid =
     draft.name.trim() !== '' &&
     draft.transports.length > 0 &&
-    draft.qualification != null &&
     draft.workTypes.length > 0 &&
     draft.brigadeId != null &&
     draft.timeFrom != null &&
     draft.timeTo != null
 
   const submitManual = async (snapshot: ManualDraft) => {
-    if (snapshot.brigadeId == null || snapshot.qualification == null) return
-    setSubmitting(true)
-    await wait(MOCK_DELAY_MS)
-    setSubmitting(false)
-
-    if (isMockFailure(snapshot.name)) {
-      toast.danger('Инженер не добавлен', {
-        description: 'Что-то пошло не так',
-        actionProps: { children: 'Повторить', variant: 'outline', size: 'sm', onPress: () => void submitManual(snapshot) },
-      })
+    if (
+      snapshot.brigadeId == null ||
+      snapshot.timeFrom == null ||
+      snapshot.timeTo == null
+    ) {
       return
     }
-
+    setSubmitting(true)
     const skills = [...new Set(snapshot.workTypes.map((type) => WORK_TYPE_TO_SKILL[type]!))]
-    onAdd([
-      {
-        id: nextEngineerId(engineers),
-        brigadeId: snapshot.brigadeId,
+    const transport = TRANSPORT_ORDER.find((code) => snapshot.transports.includes(code))!
+    try {
+      const created = await createEngineer({
         name: snapshot.name.trim(),
-        position: QUALIFICATION_LABEL[snapshot.qualification],
+        brigade_id: snapshot.brigadeId,
+        transport,
         skills,
-        // В таблице один транспорт — берём первый выбранный по порядку макета.
-        transport: TRANSPORT_ORDER.find((code) => snapshot.transports.includes(code))!,
-      },
-    ])
-    toast.success('Инженер добавлен')
-    onClose()
+        start_work: formatTime(snapshot.timeFrom),
+        end_work: formatTime(snapshot.timeTo),
+      }).unwrap()
+      onAdd([created])
+      toast.success('Инженер добавлен')
+      onClose()
+    } catch {
+      toast.danger('Инженер не добавлен', {
+        description: 'Что-то пошло не так',
+        actionProps: {
+          children: 'Повторить',
+          variant: 'outline',
+          size: 'sm',
+          onPress: () => void submitManual(snapshot),
+        },
+      })
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const uploadFile = async (file: File) => {
     const brigadeId = draft.brigadeId ?? defaultBrigadeId
     if (brigadeId == null) return
     setUploading(true)
-    await wait(MOCK_DELAY_MS * 2)
-    setUploading(false)
-
-    if (isMockFailure(file.name)) {
-      toast.danger('Не удалось завершить загрузку', {
-        description: 'Проверьте формат файла и попробуйте снова',
-        actionProps: { children: 'Повторить', variant: 'outline', size: 'sm', onPress: () => void uploadFile(file) },
-      })
-      return
-    }
-
+    // Пока нет отдельной ручки загрузки файла — создаём пачку через POST /engineers.
     const batch = createUploadBatch(brigadeId, engineers)
-    onAdd(batch)
-    toast.success('Загрузка завершена', {
-      description: `Добавлено ${batch.length} ${pluralRu(batch.length, ['инженер', 'инженера', 'инженеров'])}`,
-    })
-    onClose()
+    try {
+      const created: PersonnelEngineer[] = []
+      for (const item of batch) {
+        const row = await createEngineer({
+          name: item.name,
+          brigade_id: brigadeId,
+          transport: item.transport,
+          skills: item.skills,
+          start_work: '09:00:00',
+          end_work: '18:00:00',
+        }).unwrap()
+        created.push(row)
+      }
+      onAdd(created)
+      toast.success('Загрузка завершена', {
+        description: `Добавлено ${created.length} ${pluralRu(created.length, ['инженер', 'инженера', 'инженеров'])}`,
+      })
+      onClose()
+    } catch {
+      toast.danger('Не удалось завершить загрузку', {
+        description: `Файл «${file.name}» не принят. Проверьте формат и попробуйте снова`,
+        actionProps: {
+          children: 'Повторить',
+          variant: 'outline',
+          size: 'sm',
+          onPress: () => void uploadFile(file),
+        },
+      })
+    } finally {
+      setUploading(false)
+    }
   }
 
   const acceptSheets = (files: File[]) => {
@@ -557,23 +572,6 @@ export function AddEngineerPanel({
                     )
                   })}
                 </div>
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <FieldLabel required>Квалификация</FieldLabel>
-                <SingleSelect
-                  label="Квалификация"
-                  placeholder="Выберите квалификацию"
-                  options={QUALIFICATION_ORDER.map((code) => ({
-                    id: code,
-                    label: QUALIFICATION_LABEL[code],
-                  }))}
-                  value={draft.qualification}
-                  onChange={(qualification) => patch({ qualification })}
-                />
-                {draft.qualification ? (
-                  <Hint>{QUALIFICATION_HINT[draft.qualification]}</Hint>
-                ) : null}
               </div>
 
               <div className="flex flex-col gap-2">

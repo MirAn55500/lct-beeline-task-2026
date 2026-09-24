@@ -1,4 +1,4 @@
-import { NavLink, useLocation } from 'react-router'
+import { NavLink, useLocation, useSearchParams } from 'react-router'
 
 import { isNavItemActive, navMenuGroups, type NavItem } from '@/shared/config/nav'
 import { cn } from '@/shared/lib/cn'
@@ -6,17 +6,20 @@ import { cn } from '@/shared/lib/cn'
 function MenuItem({
   item,
   active,
+  search,
   onNavigate,
 }: {
   item: NavItem
   active: boolean
+  search: string
   onNavigate?: () => void
 }) {
   const Icon = item.icon
+  const to = search ? `${item.to}${search}` : item.to
 
   return (
     <NavLink
-      to={item.to}
+      to={to}
       onClick={onNavigate}
       className={cn(
         'flex h-9 cursor-pointer items-center gap-3 rounded-lg px-3 text-sm font-medium text-foreground transition-colors hover:bg-[#f5f5f5]',
@@ -36,6 +39,11 @@ type AppNavMenuProps = {
 
 export function AppNavMenu({ onNavigate, className }: AppNavMenuProps) {
   const { pathname } = useLocation()
+  const [params] = useSearchParams()
+  const preserved = new URLSearchParams()
+  const date = params.get('date')
+  if (date) preserved.set('date', date)
+  const search = preserved.toString() ? `?${preserved.toString()}` : ''
 
   return (
     <div
@@ -54,6 +62,7 @@ export function AppNavMenu({ onNavigate, className }: AppNavMenuProps) {
                   key={item.to}
                   item={item}
                   active={isNavItemActive(item, pathname)}
+                  search={search}
                   onNavigate={onNavigate}
                 />
               ))}

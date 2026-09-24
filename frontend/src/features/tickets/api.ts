@@ -8,12 +8,16 @@ export type Ticket = {
   number: string
   category: string
   reason: string | null
+  reason_hint?: string | null
   engineer: string | null
   assigned: boolean
   window: string
   window_start: string
   window_end: string
   address: string
+  status?: string | null
+  hd?: string | null
+  district?: string | null
 }
 
 export type TicketsListArgs = {
@@ -82,5 +86,6 @@ export const ticketsApi = baseApi.injectEndpoints({
 export const {
   useGetTicketsHealthQuery,
   useGetTicketsQuery,
+  useLazyGetTicketsQuery,
   useUploadTicketsMutation,
 } = ticketsApi

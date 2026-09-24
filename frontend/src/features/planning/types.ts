@@ -1,3 +1,9 @@
+/** Уровень перестроения: Фикс / Инженерный / Свободный. */
+export type RemakeLevel = 'fix' | 'engineer' | 'free'
+
+/** Распределение: Равномерное / Эффективное. */
+export type PlanDistribution = 'even' | 'efficient'
+
 export type RecalculateResult = {
   plan_id: number
   version: number

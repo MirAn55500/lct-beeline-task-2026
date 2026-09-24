@@ -19,6 +19,8 @@ export const REASON_OPTIONS = [
   'Нет рабочего времени',
   'Конфликт времени',
   'Нет инженера в регионе',
+  'Нет инженеров',
+  'Нет подходящего транспорта',
 ] as const
 
 export type TicketAssignmentFilter = 'all' | 'assigned' | 'unassigned'

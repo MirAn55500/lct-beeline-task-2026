@@ -5,6 +5,7 @@ import {
   RiCarFill,
   RiRidingFill,
   RiToolsFill,
+  RiWalkFill,
 } from '@remixicon/react'
 import { Link } from 'react-router'
 import type { ComponentType } from 'react'
@@ -22,6 +23,7 @@ const TRANSPORT_ICON: Record<
   public: RiBus2Fill,
   bike: RiRidingFill,
   car: RiCarFill,
+  walking: RiWalkFill,
 }
 
 function EngineerCard({ engineer }: { engineer: Engineer }) {

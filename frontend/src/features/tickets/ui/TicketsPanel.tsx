@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { ScrollShadow } from '@heroui/react'
+import { ScrollShadow, Tooltip } from '@heroui/react'
 import {
   RiErrorWarningLine,
   RiSearchLine,
@@ -21,12 +21,14 @@ function TicketTag({
   tone,
   icon,
   children,
+  hint,
 }: {
   tone: 'danger' | 'neutral'
   icon: ReactNode
   children: ReactNode
+  hint?: string | null
 }) {
-  return (
+  const tag = (
     <span
       className="inline-flex h-6 max-w-full items-center gap-1 px-1.5 py-1 text-xs font-medium leading-5"
       style={{
@@ -40,6 +42,19 @@ function TicketTag({
       </span>
       <span className="truncate">{children}</span>
     </span>
+  )
+
+  if (!hint) return tag
+
+  return (
+    <Tooltip delay={200}>
+      <Tooltip.Trigger className="inline-flex max-w-full cursor-help outline-none">
+        {tag}
+      </Tooltip.Trigger>
+      <Tooltip.Content className="max-w-[280px] text-sm leading-5 break-normal">
+        {hint}
+      </Tooltip.Content>
+    </Tooltip>
   )
 }
 
@@ -64,6 +79,7 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
           <TicketTag
             tone="danger"
             icon={<RiErrorWarningLine size={12} className="text-[#a43532]" />}
+            hint={ticket.reason_hint}
           >
             {ticket.reason}
           </TicketTag>

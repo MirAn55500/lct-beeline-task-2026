@@ -25,6 +25,9 @@ class Engineer(BaseTable, table=True):
     end_work: time
     transport_id: int = Field(foreign_key="dicts.dict_id")
     brigade_id: int = Field(foreign_key="brigades.brigade_id")
+    # UI-квалификация страницы «Персонал»: master | worker | novice
+    qualification: Optional[str] = Field(default=None)
+    is_lead: bool = Field(default=False)
 
     transport: Optional["Dictionary"] = Relationship(
         sa_relationship_kwargs={"foreign_keys": "[Engineer.transport_id]"}

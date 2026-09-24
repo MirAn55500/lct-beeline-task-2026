@@ -45,8 +45,10 @@ class TicketsRepository:
             select(Request)
             .where(Request.region_id == region_id, Request.date == day)
             .options(
-                selectinload(Request.address_ref),
+                selectinload(Request.address_ref).selectinload(Address.area_ref),
                 selectinload(Request.request_type_vk),
+                selectinload(Request.request_type_hd),
+                selectinload(Request.status),
                 selectinload(Request.priority),
             )
             .order_by(col(Request.plan_start_time).asc(), col(Request.external_id).asc())

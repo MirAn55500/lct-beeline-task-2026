@@ -41,22 +41,16 @@ REGION_NAME = "Восток"
 SHIFT_START = time(9, 0)
 SHIFT_END = time(22, 0)
 
-SKILL_LABELS = {
-    "connection": "Подключение",
-    "local": "Локальные работы",
-    "emergency": "Аварийные работы",
-}
-
-REASON_LABELS = (
-    "Нет нужного навыка",
-    "Нет нужного снаряжения",
-    "Нет рабочего времени",
-    "Конфликт времени",
-    "Нет инженера в регионе",
-    "Нет инженеров",
-    "Нет подходящего транспорта",
-    "Не найдено",
-    "Вручную",
+REASON_CODES = (
+    "no_skill",
+    "no_equipment",
+    "no_work_time",
+    "time_conflict",
+    "no_region",
+    "no_engineers",
+    "no_transport",
+    "not_found",
+    "manual",
 )
 
 
@@ -77,8 +71,8 @@ async def _dict_id(session: AsyncSession, group: DictGroup, value: str) -> int:
 async def seed_east_engineers() -> int:
     """Создаёт инженеров региона «Восток», если их ещё нет. Возвращает число новых."""
     async with async_session_factory() as session:
-        for label in REASON_LABELS:
-            await _dict_id(session, DictGroup.UNASSIGNED_REASON, label)
+        for code in REASON_CODES:
+            await _dict_id(session, DictGroup.UNASSIGNED_REASON, code)
 
         region = (
             await session.exec(select(Region).where(Region.region_name == REGION_NAME))
@@ -125,6 +119,8 @@ async def seed_east_engineers() -> int:
         await session.flush()
         brigade = Brigade(
             region_id=region.region_id,
+            name=REGION_NAME,
+            number="01",
             start_work=SHIFT_START,
             end_work=SHIFT_END,
             office_address_id=address.address_id or 0,
@@ -132,8 +128,9 @@ async def seed_east_engineers() -> int:
         session.add(brigade)
         await session.flush()
 
+        qualification_cycle = ("master", "worker", "novice")
         created = 0
-        for profile in profiles:
+        for index, profile in enumerate(profiles):
             transport_id = await _dict_id(
                 session, DictGroup.TRANSPORT, profile.transport_mode.value
             )
@@ -143,6 +140,8 @@ async def seed_east_engineers() -> int:
                 end_work=SHIFT_END,
                 transport_id=transport_id,
                 brigade_id=brigade.brigade_id or 0,
+                qualification=qualification_cycle[index % 3],
+                is_lead=index == 0,
             )
             session.add(engineer)
             await session.flush()
@@ -150,7 +149,7 @@ async def seed_east_engineers() -> int:
                 skill_id = await _dict_id(
                     session,
                     DictGroup.SKILL,
-                    SKILL_LABELS.get(skill.value, skill.value),
+                    skill.value,
                 )
                 session.add(
                     EngineerSkill(engineer_id=engineer.engineer_id or 0, skill_id=skill_id)

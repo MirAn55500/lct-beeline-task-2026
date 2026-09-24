@@ -91,6 +91,9 @@ type ContextHeaderProps = {
   isRegionsError?: boolean
   isUploadDisabled?: boolean
   onUploadClick?: () => void
+  onExportCsv?: () => void
+  onExportJson?: () => void
+  isExportDisabled?: boolean
   isRecalculating?: boolean
   onRecalculate?: () => void
 }
@@ -110,6 +113,9 @@ export function ContextHeader({
   isRegionsError = false,
   isUploadDisabled = false,
   onUploadClick,
+  onExportCsv,
+  onExportJson,
+  isExportDisabled = false,
   isRecalculating = false,
   onRecalculate,
 }: ContextHeaderProps) {
@@ -414,8 +420,12 @@ export function ContextHeader({
               </button>
               <button
                 type="button"
-                disabled
-                className="flex h-9 w-full cursor-not-allowed items-center gap-3 rounded-lg px-3 text-left text-sm font-medium text-[#18181b] opacity-40"
+                disabled={isUploadDisabled}
+                onClick={() => {
+                  setTicketsOpen(false)
+                  onUploadClick?.()
+                }}
+                className="flex h-9 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-left text-sm font-medium text-[#18181b] transition-colors hover:bg-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
               >
                 <RiDownloadFill size={16} className="shrink-0 text-[#71717a]" />
                 Импорт json
@@ -423,16 +433,24 @@ export function ContextHeader({
               <div className="mx-2 my-1 h-px bg-[#e4e4e7]" />
               <button
                 type="button"
-                disabled
-                className="flex h-9 w-full cursor-not-allowed items-center gap-3 rounded-lg px-3 text-left text-sm font-medium text-[#18181b] opacity-40"
+                disabled={isExportDisabled || !onExportCsv}
+                onClick={() => {
+                  setTicketsOpen(false)
+                  onExportCsv?.()
+                }}
+                className="flex h-9 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-left text-sm font-medium text-[#18181b] transition-colors hover:bg-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
               >
                 <RiFileDownloadLine size={16} className="shrink-0 text-[#71717a]" />
                 Экспорт csv
               </button>
               <button
                 type="button"
-                disabled
-                className="flex h-9 w-full cursor-not-allowed items-center gap-3 rounded-lg px-3 text-left text-sm font-medium text-[#18181b] opacity-40"
+                disabled={isExportDisabled || !onExportJson}
+                onClick={() => {
+                  setTicketsOpen(false)
+                  onExportJson?.()
+                }}
+                className="flex h-9 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-left text-sm font-medium text-[#18181b] transition-colors hover:bg-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
               >
                 <RiDownloadFill size={16} className="shrink-0 text-[#71717a]" />
                 Экспорт json

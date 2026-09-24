@@ -6,8 +6,10 @@ from fastapi import APIRouter, Depends, Query
 from modules.planning.dependencies import get_planning_service
 from modules.planning.schemas import (
     DayOverviewResponse,
+    Distribution,
     HealthResponse,
     RecalculateResponse,
+    RemakeLevel,
 )
 from modules.planning.service import PlanningService
 
@@ -41,9 +43,18 @@ async def recalculate(
     service: PlanningServiceDep,
     region_id: Annotated[int, Query(ge=1)],
     date: Annotated[date, Query()],
+    remake_level: Annotated[RemakeLevel, Query()] = RemakeLevel.FREE,
+    distribution: Annotated[Distribution, Query()] = Distribution.EFFICIENT,
 ) -> RecalculateResponse:
     """Пересчёт плана: заявки и инженеры региона на дату → `planner.plan`.
 
-    Пример: `POST /api/planning/recalculate?region_id=1&date=2026-10-10`
+    `remake_level` — степень изменения (fix / engineer / free).
+    `distribution` — алгоритм (even = baseline, efficient = optimized).
+    Пример: `POST /api/planning/recalculate?region_id=1&date=2026-10-10&remake_level=free&distribution=efficient`
     """
-    return await service.recalculate(region_id, date)
+    return await service.recalculate(
+        region_id,
+        date,
+        remake_level=remake_level,
+        distribution=distribution,
+    )

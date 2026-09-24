@@ -1,73 +1,18 @@
 import { useEffect, useState } from 'react'
-import { Checkbox, Popover } from '@heroui/react'
+import { Popover } from '@heroui/react'
 import { RiEqualizer2Line } from '@remixicon/react'
 
-import {
-  QUALIFICATION_LABEL,
-  QUALIFICATION_ORDER,
-  type QualificationCode,
-} from '@/features/personnel/mocks'
 import { cn } from '@/shared/lib/cn'
 import { MultiSelectField } from '@/shared/ui'
 
 export type EngineersFiltersState = {
-  qualifications: QualificationCode[]
   skills: string[]
   transports: string[]
 }
 
 export const EMPTY_ENGINEERS_FILTERS: EngineersFiltersState = {
-  qualifications: [],
   skills: [],
   transports: [],
-}
-
-function QualificationCheckbox({
-  code,
-  isSelected,
-  onChange,
-}: {
-  code: QualificationCode
-  isSelected: boolean
-  onChange: (next: boolean) => void
-}) {
-  return (
-    <Checkbox isSelected={isSelected} onChange={onChange} className="w-full">
-      <Checkbox.Content className="flex w-full items-center gap-2">
-        <Checkbox.Control
-          className="before:!rounded-[4px]"
-          style={{
-            borderRadius: 4,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: isSelected ? 'var(--accent)' : '#dedee0',
-            ['--field-background' as string]: isSelected ? 'var(--accent)' : '#ffffff',
-            ['--field-shadow' as string]: '0 0 #0000',
-          }}
-        >
-          <Checkbox.Indicator className="!size-2.5">
-            {({ isSelected: checked }) =>
-              checked ? (
-                <svg
-                  viewBox="0 0 10 10"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <polyline points="1.75 5.25 4 7.5 8.25 2.75" />
-                </svg>
-              ) : null
-            }
-          </Checkbox.Indicator>
-        </Checkbox.Control>
-        <span className="text-sm leading-6 text-[#18181b]">
-          {QUALIFICATION_LABEL[code]}
-        </span>
-      </Checkbox.Content>
-    </Checkbox>
-  )
 }
 
 type EngineersFiltersPopoverProps = {
@@ -90,16 +35,7 @@ export function EngineersFiltersPopover({
     if (open) setDraft(value)
   }, [open, value])
 
-  const filtersActive =
-    value.qualifications.length > 0 || value.skills.length > 0 || value.transports.length > 0
-
-  const toggleQualification = (code: QualificationCode, next: boolean) =>
-    setDraft((prev) => ({
-      ...prev,
-      qualifications: next
-        ? [...prev.qualifications, code]
-        : prev.qualifications.filter((item) => item !== code),
-    }))
+  const filtersActive = value.skills.length > 0 || value.transports.length > 0
 
   return (
     <Popover isOpen={open} onOpenChange={setOpen}>
@@ -152,22 +88,6 @@ export function EngineersFiltersPopover({
             </p>
 
             <div className="flex flex-col" style={{ marginTop: 16, gap: 16 }}>
-              <div className="flex flex-col" style={{ gap: 8 }}>
-                <span className="text-sm font-medium leading-6 text-[#18181b]">
-                  Квалификация
-                </span>
-                <div className="flex flex-col" style={{ gap: 8 }}>
-                  {QUALIFICATION_ORDER.map((code) => (
-                    <QualificationCheckbox
-                      key={code}
-                      code={code}
-                      isSelected={draft.qualifications.includes(code)}
-                      onChange={(next) => toggleQualification(code, next)}
-                    />
-                  ))}
-                </div>
-              </div>
-
               <MultiSelectField
                 label="Навыки"
                 placeholder="Выберите навык"

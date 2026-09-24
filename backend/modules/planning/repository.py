@@ -136,6 +136,28 @@ class PlanningRepository:
         )
         return list(result.all())
 
+    async def ensure_dict(self, group: DictGroup, value: str) -> int:
+        found = (
+            await self._session.exec(
+                select(Dictionary).where(
+                    Dictionary.group == group, Dictionary.value == value
+                )
+            )
+        ).first()
+        if found is not None and found.dict_id is not None:
+            return found.dict_id
+        row = Dictionary(value=value, group=group)
+        self._session.add(row)
+        await self._session.flush()
+        return row.dict_id or 0
+
+    async def ensure_unassigned_reasons(self) -> list[Dictionary]:
+        from modules.catalogs.seed_values import UNASSIGNED_REASON_SEED
+
+        for _, code in UNASSIGNED_REASON_SEED:
+            await self.ensure_dict(DictGroup.UNASSIGNED_REASON, code)
+        return await self.list_unassigned_reasons()
+
     async def save_plan(
         self,
         *,

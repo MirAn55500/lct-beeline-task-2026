@@ -8,8 +8,8 @@ import {
   RiVipCrown2Fill,
 } from '@remixicon/react'
 
+import { useDeleteEngineerMutation } from '@/features/personnel/api'
 import {
-  QUALIFICATION_LABEL,
   SKILL_LABEL,
   TRANSPORT_LABEL,
   type PersonnelEngineer,
@@ -91,18 +91,24 @@ function RowCheckbox({
 function IconButton({
   label,
   tone,
+  disabled,
+  onClick,
   children,
 }: {
   label: string
   tone: 'outline' | 'danger'
+  disabled?: boolean
+  onClick?: () => void
   children: ReactNode
 }) {
   return (
     <button
       type="button"
       aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
       className={cn(
-        'flex size-8 shrink-0 cursor-pointer items-center justify-center transition-colors',
+        'flex size-8 shrink-0 cursor-pointer items-center justify-center transition-colors disabled:cursor-not-allowed disabled:opacity-40',
         tone === 'outline'
           ? 'border border-[#dedee0] bg-white text-[#18181b] hover:bg-[#f5f5f5]'
           : 'bg-[#ff383c]/15 text-[#ff383c] hover:bg-[#ff383c]/25',
@@ -115,23 +121,24 @@ function IconButton({
 }
 
 function SkillsCell({ skills }: { skills: SkillCode[] }) {
-  if (skills.length === 0) {
+  const known = skills.filter((code): code is SkillCode => code in SKILL_LABEL)
+  if (known.length === 0) {
     return <span className="text-sm leading-6 text-[#71717a]">—</span>
   }
-  if (skills.length === SKILLS_TOTAL) {
+  if (known.length === SKILLS_TOTAL) {
     return <span className="truncate text-sm leading-6 text-[#18181b]">Все типы работ</span>
   }
-  if (skills.length === 1) {
+  if (known.length === 1) {
     return (
       <span className="truncate text-sm leading-6 text-[#18181b]">
-        {SKILL_LABEL[skills[0]!]}
+        {SKILL_LABEL[known[0]!]}
       </span>
     )
   }
 
   return (
     <span className="flex min-w-0 items-center gap-1 text-sm leading-6 text-[#18181b]">
-      {skills.length} {pluralRu(skills.length, ['навык', 'навыка', 'навыков'])}
+      {known.length} {pluralRu(known.length, ['навык', 'навыка', 'навыков'])}
       <Tooltip delay={200}>
         <Tooltip.Trigger
           aria-label="Список навыков"
@@ -141,7 +148,7 @@ function SkillsCell({ skills }: { skills: SkillCode[] }) {
         </Tooltip.Trigger>
         <Tooltip.Content className="max-w-[320px] text-sm leading-5 break-normal">
           <ul className="flex flex-col gap-0.5">
-            {skills.map((code) => (
+            {known.map((code) => (
               <li key={code} className="whitespace-nowrap">
                 {SKILL_LABEL[code]}
               </li>
@@ -157,12 +164,16 @@ function EngineerRow({
   engineer,
   selected,
   highlighted,
+  deleting,
   onToggle,
+  onDelete,
 }: {
   engineer: PersonnelEngineer
   selected: boolean
   highlighted: boolean
+  deleting?: boolean
   onToggle: (next: boolean) => void
+  onDelete: () => void
 }) {
   const TransportIcon = TRANSPORT_ICON[engineer.transport]
 
@@ -195,28 +206,32 @@ function EngineerRow({
             </span>
           ) : null}
         </span>
-        <span className="flex min-w-0 flex-col">
-          <span className="truncate text-sm font-medium leading-6 text-[#18181b]">
-            {engineer.name}
-          </span>
-          <span className="-mt-1 truncate text-xs font-medium leading-5 text-[#71717a]">
-            {engineer.position}
-          </span>
+        <span className="truncate text-sm font-medium leading-6 text-[#18181b]">
+          {engineer.name}
         </span>
       </div>
 
       <SkillsCell skills={engineer.skills} />
 
       <span className="flex min-w-0 items-center gap-1 text-sm leading-6 text-[#18181b]">
-        <TransportIcon size={16} className="shrink-0 text-[#71717a]" />
-        <span className="truncate">{TRANSPORT_LABEL[engineer.transport]}</span>
+        {TransportIcon ? (
+          <TransportIcon size={16} className="shrink-0 text-[#71717a]" />
+        ) : null}
+        <span className="truncate">
+          {TRANSPORT_LABEL[engineer.transport] ?? engineer.transport}
+        </span>
       </span>
 
       <div className="flex justify-end gap-1.5">
         <IconButton label={`Редактировать ${engineer.name}`} tone="outline">
           <RiPencilLine size={16} />
         </IconButton>
-        <IconButton label={`Удалить ${engineer.name}`} tone="danger">
+        <IconButton
+          label={`Удалить ${engineer.name}`}
+          tone="danger"
+          disabled={deleting}
+          onClick={onDelete}
+        >
           <RiDeleteBinLine size={16} />
         </IconButton>
       </div>
@@ -228,23 +243,24 @@ type EngineersTableProps = {
   engineers: PersonnelEngineer[]
   /** Только что добавленные строки — подсвечиваются зелёным. */
   highlightIds?: ReadonlySet<number>
+  isLoading?: boolean
 }
 
-export function EngineersTable({ engineers, highlightIds }: EngineersTableProps) {
+export function EngineersTable({
+  engineers,
+  highlightIds,
+  isLoading = false,
+}: EngineersTableProps) {
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState<EngineersFiltersState>(EMPTY_ENGINEERS_FILTERS)
   const [selected, setSelected] = useState<Set<number>>(() => new Set())
+  const [deleteEngineer, { isLoading: isDeleting }] = useDeleteEngineerMutation()
+  const [deletingId, setDeletingId] = useState<number | null>(null)
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase()
     return engineers.filter((item) => {
       if (needle && !item.name.toLowerCase().includes(needle)) return false
-      if (
-        filters.qualifications.length > 0 &&
-        !filters.qualifications.some((code) => QUALIFICATION_LABEL[code] === item.position)
-      ) {
-        return false
-      }
       if (
         filters.skills.length > 0 &&
         !item.skills.some((code) => filters.skills.includes(SKILL_LABEL[code]))
@@ -281,6 +297,22 @@ export function EngineersTable({ engineers, highlightIds }: EngineersTableProps)
       }
       return copy
     })
+
+  const handleDelete = async (id: number) => {
+    setDeletingId(id)
+    try {
+      await deleteEngineer(id).unwrap()
+      setSelected((prev) => {
+        const copy = new Set(prev)
+        copy.delete(id)
+        return copy
+      })
+    } catch {
+      // Оставляем строку; RTK Query не инвалидирует кэш при ошибке.
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   const selectionLabel =
     selected.size === 0
@@ -350,14 +382,18 @@ export function EngineersTable({ engineers, highlightIds }: EngineersTableProps)
               engineer={engineer}
               selected={selected.has(engineer.id)}
               highlighted={highlightIds?.has(engineer.id) ?? false}
+              deleting={isDeleting && deletingId === engineer.id}
               onToggle={(next) => toggle(engineer.id, next)}
+              onDelete={() => void handleDelete(engineer.id)}
             />
           ))
         ) : (
           <p className="px-5 py-8 text-center text-sm text-[#71717a]">
-            {engineers.length === 0
-              ? 'В бригаде пока нет инженеров'
-              : 'Нет инженеров по выбранным фильтрам'}
+            {isLoading
+              ? 'Загружаем инженеров…'
+              : engineers.length === 0
+                ? 'В бригаде пока нет инженеров'
+                : 'Нет инженеров по выбранным фильтрам'}
           </p>
         )}
       </ScrollShadow>

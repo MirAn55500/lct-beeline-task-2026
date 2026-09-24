@@ -9,6 +9,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from core.config import get_settings
 from core.exceptions import AppError
+from modules.catalogs.seed_values import reason_code, reason_hint, reason_label
 from modules.geocoding.anchors import district_anchors
 from modules.geocoding.geocoder import DISTRICT, SETTLED, AddressGeocoder
 from modules.planning.models.assignment import Assignment
@@ -26,6 +27,22 @@ from modules.tickets.schemas import (
 
 def _format_window(start, end) -> str:
     return f"{start.strftime('%H:%M')} - {end.strftime('%H:%M')}"
+
+
+_STATUS_LABEL = {
+    "pending": "Не отправлена",
+    "en_route": "В пути",
+    "in_progress": "В работе",
+    "completed": "Выполнена",
+    "cancelled": "Отменена",
+}
+
+
+def _status_label(value: str | None) -> str:
+    if not value:
+        return ""
+    raw = value.strip()
+    return _STATUS_LABEL.get(raw.lower(), raw)
 
 
 def _time_of(dt) -> time:
@@ -118,20 +135,33 @@ class TicketsService:
             if query.assignment is TicketAssignmentFilter.UNASSIGNED and assigned:
                 continue
 
-            reason = None
+            reason_raw = None
             engineer = None
             if assigned and assignment is not None and assignment.engineer is not None:
                 engineer = assignment.engineer.name
             elif assignment is not None and assignment.unassigned_reason is not None:
-                reason = assignment.unassigned_reason.value
+                reason_raw = assignment.unassigned_reason.value
+
+            reason = reason_label(reason_raw)
+            hint = reason_hint(reason_raw)
 
             category = request.request_type_vk.value if request.request_type_vk else ""
             address = request.address_ref.address if request.address_ref else ""
+            district = None
+            if request.address_ref is not None and request.address_ref.area_ref is not None:
+                district = request.address_ref.area_ref.area
+            status = _status_label(request.status.value if request.status else None)
+            hd = request.request_type_hd.value if request.request_type_hd else None
 
             if query.work_type and category not in query.work_type:
                 continue
-            if query.reason and (reason is None or reason not in query.reason):
-                continue
+            if query.reason:
+                wanted = {
+                    reason_code(item) or item.strip().lower() for item in query.reason
+                }
+                actual = reason_code(reason_raw)
+                if actual is None or actual not in wanted:
+                    continue
             if not _window_overlaps(
                 request.plan_start_time,
                 request.plan_end_time,
@@ -148,12 +178,16 @@ class TicketsService:
                     number=request.external_id,
                     category=category,
                     reason=reason,
+                    reason_hint=hint,
                     engineer=engineer,
                     assigned=assigned,
                     window=_format_window(request.plan_start_time, request.plan_end_time),
                     window_start=request.plan_start_time,
                     window_end=request.plan_end_time,
                     address=address,
+                    status=status or None,
+                    hd=hd,
+                    district=district,
                 )
             )
 

@@ -1,15 +1,10 @@
+import { useMemo } from 'react'
 import { ScrollShadow } from '@heroui/react'
 import { RiArrowRightLine, RiCalendarScheduleLine } from '@remixicon/react'
 import { Link } from 'react-router'
 
 import { routes } from '@/shared/config/routes'
 import { cn } from '@/shared/lib/cn'
-
-const DAY_START = 9
-const DAY_END = 18
-const DAY_SPAN = DAY_END - DAY_START
-const HOURS = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18] as const
-const LABELS = [9, 12, 15, 18] as const
 
 type BlockTone = 'soft' | 'strong'
 
@@ -30,21 +25,62 @@ const TONE_COLOR: Record<BlockTone, string> = {
   strong: '#ffdda8',
 }
 
-function hourToPercent(hour: number) {
-  const clamped = Math.min(DAY_END, Math.max(DAY_START, hour))
-  return ((clamped - DAY_START) / DAY_SPAN) * 100
+const DEFAULT_START = 9
+const DEFAULT_END = 18
+
+function buildDayRange(rows: PlanRow[]) {
+  let min = Number.POSITIVE_INFINITY
+  let max = Number.NEGATIVE_INFINITY
+  for (const row of rows) {
+    for (const block of row.blocks) {
+      min = Math.min(min, block.from)
+      max = Math.max(max, block.to)
+    }
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max) || !(max > min)) {
+    return { start: DEFAULT_START, end: DEFAULT_END }
+  }
+  const start = Math.max(0, Math.floor(min))
+  const end = Math.min(24, Math.max(start + 1, Math.ceil(max)))
+  return { start, end }
+}
+
+function buildLabels(start: number, end: number) {
+  const span = end - start
+  if (span <= 4) {
+    return Array.from({ length: span + 1 }, (_, index) => start + index)
+  }
+  const step = span <= 8 ? 2 : 3
+  const labels: number[] = [start]
+  for (let hour = start + step; hour < end; hour += step) labels.push(hour)
+  if (labels[labels.length - 1] !== end) labels.push(end)
+  return labels
+}
+
+function hourToPercent(hour: number, start: number, span: number) {
+  const clamped = Math.min(start + span, Math.max(start, hour))
+  return ((clamped - start) / span) * 100
 }
 
 function formatHour(hour: number) {
   return `${hour}:00`
 }
 
-function TimeLabels() {
+function TimeLabels({
+  start,
+  end,
+  labels,
+}: {
+  start: number
+  end: number
+  labels: number[]
+}) {
+  const span = end - start
   return (
     <div className="relative h-5 min-w-0 flex-1 text-sm font-medium leading-5 text-[#71717a]">
-      {LABELS.map((hour) => {
-        const atStart = hour === DAY_START
-        const atEnd = hour === DAY_END
+      {labels.map((hour) => {
+        const atStart = hour === start
+        const atEnd = hour === end
         return (
           <span
             key={hour}
@@ -56,7 +92,7 @@ function TimeLabels() {
             )}
             style={
               !atStart && !atEnd
-                ? { left: `${hourToPercent(hour)}%` }
+                ? { left: `${hourToPercent(hour, start, span)}%` }
                 : undefined
             }
           >
@@ -68,32 +104,43 @@ function TimeLabels() {
   )
 }
 
-function TimeGrid() {
+function TimeGrid({ start, end }: { start: number; end: number }) {
+  const span = end - start
+  const hours = Array.from({ length: span + 1 }, (_, index) => start + index)
   return (
     <div className="pointer-events-none absolute inset-0">
-      {HOURS.map((hour) => (
+      {hours.map((hour) => (
         <span
           key={hour}
           className="absolute top-0 bottom-0 border-l border-dashed border-[#dedee0]"
-          style={{ left: `${hourToPercent(hour)}%` }}
+          style={{ left: `${hourToPercent(hour, start, span)}%` }}
         />
       ))}
     </div>
   )
 }
 
-function PlanBars({ blocks }: { blocks: PlanBlock[] }) {
+function PlanBars({
+  blocks,
+  start,
+  end,
+}: {
+  blocks: PlanBlock[]
+  start: number
+  end: number
+}) {
+  const span = end - start
   return (
     <div className="relative h-8 min-w-0 flex-1">
       {blocks.map((block) => {
-        if (block.to <= DAY_START || block.from >= DAY_END) return null
+        if (block.to <= start || block.from >= end) return null
         return (
           <span
             key={`${block.from}-${block.to}`}
             className="absolute top-1/2 h-4 -translate-y-1/2"
             style={{
-              left: `calc(${hourToPercent(block.from)}% + 4px)`,
-              width: `calc(${Math.max(hourToPercent(block.to) - hourToPercent(block.from), 0)}% - 8px)`,
+              left: `calc(${hourToPercent(block.from, start, span)}% + 4px)`,
+              width: `calc(${Math.max(hourToPercent(block.to, start, span) - hourToPercent(block.from, start, span), 0)}% - 8px)`,
               backgroundColor: TONE_COLOR[block.tone],
               borderRadius: 8,
             }}
@@ -113,13 +160,16 @@ export function DayPlanPreview({
   className,
   rows = [],
 }: DayPlanPreviewProps) {
+  const { start, end } = useMemo(() => buildDayRange(rows), [rows])
+  const labels = useMemo(() => buildLabels(start, end), [start, end])
+
   return (
     <div className={cn('flex min-h-0 w-full flex-1 flex-col', className)}>
       <div className="flex shrink-0 items-end gap-4 px-5 pt-5 pb-2">
         <h2 className="w-[136px] shrink-0 text-xl font-semibold leading-7 text-foreground">
           План работ
         </h2>
-        <TimeLabels />
+        <TimeLabels start={start} end={end} labels={labels} />
       </div>
 
       <ScrollShadow
@@ -130,7 +180,7 @@ export function DayPlanPreview({
       >
         <div className="relative">
           <div className="pointer-events-none absolute inset-y-0 right-5 left-[172px]">
-            <TimeGrid />
+            <TimeGrid start={start} end={end} />
           </div>
 
           {rows.length === 0 ? (
@@ -143,7 +193,7 @@ export function DayPlanPreview({
                 <p className="w-[136px] shrink-0 truncate text-sm font-medium leading-5 text-foreground">
                   {row.name}
                 </p>
-                <PlanBars blocks={row.blocks} />
+                <PlanBars blocks={row.blocks} start={start} end={end} />
               </div>
             ))
           )}

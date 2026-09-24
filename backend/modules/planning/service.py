@@ -16,10 +16,25 @@ from modules.planning.scenario_builder import (
 from modules.planning.schemas import (
     CounterPair,
     DayOverviewResponse,
+    Distribution,
     EngineersCounter,
     PlanVersionResponse,
     RecalculateResponse,
+    RemakeLevel,
 )
+from planner import Algorithm
+from planner.enums import ReplanScope
+
+_REMAKE_TO_SCOPE = {
+    RemakeLevel.FIX: ReplanScope.LOW,
+    RemakeLevel.ENGINEER: ReplanScope.MEDIUM,
+    RemakeLevel.FREE: ReplanScope.HIGH,
+}
+
+_DISTRIBUTION_TO_ALGORITHM = {
+    Distribution.EVEN: Algorithm.BASELINE,
+    Distribution.EFFICIENT: Algorithm.OPTIMIZED,
+}
 
 
 class PlanningService:
@@ -107,12 +122,20 @@ class PlanningService:
         return scenario
 
     async def recalculate(
-        self, region_id: int, day: date, *, warm_transit: bool = True
+        self,
+        region_id: int,
+        day: date,
+        *,
+        remake_level: RemakeLevel = RemakeLevel.FREE,
+        distribution: Distribution = Distribution.EFFICIENT,
+        warm_transit: bool = True,
     ) -> RecalculateResponse:
         scenario, transport_by_engineer = await self._scenario(region_id, day)
+        scenario.settings.replan_scope = _REMAKE_TO_SCOPE[remake_level]
+        algorithm = _DISTRIBUTION_TO_ALGORITHM[distribution]
 
-        result = await asyncio.to_thread(run_plan, scenario)
-        reasons = await self._repo.list_unassigned_reasons()
+        result = await asyncio.to_thread(run_plan, scenario, algorithm)
+        reasons = await self._repo.ensure_unassigned_reasons()
         rows, assigned, unassigned = assignments_from_result(
             result,
             transport_by_engineer=transport_by_engineer,
