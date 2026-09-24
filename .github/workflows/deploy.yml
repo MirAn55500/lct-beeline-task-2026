@@ -127,23 +127,31 @@ jobs:
               fh.write("\n".join(lines) + "\n")
           PY
 
+          # Переменные шага (в т.ч. незаданные vars — пустыми строками) для compose
+          # важнее .env: пустой ORS_XMX давал дефолт 10g, пустой ORS_URL выключал ORS.
+          # Источник правды — .env, поэтому все его ключи из окружения убираются
+          db_host="$POSTGRES_HOST"
+          frontend_port="${FRONTEND_PORT:-8080}"
+          backend_port="${BACKEND_PORT:-8000}"
+          unset $(sed -n 's/=.*//p' .env)
+
           # При падении показать, почему backend не поднялся
           trap 'docker compose ps -a; docker compose logs --tail=100 backend db || true' ERR
 
           # db в профиле local-db и сам не стартует — без него хост "db" не резолвится
-          if [ "$POSTGRES_HOST" = "db" ]; then
+          if [ "$db_host" = "db" ]; then
             docker compose --profile local-db up -d --wait db
           fi
 
           docker compose up -d --build backend frontend
           docker compose ps
           docker compose logs --tail=80 backend
-          curl -fsS "http://127.0.0.1:${FRONTEND_PORT:-8080}/api/catalogs/health"
+          curl -fsS "http://127.0.0.1:${frontend_port}/api/catalogs/health"
           echo
-          curl -fsS "http://127.0.0.1:${BACKEND_PORT:-8000}/health"
+          curl -fsS "http://127.0.0.1:${backend_port}/health"
           echo
 
-          # ORS после приложения: первый деплой качает OSM (~0.9 ГБ), графы собираются
-          # в фоне 30-45 минут — ждать их не нужно, backend пока считает на кэше
+          # ORS после приложения; ждать его не нужно — до готовности backend считает на
+          # кэше маршрутов. Графы на стенде заливаются готовыми (upload-graphs.sh)
           docker compose --profile ors up -d ors
           docker compose --profile ors ps ors
