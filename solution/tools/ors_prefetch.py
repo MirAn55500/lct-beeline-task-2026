@@ -11,7 +11,7 @@
     python tools/ors_prefetch.py --with-geometry         # ещё и линии маршрутов плана
     python tools/ors_prefetch.py --transit               # ещё и расписания транспорта
     python tools/ors_prefetch.py --transit --date 2026-09-21   # на конкретный день
-    python tools/ors_prefetch.py --url http://host:8080/ors
+    python tools/ors_prefetch.py --url http://host:8081/ors
     python tools/ors_prefetch.py --dry-run               # что будет запрошено
 
 Матрица считается «все со всеми» по точкам сценария: старты инженеров плюс адреса

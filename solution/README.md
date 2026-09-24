@@ -524,7 +524,7 @@ python tools/ors_prefetch.py --with-geometry                # прогреть �
 В коде это три строки, и ни одна из них не в алгоритме:
 
 ```python
-routing = setup_routing(scenario, url="http://localhost:8080/ors")
+routing = setup_routing(scenario, url="http://localhost:8081/ors")
 result = routing.attach(plan(scenario, travel=routing.travel))   # расчёт + геометрия
 routing.save()                                                   # ответы сервиса — в кэш
 ```

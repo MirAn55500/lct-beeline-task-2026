@@ -10,7 +10,8 @@ set -eu
 
 REGION="${1:-central}"
 DIR="$(cd "$(dirname "$0")" && pwd)"
-TARGET="$DIR/files/region.osm.pbf"
+# OSM_TARGET — куда класть файл (ors-init кладёт прямо в volume ORS)
+TARGET="${OSM_TARGET:-$DIR/files/region.osm.pbf}"
 
 case "$REGION" in
   central)
@@ -25,7 +26,7 @@ case "$REGION" in
     ;;
 esac
 
-mkdir -p "$DIR/files"
+mkdir -p "$(dirname "$TARGET")"
 
 if [ -f "$TARGET" ]; then
   echo "Файл уже есть: $TARGET"

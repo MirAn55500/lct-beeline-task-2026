@@ -100,7 +100,7 @@ __all__ = [
     "TransitFailures",
 ]
 
-DEFAULT_BASE_URL = "http://localhost:8080/ors"
+DEFAULT_BASE_URL = "http://localhost:8081/ors"
 """Адрес локального контейнера из `deploy/ors/docker-compose.yml`."""
 
 DEFAULT_CACHE_PATH = Path(__file__).resolve().parent.parent / "data" / "routing_cache.json"
@@ -1421,7 +1421,7 @@ class Routing:
 
     Типовое использование (и в `demo.py`, и в основном сервисе):
 
-        routing = setup_routing(scenario, url="http://localhost:8080/ors")
+        routing = setup_routing(scenario, url="http://localhost:8081/ors")
         result = plan(scenario, travel=routing.travel)
         result = routing.attach(result)      # линии маршрутов для карты
         routing.save()                       # ответы сервиса — в кэш

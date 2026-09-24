@@ -6,7 +6,7 @@
 
 Запуск:
     python tools/ors_check.py
-    python tools/ors_check.py --url http://localhost:8080/ors
+    python tools/ors_check.py --url http://localhost:8081/ors
     python tools/ors_check.py --url https://api.openrouteservice.org --key <ключ>
 
 Код возврата 0, если хотя бы один профиль отвечает и на матрицу, и на маршрут.

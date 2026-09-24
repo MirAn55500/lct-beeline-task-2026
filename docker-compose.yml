@@ -35,8 +35,14 @@ services:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       DEBUG: ${DEBUG:-false}
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173","http://localhost:8080"]}
+      # Сервис ors ниже. Пустое значение — только кэш маршрутов, без кэша — координаты
+      ORS_URL: ${ORS_URL-http://ors:8082/ors}
+      # Кэш ответов ORS переживает пересборку образа; при первом старте берётся из образа
+      ROUTING_CACHE_PATH: /cache/routing_cache.json
     ports:
       - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - routing-cache:/cache
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)\""]
       interval: 5s
@@ -60,8 +66,54 @@ services:
     networks:
       - lct
 
+  # Готовит volume ORS: выгрузка OSM (один раз, ~0.9 ГБ), GTFS и конфиг из solution/deploy/ors
+  ors-init:
+    image: curlimages/curl:8.10.1
+    user: "0:0"
+    entrypoint: ["sh", "/src/init.sh"]
+    environment:
+      OSM_REGION: ${ORS_OSM_REGION:-central}
+    volumes:
+      - ./solution/deploy/ors:/src:ro
+      - ors-data:/home/ors
+    profiles:
+      - ors
+
+  # openrouteservice: расстояния по улицам и транспорту для планировщика.
+  # Первая сборка графов идёт 30-45 минут — backend всё это время работает на кэше.
+  ors:
+    image: openrouteservice/openrouteservice:v10.0.0
+    container_name: lct-ors
+    restart: unless-stopped
+    depends_on:
+      ors-init:
+        condition: service_completed_successfully
+    ports:
+      # Для tools/ors_check.py и прогрева кэша с хоста; наружу не открываем
+      - "127.0.0.1:${ORS_PORT:-8081}:8082"
+    volumes:
+      - ors-data:/home/ors
+    environment:
+      REBUILD_GRAPHS: "False"
+      CONTAINER_LOG_LEVEL: INFO
+      # Правило ORS: <размер pbf> × <число профилей> × 2 — для ЦФО минимум 6 ГБ
+      XMS: ${ORS_XMS:-4g}
+      XMX: ${ORS_XMX:-10g}
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8082/ors/v2/health || exit 1
+      start_period: 45m
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    profiles:
+      - ors
+    networks:
+      - lct
+
 volumes:
   pgdata:
+  routing-cache:
+  ors-data:
 
 networks:
   lct:

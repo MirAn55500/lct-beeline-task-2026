@@ -7,6 +7,7 @@ on:
       - "backend/**"
       - "solution/planner/**"
       - "solution/data/*.json"
+      - "solution/deploy/ors/**"
       - "frontend/**"
       - "docker-compose.yml"
       - ".github/workflows/deploy.yml"
@@ -34,6 +35,9 @@ jobs:
           BACKEND_PORT: ${{ vars.BACKEND_PORT }}
           FRONTEND_PORT: ${{ vars.FRONTEND_PORT }}
           CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
+          ORS_URL: ${{ vars.ORS_URL }}
+          ORS_XMS: ${{ vars.ORS_XMS }}
+          ORS_XMX: ${{ vars.ORS_XMX }}
         run: |
           set -e
           missing=
@@ -64,6 +68,9 @@ jobs:
           backend_port = os.environ.get("BACKEND_PORT") or "8000"
           frontend_port = os.environ.get("FRONTEND_PORT") or "8080"
           cors = os.environ.get("CORS_ORIGINS") or '["http://localhost:8080"]'
+          ors_url = os.environ.get("ORS_URL") or "http://ors:8082/ors"
+          ors_xms = os.environ.get("ORS_XMS") or "4g"
+          ors_xmx = os.environ.get("ORS_XMX") or "10g"
 
           database_url = (
               "postgresql+asyncpg://"
@@ -89,6 +96,9 @@ jobs:
               q("BACKEND_PORT", backend_port),
               q("FRONTEND_PORT", frontend_port),
               q("CORS_ORIGINS", cors),
+              q("ORS_URL", ors_url),
+              q("ORS_XMS", ors_xms),
+              q("ORS_XMX", ors_xmx),
           ]
           with open(".env", "w", encoding="utf-8") as fh:
               fh.write("\n".join(lines) + "\n")
@@ -109,3 +119,8 @@ jobs:
           echo
           curl -fsS "http://127.0.0.1:${BACKEND_PORT:-8000}/health"
           echo
+
+          # ORS после приложения: первый деплой качает OSM (~0.9 ГБ), графы собираются
+          # в фоне 30-45 минут — ждать их не нужно, backend пока считает на кэше
+          docker compose --profile ors up -d ors
+          docker compose --profile ors ps ors

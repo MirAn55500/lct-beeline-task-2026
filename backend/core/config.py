@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     debug: bool = False
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/lct"
     cors_origins: list[str] = ["http://localhost:5173"]
+    # openrouteservice (solution/deploy/ors). Пусто — расчёт на кэше маршрутов или по координатам
+    ors_url: str | None = None
+    # Где хранить кэш ответов ORS; не задан — solution/data/routing_cache.json
+    routing_cache_path: str | None = None
 
     @field_validator("database_url", mode="before")
     @classmethod
