@@ -36,6 +36,8 @@ jobs:
           FRONTEND_PORT: ${{ vars.FRONTEND_PORT }}
           CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
           ORS_URL: ${{ vars.ORS_URL }}
+          ORS_API_KEY: ${{ secrets.ORS_API_KEY }}
+          TRANSIT_WORKERS: ${{ vars.TRANSIT_WORKERS }}
           ORS_XMS: ${{ vars.ORS_XMS }}
           ORS_XMX: ${{ vars.ORS_XMX }}
           ORS_GRAPHS_DATA_ACCESS: ${{ vars.ORS_GRAPHS_DATA_ACCESS }}
@@ -75,6 +77,8 @@ jobs:
           frontend_port = os.environ.get("FRONTEND_PORT") or "8080"
           cors = os.environ.get("CORS_ORIGINS") or '["http://localhost:8080"]'
           ors_url = os.environ.get("ORS_URL") or "http://ors:8082/ors"
+          ors_api_key = os.environ.get("ORS_API_KEY") or ""
+          transit_workers = os.environ.get("TRANSIT_WORKERS") or "2"
           # По умолчанию — экономный режим стенда (3-4 ГБ RAM): графы с диска, heap 1 ГБ,
           # потолок контейнера 2 ГБ, без общественного транспорта. Графы заливаются
           # готовыми (solution/deploy/ors/upload-graphs.sh), собрать их тут не хватит памяти
@@ -118,6 +122,8 @@ jobs:
               q("FRONTEND_PORT", frontend_port),
               q("CORS_ORIGINS", cors),
               q("ORS_URL", ors_url),
+              q("ORS_API_KEY", ors_api_key),
+              q("TRANSIT_WORKERS", transit_workers),
               q("ORS_XMS", ors_xms),
               q("ORS_XMX", ors_xmx),
               q("ORS_GRAPHS_DATA_ACCESS", ors_data_access),
@@ -135,6 +141,7 @@ jobs:
           # важнее .env: пустой ORS_XMX давал дефолт 10g, пустой ORS_URL выключал ORS.
           # Источник правды — .env, поэтому все его ключи из окружения убираются
           db_host="$POSTGRES_HOST"
+          ors_url="$(grep '^ORS_URL=' .env | cut -d"'" -f2)"
           frontend_port="${FRONTEND_PORT:-8080}"
           backend_port="${BACKEND_PORT:-8000}"
           unset $(sed -n 's/=.*//p' .env)
@@ -156,6 +163,15 @@ jobs:
           echo
 
           # ORS после приложения; ждать его не нужно — до готовности backend считает на
-          # кэше маршрутов. Графы на стенде заливаются готовыми (upload-graphs.sh)
-          docker compose --profile ors up -d ors
-          docker compose --profile ors ps ors
+          # кэше маршрутов. Графы на стенде заливаются готовыми (upload-graphs.sh).
+          # ORS_URL на отдельную машину (solution/deploy/ors/REMOTE.md) — свой не нужен
+          case "$ors_url" in
+            http://ors:*)
+              docker compose --profile ors up -d ors
+              docker compose --profile ors ps ors
+              ;;
+            *)
+              echo "ORS на отдельной машине: $ors_url — локальный lct-ors не нужен"
+              docker compose --profile ors rm -sf ors ors-init || true
+              ;;
+          esac

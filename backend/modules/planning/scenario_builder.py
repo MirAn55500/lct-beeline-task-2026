@@ -209,22 +209,24 @@ def build_scenario(
 logger = logging.getLogger(__name__)
 
 # Кэш маршрутов — один JSON-файл, запись не атомарная: чтение и запись по очереди
-_routing_cache_lock = threading.Lock()
+routing_cache_lock = threading.Lock()
 
 
 def run_plan(scenario: Scenario) -> PlanResult:
     # Без ORS_URL берутся сохранённые ответы сервиса, без кэша — расстояния по координатам
     settings = get_settings()
     options = {"cache_path": settings.routing_cache_path} if settings.routing_cache_path else {}
-    with _routing_cache_lock:
-        routing = setup_routing(scenario, url=settings.ors_url or None, **options)
+    with routing_cache_lock:
+        routing = setup_routing(
+            scenario, url=settings.ors_url or None, api_key=settings.ors_api_key or None, **options
+        )
     result = plan(scenario, travel=routing.travel)
     notes = list(routing.notes)
     if isinstance(routing.travel, OrsTravelModel):
         notes += [n for n in routing.travel.report() if n not in notes]
     for note in notes:
         logger.warning(note)
-    with _routing_cache_lock:
+    with routing_cache_lock:
         routing.save()
     return result
 

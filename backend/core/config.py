@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173"]
     # openrouteservice (solution/deploy/ors). Пусто — расчёт на кэше маршрутов или по координатам
     ors_url: str | None = None
+    # Токен ORS на отдельной машине (nginx перед ним проверяет заголовок Authorization)
+    ors_api_key: str | None = None
+    # Параллельных запросов фонового досчёта расписаний: 2 — ORS на стенде рядом с
+    # backend; на отдельной машине под ORS — 6-8
+    transit_workers: int = 2
     # Где хранить кэш ответов ORS; не задан — solution/data/routing_cache.json
     routing_cache_path: str | None = None
     # Геокодирование: DaData (ключ с dadata.ru; секрет включает стандартизацию), резерв — OSM

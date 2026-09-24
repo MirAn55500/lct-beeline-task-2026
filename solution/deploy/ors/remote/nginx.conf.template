@@ -1,0 +1,25 @@
+# nginx подставляет сюда только переменные окружения контейнера (ORS_TOKEN);
+# переменные самого nginx вида $http_authorization остаются как есть.
+server {
+    listen 8081;
+    client_max_body_size 20m;
+
+    # Без токена — только проверка живости: её удобно дёргать со стенда и мониторинга
+    location = /ors/v2/health {
+        proxy_pass http://ors:8082;
+    }
+
+    location /ors/ {
+        if ($http_authorization != "${ORS_TOKEN}") {
+            return 401;
+        }
+        proxy_pass http://ors:8082;
+        # Расчёт по расписанию и большие матрицы идут десятки секунд
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+
+    location / {
+        return 404;
+    }
+}

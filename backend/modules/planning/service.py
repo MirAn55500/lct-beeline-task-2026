@@ -5,6 +5,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from core.exceptions import AppError
 from modules.algorithm.service import AlgorithmService
+from modules.planning import transit_warmup
 from modules.planning.repository import PlanningRepository
 from modules.planning.scenario_builder import (
     assignments_from_result,
@@ -76,7 +77,7 @@ class PlanningService:
             plans=versions,
         )
 
-    async def recalculate(self, region_id: int, day: date) -> RecalculateResponse:
+    async def _scenario(self, region_id: int, day: date):
         region = await self._repo.get_region(region_id)
         if region is None:
             raise AppError("Регион не найден", status_code=404)
@@ -95,6 +96,20 @@ class PlanningService:
         )
         if not scenario.requests:
             raise AppError("Нет открытых заявок для расчёта")
+        return scenario, transport_by_engineer
+
+    async def scenario_for(self, region_id: int, day: date):
+        """Сценарий дня для фонового досчёта; None, если считать нечего."""
+        try:
+            scenario, _ = await self._scenario(region_id, day)
+        except AppError:
+            return None
+        return scenario
+
+    async def recalculate(
+        self, region_id: int, day: date, *, warm_transit: bool = True
+    ) -> RecalculateResponse:
+        scenario, transport_by_engineer = await self._scenario(region_id, day)
 
         result = await asyncio.to_thread(run_plan, scenario)
         reasons = await self._repo.list_unassigned_reasons()
@@ -113,6 +128,10 @@ class PlanningService:
             reference_plan_id=previous.plan_id if previous is not None else None,
             rows=rows,
         )
+        if warm_transit:
+            # Новые точки на общественном транспорте пока по координатам — досчитать
+            # расписания в фоне и пересчитать план ещё раз (modules/planning/transit_warmup)
+            transit_warmup.schedule(region_id, day)
         return RecalculateResponse(
             plan_id=plan.plan_id or 0,
             version=plan.version,

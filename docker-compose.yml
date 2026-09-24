@@ -37,6 +37,9 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173","http://localhost:8080"]}
       # Сервис ors ниже. Пустое значение — только кэш маршрутов, без кэша — координаты
       ORS_URL: ${ORS_URL-http://ors:8082/ors}
+      # ORS на отдельной машине: токен nginx и потоки фонового досчёта расписаний
+      ORS_API_KEY: ${ORS_API_KEY:-}
+      TRANSIT_WORKERS: ${TRANSIT_WORKERS:-2}
       # Кэш ответов ORS переживает пересборку образа; при первом старте берётся из образа
       ROUTING_CACHE_PATH: /cache/routing_cache.json
       # Геокодирование новых адресов: DaData, при промахе — Photon/Nominatim (OSM)

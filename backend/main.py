@@ -11,6 +11,7 @@ from core.config import get_settings
 from core.database import engine
 from core.exceptions import register_exception_handlers
 from modules.geocoding.recheck import recheck_addresses
+from modules.planning import transit_warmup
 
 # Сообщения модулей (геокодер, маршрутизация) — в лог контейнера рядом с uvicorn
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s: %(message)s")
@@ -21,8 +22,10 @@ logging.getLogger("httpx").setLevel(logging.WARNING)  # строка на каж
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # В фоне: старт и healthcheck не ждут геокодера
     recheck = asyncio.create_task(recheck_addresses())
+    warmup = asyncio.create_task(transit_warmup.worker())
     yield
     recheck.cancel()
+    warmup.cancel()
     await engine.dispose()
 
 

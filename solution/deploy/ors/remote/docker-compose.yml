@@ -1,0 +1,44 @@
+# openrouteservice на отдельной машине для стенда: все профили, включая общественный
+# транспорт по расписанию. Инструкция — ../REMOTE.md.
+#
+#   cp .env.example .env         # задать ORS_TOKEN
+#   docker compose up -d
+#
+# Наружу смотрит только nginx: пускает запросы с заголовком Authorization = ORS_TOKEN.
+# Сам ORS авторизации не знает, открывать его в интернет напрямую нельзя.
+
+services:
+  ors:
+    image: openrouteservice/openrouteservice:v10.0.0
+    container_name: lct-ors-remote
+    restart: unless-stopped
+    volumes:
+      # Графы и выгрузка — рядом, в solution/deploy/ors: те же пути, что у локального запуска
+      - ../ors-docker:/home/ors
+      - ../ors-config.yml:/home/ors/config/ors-config.yml:ro
+      - ../files:/home/ors/files
+    environment:
+      REBUILD_GRAPHS: "False"   # True — только после смены выгрузки OSM или профилей
+      CONTAINER_LOG_LEVEL: INFO
+      # Графы ЦФО с общественным транспортом в памяти занимают ~7.5 ГБ
+      XMS: ${ORS_XMS:-4g}
+      XMX: ${ORS_XMX:-10g}
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8082/ors/v2/health || exit 1
+      start_period: 45m         # первая сборка графов на этой машине — десятки минут
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  proxy:
+    image: nginx:1.28-alpine
+    container_name: lct-ors-proxy
+    restart: unless-stopped
+    depends_on:
+      - ors
+    ports:
+      - "${ORS_PORT:-8081}:8081"
+    environment:
+      ORS_TOKEN: ${ORS_TOKEN:?задайте ORS_TOKEN в .env}
+    volumes:
+      - ./nginx.conf.template:/etc/nginx/templates/default.conf.template:ro

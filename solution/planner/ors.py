@@ -666,6 +666,29 @@ class RoutingCache:
 
     # -- сохранение --
 
+    def merge(self, other: "RoutingCache") -> int:
+        """Долить из другого кэша то, чего нет в этом. Возвращает число новых участков.
+
+        Нужно долгим прогревам на копии: копия считается минутами без блокировки
+        файла, а в общий кэш, который за это время мог пополниться другими расчётами,
+        доливается одним коротким шагом. Уже известное здесь не перезаписывается.
+        """
+        added = 0
+        for mine, theirs in (
+            (self._legs, other._legs),
+            (self._geometry, other._geometry),
+            (self._transit, other._transit),
+        ):
+            for section, entries in theirs.items():
+                target = mine.setdefault(section, {})
+                for key, value in entries.items():
+                    if key not in target:
+                        target[key] = value
+                        if mine is self._legs:
+                            added += 1
+                        self._dirty = True
+        return added
+
     @property
     def dirty(self) -> bool:
         return self._dirty
@@ -1905,8 +1928,14 @@ def fetch_transit_legs(
     workers: int = 8,
     on_progress: Callable[[int, int, int], None] | None = None,
     known: Mapping[tuple[str, str], tuple[float, float]] | None = None,
+    skip: Iterable[tuple[str, str]] = (),
+    outside: set[tuple[str, str]] | None = None,
 ) -> tuple[dict[tuple[str, str], tuple[float, float]], TransitFailures]:
     """Матрица общественного транспорта, собранная по одному участку за раз.
+
+    `skip` — пары, которые не запрашивать (например, заведомо вне фида); в `outside`
+    складываются ключи пар, по которым сервис дал вердикт «вне фида», — чтобы
+    фоновый досчёт не перезапрашивал Каширу при каждой загрузке.
 
     Почему не `/v2/matrix`: см. `NO_MATRIX_PROFILES` — у матрицы нет времени отправления,
     и она отвечает пешей доступностью. `directions` время принимает, но берёт одну пару
@@ -1925,10 +1954,12 @@ def fetch_transit_legs(
     по координатам. Но ПОЧЕМУ она не построилась, записывается (см. `TransitFailures`) —
     граница фида и лежащий сервис дают одинаковый результат и совершенно разный вывод.
     """
+    skipped = set(skip)
     pairs = [
         (a, b) for a in points for b in points
         if point_key(a) != point_key(b)
         and (known is None or (point_key(a), point_key(b)) not in known)
+        and (point_key(a), point_key(b)) not in skipped
     ]
     table: dict[tuple[str, str], tuple[float, float]] = {}
     failures = TransitFailures()
@@ -1947,6 +1978,8 @@ def fetch_transit_legs(
                 kind = "outage"
             elif is_point_verdict(exc.code):
                 kind = "outside"
+                if outside is not None:
+                    outside.add((point_key(a), point_key(b)))
             else:
                 kind = "rejected"
             return None, kind, str(exc)
