@@ -102,19 +102,17 @@ jobs:
               f"{host}:{port}/{db}"
           )
 
-          # Compose интерполирует % как %(…)s — URL-encoded пароль (%24) иначе ValueError.
-          # В .env пишем %%, compose отдаст в контейнер уже одиночный %.
-          database_url_for_compose = database_url.replace("%", "%%")
-
-          # Одинарные кавычки: compose не интерполирует $ внутри них
-          # (в двойных "abc$7def" превращается в "abcdef").
+          # Одинарные кавычки: compose берёт значение как есть — не интерполирует $
+          # (в двойных "abc$7def" превращается в "abcdef") и не трогает %. Поэтому
+          # % не удваиваем: %% дошёл бы до backend и сломал пароль. Для configparser
+          # alembic % экранирует сам (backend/alembic/env.py)
           def q(name: str, value: str) -> str:
               if "'" in value or "\n" in value:
                   raise SystemExit(f"{name}: одинарная кавычка/перевод строки не поддерживаются")
               return f"{name}='{value}'"
 
           lines = [
-              q("DATABASE_URL", database_url_for_compose),
+              q("DATABASE_URL", database_url),
               q("POSTGRES_USER", user),
               q("POSTGRES_PASSWORD", password),
               q("POSTGRES_DB", db),

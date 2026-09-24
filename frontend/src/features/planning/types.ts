@@ -1,6 +1,9 @@
 /** Уровень перестроения: Фикс / Инженерный / Свободный. */
 export type RemakeLevel = 'fix' | 'engineer' | 'free'
 
+/** Алиас для UI-диалога перестроения плана. */
+export type PlanRebuildLevel = RemakeLevel
+
 /** Распределение: Равномерное / Эффективное. */
 export type PlanDistribution = 'even' | 'efficient'
 

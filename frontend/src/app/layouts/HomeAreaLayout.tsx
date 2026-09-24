@@ -10,12 +10,16 @@ import { useSearchParams } from 'react-router'
 
 import { useGetRegionsQuery } from '@/features/catalogs'
 import {
-  RemakePlanModal,
+  PlanRebuildDialog,
   useGetDayOverviewQuery,
   useRecalculatePlanMutation,
-  type PlanDistribution,
-  type RemakeLevel,
 } from '@/features/planning'
+import {
+  TicketsUploadDialog,
+  downloadTickets,
+  useLazyGetTicketsQuery,
+} from '@/features/tickets'
+import { ASIDE_WIDTH_CLASS, cn } from '@/shared/lib'
 import { AppNav, AppPanel, BrandBar, ContextHeader } from '@/shared/ui'
 
 export type HomeAreaContext = {
@@ -29,11 +33,6 @@ export type HomeAreaContext = {
 
 type HomeAreaLayoutProps = {
   children?: ReactNode | ((context: HomeAreaContext) => ReactNode)
-  isUploadDisabled?: boolean
-  onUploadClick?: () => void
-  isExportDisabled?: boolean
-  onExportCsv?: () => void
-  onExportJson?: () => void
 }
 
 function readDateParam(raw: string | null): CalendarDate | null {
@@ -45,24 +44,18 @@ function readDateParam(raw: string | null): CalendarDate | null {
   }
 }
 
-export function HomeAreaLayout({
-  children,
-  isUploadDisabled,
-  onUploadClick,
-  isExportDisabled,
-  onExportCsv,
-  onExportJson,
-}: HomeAreaLayoutProps) {
+export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
   const [params, setParams] = useSearchParams()
   const { data: regions = [], isLoading, isError } = useGetRegionsQuery()
   const [regionId, setRegionId] = useState<number | null>(null)
   const [planId, setPlanId] = useState<number | null>(null)
-  const [remakeOpen, setRemakeOpen] = useState(false)
   const [recalculatePlan, { isLoading: isRecalculating }] =
     useRecalculatePlanMutation()
+  const [loadTickets] = useLazyGetTicketsQuery()
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [rebuildOpen, setRebuildOpen] = useState(false)
 
-  const date =
-    readDateParam(params.get('date')) ?? today(getLocalTimeZone())
+  const date = readDateParam(params.get('date')) ?? today(getLocalTimeZone())
 
   const setDate = (next: CalendarDate) => {
     setPlanId(null)
@@ -108,46 +101,6 @@ export function HomeAreaLayout({
     setRegionId(nextRegionId)
   }
 
-  const handleRemake = async (args: {
-    remakeLevel: RemakeLevel
-    distribution: PlanDistribution
-  }) => {
-    if (regionId == null) return
-    try {
-      const result = await recalculatePlan({
-        regionId,
-        date: date.toString(),
-        remakeLevel: args.remakeLevel,
-        distribution: args.distribution,
-      }).unwrap()
-      setPlanId(null)
-      toast.success('План обновлён', {
-        description: `Версия ${result.version}: назначено ${result.assigned}, без назначения ${result.unassigned}`,
-      })
-    } catch (error) {
-      const description =
-        error &&
-        typeof error === 'object' &&
-        'data' in error &&
-        error.data &&
-        typeof error.data === 'object' &&
-        'detail' in error.data &&
-        typeof (error.data as { detail: unknown }).detail === 'string'
-          ? (error.data as { detail: string }).detail
-          : 'Проверьте заявки и инженеров на выбранную дату'
-      toast.danger('Не удалось обновить план', {
-        description,
-        actionProps: {
-          children: 'Повторить',
-          variant: 'outline',
-          size: 'sm',
-          onPress: () => setRemakeOpen(true),
-        },
-      })
-      throw error
-    }
-  }
-
   const content =
     typeof children === 'function'
       ? children({
@@ -162,7 +115,7 @@ export function HomeAreaLayout({
 
   return (
     <div className="flex h-svh gap-4 bg-[#f5f5f5] p-4">
-      <aside className="flex w-[346px] shrink-0 flex-col gap-4">
+      <aside className={cn('flex shrink-0 flex-col gap-4', ASIDE_WIDTH_CLASS)}>
         <BrandBar className="w-full" />
         <AppNav />
       </aside>
@@ -171,9 +124,7 @@ export function HomeAreaLayout({
         <ContextHeader
           regions={regions}
           regionId={regionId}
-          onRegionIdChange={(nextRegionId) => {
-            selectRegion(nextRegionId)
-          }}
+          onRegionIdChange={selectRegion}
           date={date}
           onDateChange={setDate}
           plannedDates={overview?.planned_dates ?? []}
@@ -182,30 +133,77 @@ export function HomeAreaLayout({
           onPlanIdChange={setPlanId}
           isRegionsLoading={isLoading}
           isRegionsError={isError}
-          isUploadDisabled={isUploadDisabled}
-          onUploadClick={onUploadClick}
-          isExportDisabled={isExportDisabled}
-          onExportCsv={onExportCsv}
-          onExportJson={onExportJson}
+          onUploadClick={() => setUploadOpen(true)}
           isRecalculating={isRecalculating}
           onRecalculate={
-            regionId == null
+            regionId == null ? undefined : () => setRebuildOpen(true)
+          }
+          onExport={
+            regionId == null || !overview?.tickets.total
               ? undefined
-              : () => {
-                  if (!isRecalculating) setRemakeOpen(true)
+              : async (format) => {
+                  try {
+                    const tickets = await loadTickets({
+                      regionId,
+                      date: date.toString(),
+                      planId: selectedPlanId,
+                    }).unwrap()
+                    downloadTickets(
+                      tickets,
+                      format,
+                      `Заявки_${regionName ?? regionId}_${date.toString()}`,
+                    )
+                  } catch {
+                    toast.danger('Не удалось выгрузить заявки')
+                  }
                 }
           }
-        />
-        <RemakePlanModal
-          isOpen={remakeOpen}
-          onOpenChange={setRemakeOpen}
-          isSubmitting={isRecalculating}
-          onSubmit={handleRemake}
         />
         <div className="flex min-h-0 flex-1 flex-col gap-4">
           {content ?? <AppPanel className="min-h-0 flex-1" />}
         </div>
       </div>
+
+      <TicketsUploadDialog
+        isOpen={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        defaultRegionId={regionId}
+        date={date.toString()}
+        onUploaded={(result) => {
+          if (result.date) focusDay(result.date)
+        }}
+      />
+      <PlanRebuildDialog
+        isOpen={rebuildOpen}
+        onClose={() => setRebuildOpen(false)}
+        onConfirm={async (options) => {
+          if (regionId == null) return
+          try {
+            const result = await recalculatePlan({
+              regionId,
+              date: date.toString(),
+              remakeLevel: options.level,
+              distribution: options.distribution,
+            }).unwrap()
+            setPlanId(null)
+            toast.success(`План №${result.version} составлен`, {
+              description: `Назначено ${result.assigned}, без инженера: ${result.unassigned}`,
+            })
+          } catch (error) {
+            const description =
+              error &&
+              typeof error === 'object' &&
+              'data' in error &&
+              error.data &&
+              typeof error.data === 'object' &&
+              'detail' in error.data &&
+              typeof (error.data as { detail: unknown }).detail === 'string'
+                ? (error.data as { detail: string }).detail
+                : 'Текущий план остался без изменений'
+            toast.danger('Не удалось обновить план', { description })
+          }
+        }}
+      />
     </div>
   )
 }

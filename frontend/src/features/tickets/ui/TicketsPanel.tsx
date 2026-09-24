@@ -58,6 +58,16 @@ function TicketTag({
   )
 }
 
+/** Пояснение к причине неназначения — в подсказке на теге, как в макете. */
+function reasonHint(reason: string) {
+  const text = reason.toLowerCase()
+  if (text.includes('навык')) return 'У инженеров региона нет навыка для этого вида работ'
+  if (text.includes('снаряж') || text.includes('оборудован')) return 'У подходящих инженеров нет нужного оборудования'
+  if (text.includes('смен') || text.includes('рабочего времени')) return 'Работа не помещается в рабочие смены инженеров'
+  if (text.includes('конфликт') || text.includes('график')) return 'Окно клиента пересекается с другими визитами инженеров'
+  return 'Инженеры региона отсутствуют или недоступны на нужное время'
+}
+
 function TicketCard({ ticket }: { ticket: Ticket }) {
   return (
     <article className="flex flex-col gap-2 border-b border-[#dedee0] px-5 py-3">
@@ -79,7 +89,7 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
           <TicketTag
             tone="danger"
             icon={<RiErrorWarningLine size={12} className="text-[#a43532]" />}
-            hint={ticket.reason_hint}
+            hint={ticket.reason_hint ?? reasonHint(ticket.reason)}
           >
             {ticket.reason}
           </TicketTag>

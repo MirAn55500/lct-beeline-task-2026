@@ -55,7 +55,7 @@ export function AppNavMenu({ onNavigate, className }: AppNavMenuProps) {
       <nav className="flex flex-col gap-2">
         {navMenuGroups.map((group, groupIndex) => (
           <div key={groupIndex} className="flex flex-col gap-2">
-            {groupIndex > 0 ? <div className="h-px bg-[#e4e4e7]" /> : null}
+            {groupIndex > 0 ? <div className="mx-2 h-px bg-[#e4e4e7]" /> : null}
             <div className="flex flex-col gap-2">
               {group.map((item) => (
                 <MenuItem

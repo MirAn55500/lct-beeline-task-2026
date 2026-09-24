@@ -4,7 +4,6 @@ import {
   RiGroupLine,
   RiHome5Line,
   RiQuestionLine,
-  RiSettings4Line,
 } from '@remixicon/react'
 
 import { routes } from '@/shared/config/routes'
@@ -36,11 +35,6 @@ export const navPrimaryItems: NavItem[] = [
     label: 'Персонал',
     icon: RiGroupLine,
   },
-  {
-    to: routes.config,
-    label: 'Конфигурация',
-    icon: RiSettings4Line,
-  },
 ]
 
 export const navHelpItem: NavItem = {
@@ -49,11 +43,8 @@ export const navHelpItem: NavItem = {
   icon: RiQuestionLine,
 }
 
-export const navMenuGroups: NavItem[][] = [
-  navPrimaryItems.slice(0, 2),
-  navPrimaryItems.slice(2),
-  [navHelpItem],
-]
+// Меню под кнопкой бренда: разделы, черта, «Помощь» — как в макете.
+export const navMenuGroups: NavItem[][] = [navPrimaryItems, [navHelpItem]]
 
 export function isNavItemActive(item: NavItem, pathname: string) {
   return item.match ? item.match(pathname) : pathname === item.to

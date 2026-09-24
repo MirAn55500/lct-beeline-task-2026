@@ -33,16 +33,20 @@ export const planningApi = baseApi.injectEndpoints({
         regionId: number
         date: string
         remakeLevel?: RemakeLevel
+        /** @deprecated используйте remakeLevel */
+        level?: RemakeLevel
         distribution?: PlanDistribution
       }
     >({
-      query: ({ regionId, date, remakeLevel, distribution }) => ({
+      query: ({ regionId, date, remakeLevel, level, distribution }) => ({
         url: '/api/planning/recalculate',
         method: 'POST',
         params: {
           region_id: regionId,
           date,
-          ...(remakeLevel != null ? { remake_level: remakeLevel } : {}),
+          ...((remakeLevel ?? level) != null
+            ? { remake_level: remakeLevel ?? level }
+            : {}),
           ...(distribution != null ? { distribution } : {}),
         },
       }),

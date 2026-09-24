@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 
+import { ASIDE_WIDTH_CLASS, cn } from '@/shared/lib'
 import { AppPanel, BrandBar } from '@/shared/ui'
 
 type WorkAreaMapLayoutProps = {
@@ -17,7 +18,7 @@ export function WorkAreaMapLayout({
 }: WorkAreaMapLayoutProps) {
   return (
     <div className="flex h-svh gap-4 bg-[#f5f5f5] p-4">
-      <aside className="flex w-[346px] shrink-0 flex-col gap-4">
+      <aside className={cn('flex shrink-0 flex-col gap-4', ASIDE_WIDTH_CLASS)}>
         <BrandBar className="w-full" showMenu />
         {sidebar ?? <AppPanel className="min-h-0 flex-1" />}
       </aside>

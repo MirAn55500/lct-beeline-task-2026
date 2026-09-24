@@ -59,7 +59,7 @@ export function BrandBar({
         alt="билайн маршруты"
         width={272}
         height={36}
-        className="h-9 w-[272px]"
+        className="h-9 w-[272px] min-w-0 shrink object-cover object-left"
       />
 
       {showMenu ? (
@@ -77,7 +77,7 @@ export function BrandBar({
 
           {open ? (
             <AppNavMenu
-              className="absolute top-[calc(100%+12px)] left-3 z-50"
+              className="absolute top-[calc(100%-4px)] left-3 z-50"
               onNavigate={() => setOpen(false)}
             />
           ) : null}

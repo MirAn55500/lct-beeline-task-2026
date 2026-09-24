@@ -31,8 +31,8 @@ function EngineerCard({ engineer }: { engineer: Engineer }) {
 
   return (
     <div className="flex items-center gap-4 border-b border-[#dedee0] px-5 py-3">
-      <Avatar className="size-[52px] shrink-0 !rounded-lg">
-        <Avatar.Fallback className="!rounded-lg bg-[#ebebec] text-xs font-medium text-foreground">
+      <Avatar className="size-[52px] shrink-0 !rounded-[4px]">
+        <Avatar.Fallback className="!rounded-[4px] bg-[#ebebec] text-xs font-medium text-foreground">
           {getInitials(engineer.name)}
         </Avatar.Fallback>
       </Avatar>

@@ -2,11 +2,10 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Calendar } from '@heroui/react'
 import type { CalendarDate } from '@internationalized/date'
 import {
-  RiAddLine,
+  RiAddCircleLine,
   RiArrowDownSLine,
   RiDownloadFill,
   RiFileDownloadLine,
-  RiFileList3Line,
 } from '@remixicon/react'
 
 import { cn } from '@/shared/lib/cn'
@@ -33,7 +32,7 @@ function ContextSelect({
         onClick={onToggle}
         className={cn(
           'flex cursor-pointer items-center gap-1 text-left text-xl font-semibold leading-7 transition-colors hover:opacity-80',
-          muted ? 'text-[#71717a]' : 'text-foreground',
+          muted || open ? 'text-[#71717a]' : 'text-foreground',
         )}
       >
         <span>{label}</span>
@@ -91,11 +90,14 @@ type ContextHeaderProps = {
   isRegionsError?: boolean
   isUploadDisabled?: boolean
   onUploadClick?: () => void
-  onExportCsv?: () => void
-  onExportJson?: () => void
-  isExportDisabled?: boolean
   isRecalculating?: boolean
   onRecalculate?: () => void
+  /** Блок по центру шапки, например переключатель вида плана. */
+  center?: ReactNode
+  /** Показывать ли день недели рядом с датой; в макетах его нет. */
+  showWeekday?: boolean
+  /** Экспорт заявок дня; без него пункты экспорта неактивны. */
+  onExport?: (format: 'csv' | 'json') => void
 }
 
 export function ContextHeader({
@@ -113,11 +115,11 @@ export function ContextHeader({
   isRegionsError = false,
   isUploadDisabled = false,
   onUploadClick,
-  onExportCsv,
-  onExportJson,
-  isExportDisabled = false,
   isRecalculating = false,
   onRecalculate,
+  center,
+  showWeekday = false,
+  onExport,
 }: ContextHeaderProps) {
   const [regionOpen, setRegionOpen] = useState(false)
   const [dateOpen, setDateOpen] = useState(false)
@@ -165,7 +167,9 @@ export function ContextHeader({
     <AppPanel
       ref={rootRef}
       className={cn(
-        'relative flex h-[60px] shrink-0 items-center justify-between px-3',
+        'relative h-[60px] shrink-0 items-center px-3',
+        // С центральным блоком края делят остаток поровну, чтобы центр стоял ровно посередине.
+        center ? 'grid grid-cols-[1fr_auto_1fr] gap-4' : 'flex justify-between',
         className,
       )}
     >
@@ -216,7 +220,7 @@ export function ContextHeader({
         <div className="h-7 w-px bg-[#e4e4e7]" />
 
         <ContextSelect
-          label={formatDayLabel(date)}
+          label={formatDayLabel(date, { weekday: showWeekday })}
           open={dateOpen}
           onToggle={() => {
             setRegionOpen(false)
@@ -300,7 +304,9 @@ export function ContextHeader({
 
       </div>
 
-      <div className="flex items-center gap-2">
+      {center}
+
+      <div className="flex items-center justify-end gap-2">
         {selectedPlan ? (
           <div className="relative">
             <button
@@ -311,7 +317,7 @@ export function ContextHeader({
                 setTicketsOpen(false)
                 setVersionOpen((value) => !value)
               }}
-              className="flex h-9 cursor-pointer items-center gap-2 border border-[#dedee0] bg-white px-4 text-sm font-medium text-foreground transition-colors hover:bg-[#f5f5f5]"
+              className="flex h-9 cursor-pointer items-center gap-5 border border-[#dedee0] bg-white px-3 text-sm leading-5 text-foreground transition-colors hover:bg-[#f5f5f5]"
               style={{ borderRadius: 8 }}
             >
               План №{selectedPlan.version}
@@ -322,7 +328,7 @@ export function ContextHeader({
             </button>
             {versionOpen ? (
               <div
-                className="absolute top-[calc(100%+8px)] right-0 z-50 w-[220px] bg-white p-1 shadow-lg"
+                className="absolute top-[calc(100%+8px)] right-0 z-50 w-[193px] bg-white p-1 shadow-lg"
                 style={{ borderRadius: 16 }}
               >
                 <div className="flex flex-col">
@@ -347,6 +353,7 @@ export function ContextHeader({
                       </span>
                     </button>
                   ))}
+                  <div className="mx-2 my-1 h-px bg-[#e4e4e7]" />
                   <button
                     type="button"
                     disabled={isRecalculating || !onRecalculate}
@@ -354,9 +361,9 @@ export function ContextHeader({
                       setVersionOpen(false)
                       onRecalculate?.()
                     }}
-                    className="flex h-9 w-full cursor-pointer items-center gap-2 rounded-lg px-3 text-sm font-medium text-foreground transition-colors hover:bg-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium text-foreground transition-colors hover:bg-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <RiAddLine size={16} className="shrink-0" />
+                    <RiAddCircleLine size={16} className="shrink-0" />
                     {isRecalculating ? 'Считаем план' : 'Новый план'}
                   </button>
                 </div>
@@ -374,12 +381,11 @@ export function ContextHeader({
               type="button"
               disabled={isUploadDisabled}
               onClick={onUploadClick}
-              className="inline-flex cursor-pointer items-center gap-2 bg-[#0485f7] px-4 text-sm font-medium text-[#fcfcfc] transition-colors hover:bg-[#0374d9] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[#0485f7]"
+              className="inline-flex cursor-pointer items-center bg-[#0485f7] px-4 text-sm leading-5 font-medium text-[#fcfcfc] transition-colors hover:bg-[#0374d9] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[#0485f7]"
             >
-              <RiFileList3Line size={16} className="shrink-0" />
               Заявки
             </button>
-            <span className="my-2 w-px shrink-0 bg-[#fcfcfc]" aria-hidden />
+            <span className="my-2 w-px shrink-0 bg-[#fcfcfc]/40" aria-hidden />
             <button
               type="button"
               aria-label="Действия с заявками"
@@ -390,7 +396,10 @@ export function ContextHeader({
                 setVersionOpen(false)
                 setTicketsOpen((value) => !value)
               }}
-              className="inline-flex w-9 cursor-pointer items-center justify-center bg-[#3592f9] text-[#fcfcfc] transition-colors hover:bg-[#2b86ea]"
+              className={cn(
+                'inline-flex w-9 cursor-pointer items-center justify-center text-[#fcfcfc] transition-colors hover:bg-[#0374d9]',
+                ticketsOpen ? 'bg-[#3592f9]' : 'bg-[#0485f7]',
+              )}
             >
               <RiArrowDownSLine
                 size={16}
@@ -406,55 +415,31 @@ export function ContextHeader({
               className="absolute top-[calc(100%+8px)] right-0 z-50 w-[193px] bg-white p-1 shadow-lg"
               style={{ borderRadius: 16 }}
             >
-              <button
-                type="button"
-                disabled={isUploadDisabled}
-                onClick={() => {
-                  setTicketsOpen(false)
-                  onUploadClick?.()
-                }}
-                className="flex h-9 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-left text-sm font-medium text-[#18181b] transition-colors hover:bg-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-              >
-                <RiFileDownloadLine size={16} className="shrink-0 text-[#71717a]" />
-                Импорт csv
-              </button>
-              <button
-                type="button"
-                disabled={isUploadDisabled}
-                onClick={() => {
-                  setTicketsOpen(false)
-                  onUploadClick?.()
-                }}
-                className="flex h-9 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-left text-sm font-medium text-[#18181b] transition-colors hover:bg-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-              >
-                <RiDownloadFill size={16} className="shrink-0 text-[#71717a]" />
-                Импорт json
-              </button>
-              <div className="mx-2 my-1 h-px bg-[#e4e4e7]" />
-              <button
-                type="button"
-                disabled={isExportDisabled || !onExportCsv}
-                onClick={() => {
-                  setTicketsOpen(false)
-                  onExportCsv?.()
-                }}
-                className="flex h-9 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-left text-sm font-medium text-[#18181b] transition-colors hover:bg-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-              >
-                <RiFileDownloadLine size={16} className="shrink-0 text-[#71717a]" />
-                Экспорт csv
-              </button>
-              <button
-                type="button"
-                disabled={isExportDisabled || !onExportJson}
-                onClick={() => {
-                  setTicketsOpen(false)
-                  onExportJson?.()
-                }}
-                className="flex h-9 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-left text-sm font-medium text-[#18181b] transition-colors hover:bg-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-              >
-                <RiDownloadFill size={16} className="shrink-0 text-[#71717a]" />
-                Экспорт json
-              </button>
+              {[
+                { label: 'Импорт csv', icon: RiFileDownloadLine, disabled: isUploadDisabled || !onUploadClick, run: onUploadClick },
+                { label: 'Импорт json', icon: RiDownloadFill, disabled: isUploadDisabled || !onUploadClick, run: onUploadClick },
+                null,
+                { label: 'Экспорт csv', icon: RiFileDownloadLine, disabled: !onExport, run: () => onExport?.('csv') },
+                { label: 'Экспорт json', icon: RiDownloadFill, disabled: !onExport, run: () => onExport?.('json') },
+              ].map((item, index) =>
+                item == null ? (
+                  <div key={index} className="mx-2 my-1 h-px bg-[#e4e4e7]" />
+                ) : (
+                  <button
+                    key={item.label}
+                    type="button"
+                    disabled={item.disabled}
+                    onClick={() => {
+                      setTicketsOpen(false)
+                      item.run?.()
+                    }}
+                    className="flex h-9 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-left text-sm font-medium text-[#18181b] transition-colors hover:bg-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                  >
+                    <item.icon size={16} className="shrink-0 text-[#71717a]" />
+                    {item.label}
+                  </button>
+                ),
+              )}
             </div>
           ) : null}
         </div>

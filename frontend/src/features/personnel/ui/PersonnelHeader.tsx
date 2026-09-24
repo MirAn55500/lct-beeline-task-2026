@@ -8,7 +8,7 @@ import {
 import { Separator } from 'react-aria-components'
 
 import { cn } from '@/shared/lib/cn'
-import { AppPanel } from '@/shared/ui'
+import { AppPanel, SegmentedControl } from '@/shared/ui'
 
 export type PersonnelTab = 'info' | 'engineers'
 export type EngineersExportFormat = 'csv' | 'json'
@@ -22,6 +22,8 @@ const MENU_ITEM =
   'flex h-9 cursor-pointer items-center gap-2 px-3 text-sm font-medium leading-5 text-[#18181b] outline-none data-[focused]:bg-[#f5f5f5]'
 
 type PersonnelHeaderProps = {
+  /** Название выбранной бригады. */
+  title: string
   tab: PersonnelTab
   onTabChange: (tab: PersonnelTab) => void
   onAddEngineer: () => void
@@ -29,45 +31,19 @@ type PersonnelHeaderProps = {
 }
 
 export function PersonnelHeader({
+  title,
   tab,
   onTabChange,
   onAddEngineer,
   onExport,
 }: PersonnelHeaderProps) {
   return (
-    <AppPanel className="grid h-[60px] shrink-0 grid-cols-[1fr_334px_1fr] items-center gap-4 p-3">
+    <AppPanel className="grid h-[60px] shrink-0 grid-cols-[1fr_214px_1fr] items-center gap-4 p-3 min-[1400px]:grid-cols-[1fr_334px_1fr]">
       <h1 className="truncate px-1 text-xl font-semibold leading-7 text-[#18181b]">
-        Бригада
+        {title}
       </h1>
 
-      <div
-        role="tablist"
-        aria-label="Раздел бригады"
-        className="flex h-9 items-center bg-[#ebebec]"
-        style={{ borderRadius: 8, padding: 2 }}
-      >
-        {TABS.map((item) => {
-          const active = item.id === tab
-          return (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => onTabChange(item.id)}
-              className={cn(
-                'h-8 flex-1 cursor-pointer text-sm font-medium leading-6 transition-colors',
-                active
-                  ? 'bg-white text-[#18181b] shadow-[0_1px_2px_rgb(0_0_0/0.06)]'
-                  : 'text-[#71717a] hover:text-[#18181b]',
-              )}
-              style={{ borderRadius: 6 }}
-            >
-              {item.label}
-            </button>
-          )
-        })}
-      </div>
+      <SegmentedControl aria-label="Раздел бригады" options={TABS} value={tab} onChange={onTabChange} />
 
       <div className="flex justify-end">
         <div

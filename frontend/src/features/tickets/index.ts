@@ -12,6 +12,9 @@ export {
   UploadTicketsModal,
   uploadSuccessDescription,
 } from './ui/UploadTicketsModal'
+export { TicketsUploadDialog } from './ui/TicketsUploadDialog'
+export { useTicketsUpload } from './lib/useTicketsUpload'
+export { isTicketsFile } from './lib/template'
 export { downloadTickets, type TicketsExportFormat } from './lib/exportTickets'
 export {
   EMPTY_TICKETS_FILTERS,

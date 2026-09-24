@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useSearchParams } from 'react-router'
 import { toast } from '@heroui/react'
 
@@ -6,6 +6,7 @@ import {
   HomeAreaLayout,
   WorkAreaGanttLayout,
   WorkAreaMapLayout,
+  type HomeAreaContext,
 } from '@/app/layouts'
 import {
   AddEngineerPanel,
@@ -18,168 +19,51 @@ import {
   type PersonnelEngineer,
   type PersonnelTab,
 } from '@/features/personnel'
-import { DayOverviewWorkspace } from '@/features/planning'
 import {
-  UploadTicketsModal,
-  downloadTickets,
-  isAcceptedTicketFile,
-  uploadSuccessDescription,
-  useLazyGetTicketsQuery,
-  useUploadTicketsMutation,
-} from '@/features/tickets'
+  DayOverviewWorkspace,
+  EngineersSidebar,
+  MOCK_MAP_PLANNED_DATES,
+  MOCK_MAP_REGIONS,
+  PlanGanttBoard,
+  PlanMapBoard,
+  PlanRebuildDialog,
+  usePlanContext,
+  usePlanGanttBoard,
+  usePlanMapBoard,
+} from '@/features/planning'
+import { TicketsUploadDialog, isTicketsFile, useTicketsUpload } from '@/features/tickets'
 import { routes } from '@/shared/config/routes'
-import { AppPanel } from '@/shared/ui'
+import { AppPanel, ContextHeader, PlanViewTabs } from '@/shared/ui'
 
-function OverviewPage() {
-  const exportContextRef = useRef<{
-    regionId: number
-    regionName: string | null
-    date: string
-    planId: number | null
-  } | null>(null)
-  const [uploadOpen, setUploadOpen] = useState(false)
-  const [pending, setPending] = useState(false)
-  const [exporting, setExporting] = useState(false)
-  const [uploadTickets, { isLoading }] = useUploadTicketsMutation()
-  const [fetchTickets] = useLazyGetTicketsQuery()
-  const isUploading = pending || isLoading
-
-  const handleUpload = async (
-    file: File,
-    regionId: number,
-    date: string,
-    focusDay: (isoDate: string) => void,
-    setRegionId: (regionId: number) => void,
-  ) => {
-    if (!isAcceptedTicketFile(file) || isUploading) {
-      if (!isAcceptedTicketFile(file)) toast.danger('Нужен json или csv файл')
-      return
-    }
-
-    const body = new FormData()
-    body.append('file', file)
-    body.append('region_id', String(regionId))
-    body.append('date', date)
-
-    setPending(true)
-    try {
-      const result = await uploadTickets(body).unwrap()
-      setRegionId(regionId)
-      if (result.date) focusDay(result.date)
-      toast.success('Загрузка заявок завершена', {
-        description: uploadSuccessDescription(result.created, result.updated),
-      })
-    } catch (error) {
-      const description =
-        error &&
-        typeof error === 'object' &&
-        'data' in error &&
-        error.data &&
-        typeof error.data === 'object' &&
-        'detail' in error.data &&
-        typeof (error.data as { detail: unknown }).detail === 'string'
-          ? (error.data as { detail: string }).detail
-          : 'Проверьте формат файла и попробуйте снова'
-      toast.danger('Не удалось завершить загрузку', {
-        description,
-        actionProps: {
-          children: 'Повторить',
-          variant: 'outline',
-          size: 'sm',
-          onPress: () => setUploadOpen(true),
-        },
-      })
-      throw error
-    } finally {
-      setPending(false)
-    }
-  }
-
-  const handleFiles = async (
-    files: File[],
-    regionId: number,
-    date: string,
-    focusDay: (isoDate: string) => void,
-    setRegionId: (regionId: number) => void,
-  ) => {
-    const file = files.find(isAcceptedTicketFile)
-    if (!file) {
-      if (files.length > 0) toast.danger('Нужен json или csv файл')
-      return
-    }
-    try {
-      await handleUpload(file, regionId, date, focusDay, setRegionId)
-    } catch {
-      // Тост уже показан в handleUpload.
-    }
-  }
-
-  const handleExport = async (format: 'csv' | 'json') => {
-    const ctx = exportContextRef.current
-    if (ctx == null || exporting) return
-    setExporting(true)
-    try {
-      const tickets = await fetchTickets({
-        regionId: ctx.regionId,
-        date: ctx.date,
-        planId: ctx.planId,
-      }).unwrap()
-      if (tickets.length === 0) {
-        toast.danger('Нет заявок для экспорта')
-        return
-      }
-      const safeName = (ctx.regionName ?? 'region').replace(/\s+/g, '-')
-      downloadTickets(tickets, format, `tickets-${safeName}-${ctx.date}`)
-    } catch {
-      toast.danger('Не удалось экспортировать заявки')
-    } finally {
-      setExporting(false)
-    }
-  }
+function OverviewContent({ context }: { context: HomeAreaContext }) {
+  const { regionId, date, planId, focusDay } = context
+  const { upload, isUploading } = useTicketsUpload((result) => {
+    if (result.date) focusDay(result.date)
+  })
 
   return (
-    <HomeAreaLayout
-      isUploadDisabled={isUploading}
-      onUploadClick={() => {
-        if (!isUploading) setUploadOpen(true)
-      }}
-      isExportDisabled={exporting}
-      onExportCsv={() => void handleExport('csv')}
-      onExportJson={() => void handleExport('json')}
-    >
-      {({ regionId, regionName, date, planId, focusDay, setRegionId }) => {
-        if (regionId != null) {
-          exportContextRef.current = { regionId, regionName, date, planId }
-        } else {
-          exportContextRef.current = null
-        }
-        return (
-          <>
-            <UploadTicketsModal
-              isOpen={uploadOpen}
-              onOpenChange={setUploadOpen}
-              defaultRegionId={regionId}
-              date={date}
-              isUploading={isUploading}
-              onUpload={async ({ file, regionId: uploadRegionId }) => {
-                await handleUpload(file, uploadRegionId, date, focusDay, setRegionId)
-              }}
-            />
-            <DayOverviewWorkspace
-              regionId={regionId}
-              regionName={regionName}
-              date={date}
-              planId={planId}
-              isUploading={isUploading}
-              onFiles={
-                regionId == null
-                  ? undefined
-                  : (files) => handleFiles(files, regionId, date, focusDay, setRegionId)
-              }
-            />
-          </>
-        )
-      }}
+    <DayOverviewWorkspace
+      regionId={regionId}
+      regionName={context.regionName}
+      date={date}
+      planId={planId}
+      isUploading={isUploading}
+      onFiles={
+        regionId == null
+          ? undefined
+          : async (files) => {
+              const file = files.find(isTicketsFile)
+              if (file) await upload({ file, regionId, date })
+            }
+      }
+    />
+  )
+}
+
+function OverviewPage() {
+  return (
+    <HomeAreaLayout>
+      {(context) => <OverviewContent context={context} />}
     </HomeAreaLayout>
   )
 }
@@ -190,7 +74,9 @@ const HIGHLIGHT_MS = 4000
 function PersonnelPage() {
   const [params, setParams] = useSearchParams()
   const [isAddOpen, setAddOpen] = useState(false)
-  const [highlightIds, setHighlightIds] = useState<ReadonlySet<number>>(() => new Set())
+  const [highlightIds, setHighlightIds] = useState<ReadonlySet<number>>(
+    () => new Set(),
+  )
 
   const { data: brigades = [], isLoading: brigadesLoading } = useGetBrigadesQuery()
 
@@ -200,10 +86,11 @@ function PersonnelPage() {
   const brigade = brigades.find((item) => item.id === brigadeId)
   const tab: PersonnelTab = params.get('tab') === 'info' ? 'info' : 'engineers'
 
-  const { data: engineers = [], isLoading: engineersLoading } = useGetPersonnelEngineersQuery(
-    { brigadeId: brigadeId ?? 0 },
-    { skip: brigadeId == null },
-  )
+  const { data: engineers = [], isLoading: engineersLoading } =
+    useGetPersonnelEngineersQuery(
+      { brigadeId: brigadeId ?? 0 },
+      { skip: brigadeId == null },
+    )
 
   useEffect(() => {
     if (highlightIds.size === 0) return
@@ -232,13 +119,6 @@ function PersonnelPage() {
     brigades.map((item) => [item.id, item.leaderShortName ?? undefined]),
   )
 
-  const handleAdded = (added: PersonnelEngineer[]) => {
-    setHighlightIds(new Set(added.map((item) => item.id)))
-    const target = added[0]?.brigadeId
-    if (target != null && target !== brigadeId) update({ brigade: target, tab: 'engineers' })
-    else if (tab !== 'engineers') update({ tab: 'engineers' })
-  }
-
   const update = (next: { brigade?: number; tab?: PersonnelTab }) =>
     setParams(
       (prev) => {
@@ -249,6 +129,14 @@ function PersonnelPage() {
       },
       { replace: true },
     )
+
+  const handleAdded = (added: PersonnelEngineer[]) => {
+    setHighlightIds(new Set(added.map((item) => item.id)))
+    const target = added[0]?.brigadeId
+    if (target != null && target !== brigadeId)
+      update({ brigade: target, tab: 'engineers' })
+    else if (tab !== 'engineers') update({ tab: 'engineers' })
+  }
 
   return (
     <WorkAreaMapLayout
@@ -264,11 +152,16 @@ function PersonnelPage() {
       }
       header={
         <PersonnelHeader
+          title={brigade?.name ?? 'Бригада'}
           tab={tab}
           onTabChange={(next) => update({ tab: next })}
           onAddEngineer={() => setAddOpen(true)}
           onExport={(format) =>
-            downloadEngineers(engineers, format, `engineers-${brigade?.name ?? 'all'}`)
+            downloadEngineers(
+              engineers,
+              format,
+              `engineers-${brigade?.name ?? 'all'}`,
+            )
           }
         />
       }
@@ -307,6 +200,94 @@ function PersonnelPage() {
   )
 }
 
+type PlanContextState = ReturnType<typeof usePlanContext>
+
+/**
+ * Шапка плана работ — одна на Гант и карту: те же регион, день, версия плана
+ * и окна «Загрузить заявки» / «Обновить план», чтобы при переключении вида ничего не менялось.
+ */
+function PlanWorkHeader({
+  context,
+  hasPlan,
+}: {
+  context: PlanContextState
+  hasPlan: boolean
+}) {
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [rebuildOpen, setRebuildOpen] = useState(false)
+
+  return (
+    <>
+      <ContextHeader
+        regions={MOCK_MAP_REGIONS}
+        regionId={context.regionId}
+        onRegionIdChange={context.setRegionId}
+        date={context.date}
+        onDateChange={context.setDate}
+        plannedDates={MOCK_MAP_PLANNED_DATES}
+        plans={hasPlan ? context.plans : []}
+        planId={hasPlan ? context.planId : null}
+        onPlanIdChange={context.setPlanId}
+        onUploadClick={() => setUploadOpen(true)}
+        onRecalculate={() => setRebuildOpen(true)}
+        center={<PlanViewTabs />}
+      />
+      <TicketsUploadDialog
+        isOpen={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        date={context.date.toString()}
+      />
+      <PlanRebuildDialog
+        isOpen={rebuildOpen}
+        onClose={() => setRebuildOpen(false)}
+        onConfirm={() => {
+          // План работ пока на моках: новая версия с теми же назначениями.
+          const plan = context.addPlan()
+          toast.success(`План №${plan.version} составлен`)
+        }}
+      />
+    </>
+  )
+}
+
+function PlanMapPage() {
+  const context = usePlanContext()
+  const board = usePlanMapBoard(context.regionId, context.date.toString())
+
+  return (
+    <WorkAreaMapLayout
+      sidebar={
+        <EngineersSidebar
+          engineers={board.engineers}
+          selectedId={board.selectedId}
+          hoveredId={board.hoveredId}
+          onSelect={board.select}
+          onHover={board.hover}
+        />
+      }
+      header={<PlanWorkHeader context={context} hasPlan={board.hasPlan} />}
+    >
+      <PlanMapBoard board={board} />
+    </WorkAreaMapLayout>
+  )
+}
+
+function PlanGanttPage() {
+  const context = usePlanContext()
+  const board = usePlanGanttBoard(context.regionId, context.date.toString())
+
+  return (
+    <WorkAreaGanttLayout
+      header={<PlanWorkHeader context={context} hasPlan={board.hasPlan} />}
+    >
+      <PlanGanttBoard
+        board={board}
+        viewKey={`${context.regionId}:${context.date.toString()}`}
+      />
+    </WorkAreaGanttLayout>
+  )
+}
+
 function PlaceholderPage() {
   return <HomeAreaLayout />
 }
@@ -316,41 +297,23 @@ export function AppRouter() {
     <Routes>
       <Route path={routes.overview} element={<OverviewPage />} />
 
-      <Route
-        path={routes.plan}
-        element={<Navigate to={routes.planGantt} replace />}
-      />
-      <Route path={routes.planGantt} element={<WorkAreaGanttLayout />} />
-      <Route path={routes.planMap} element={<WorkAreaMapLayout />} />
+      <Route path={routes.plan} element={<Navigate to={routes.planGantt} replace />} />
+      <Route path={routes.planGantt} element={<PlanGanttPage />} />
+      <Route path={routes.planMap} element={<PlanMapPage />} />
 
       <Route path={routes.personnel} element={<PersonnelPage />} />
       <Route path={routes.config} element={<PlaceholderPage />} />
       <Route path={routes.help} element={<PlaceholderPage />} />
 
-      <Route
-        path="/layouts/home"
-        element={<Navigate to={routes.overview} replace />}
-      />
-      <Route
-        path="/layouts/gantt"
-        element={<Navigate to={routes.planGantt} replace />}
-      />
-      <Route
-        path="/layouts/map"
-        element={<Navigate to={routes.planMap} replace />}
-      />
+      <Route path="/layouts/home" element={<Navigate to={routes.overview} replace />} />
+      <Route path="/layouts/gantt" element={<Navigate to={routes.planGantt} replace />} />
+      <Route path="/layouts/map" element={<Navigate to={routes.planMap} replace />} />
       <Route
         path="/layouts/personnel"
         element={<Navigate to={routes.personnel} replace />}
       />
-      <Route
-        path="/layouts/config"
-        element={<Navigate to={routes.config} replace />}
-      />
-      <Route
-        path="/layouts/help"
-        element={<Navigate to={routes.help} replace />}
-      />
+      <Route path="/layouts/config" element={<Navigate to={routes.config} replace />} />
+      <Route path="/layouts/help" element={<Navigate to={routes.help} replace />} />
 
       <Route path="*" element={<Navigate to={routes.overview} replace />} />
     </Routes>
