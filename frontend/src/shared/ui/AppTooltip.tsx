@@ -1,4 +1,4 @@
-import type { ComponentPropsWithoutRef, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { Tooltip } from '@heroui/react'
 
 import { cn } from '@/shared/lib/cn'
@@ -10,11 +10,10 @@ import { cn } from '@/shared/lib/cn'
 export const appTooltipContentClass =
   'z-50 max-w-[340px] rounded-lg bg-[#18181b] px-2 py-1 text-center text-xs font-normal leading-5 text-white shadow-none outline-none'
 
-type AppTooltipContentProps = Omit<
-  ComponentPropsWithoutRef<typeof Tooltip.Content>,
-  'children'
-> & {
+type AppTooltipContentProps = {
   children: ReactNode
+  className?: string
+  showArrow?: boolean
 }
 
 /** Контент тултипа в едином стиле макета. */
@@ -22,13 +21,11 @@ export function AppTooltipContent({
   children,
   className,
   showArrow = true,
-  ...props
 }: AppTooltipContentProps) {
   return (
     <Tooltip.Content
       showArrow={showArrow}
       className={cn(appTooltipContentClass, className)}
-      {...props}
     >
       {children}
       {showArrow ? (
