@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react'
-import { Popover } from '@heroui/react'
+import { Checkbox, Popover } from '@heroui/react'
 import { RiEqualizer2Line } from '@remixicon/react'
 
 import { cn } from '@/shared/lib/cn'
+import { pluralRu } from '@/shared/lib/text'
 import { MultiSelectField } from '@/shared/ui'
 
 export type EngineersFiltersState = {
+  qualifications: string[]
   skills: string[]
   transports: string[]
 }
 
 export const EMPTY_ENGINEERS_FILTERS: EngineersFiltersState = {
+  qualifications: [],
   skills: [],
   transports: [],
 }
@@ -18,6 +21,9 @@ export const EMPTY_ENGINEERS_FILTERS: EngineersFiltersState = {
 type EngineersFiltersPopoverProps = {
   value: EngineersFiltersState
   onChange: (next: EngineersFiltersState) => void
+  /** Сколько строк сейчас видно в таблице (для подписи «Найдено»). */
+  matchedCount: number
+  qualificationOptions: string[]
   skillOptions: string[]
   transportOptions: string[]
 }
@@ -25,6 +31,8 @@ type EngineersFiltersPopoverProps = {
 export function EngineersFiltersPopover({
   value,
   onChange,
+  matchedCount,
+  qualificationOptions,
   skillOptions,
   transportOptions,
 }: EngineersFiltersPopoverProps) {
@@ -35,7 +43,26 @@ export function EngineersFiltersPopover({
     if (open) setDraft(value)
   }, [open, value])
 
-  const filtersActive = value.skills.length > 0 || value.transports.length > 0
+  const filtersActive =
+    value.qualifications.length > 0 ||
+    value.skills.length > 0 ||
+    value.transports.length > 0
+
+  const toggleQualification = (label: string) =>
+    setDraft((prev) => ({
+      ...prev,
+      qualifications: prev.qualifications.includes(label)
+        ? prev.qualifications.filter((item) => item !== label)
+        : [...prev.qualifications, label],
+    }))
+
+  const toggleTransport = (label: string) =>
+    setDraft((prev) => ({
+      ...prev,
+      transports: prev.transports.includes(label)
+        ? prev.transports.filter((item) => item !== label)
+        : [...prev.transports, label],
+    }))
 
   return (
     <Popover isOpen={open} onOpenChange={setOpen}>
@@ -84,10 +111,54 @@ export function EngineersFiltersPopover({
               Фильтрация
             </Popover.Heading>
             <p className="text-sm leading-6 text-[#71717a]" style={{ marginTop: 4 }}>
-              Найдите подходящего инженера
+              Найдено: {matchedCount}{' '}
+              {pluralRu(matchedCount, [
+                'подходящий инженер',
+                'подходящих инженера',
+                'подходящих инженеров',
+              ])}
             </p>
 
             <div className="flex flex-col" style={{ marginTop: 16, gap: 16 }}>
+              <div className="flex flex-col gap-2">
+                <span className="text-sm font-medium leading-6 text-[#18181b]">
+                  Квалификация
+                </span>
+                <div className="flex flex-col gap-2">
+                  {qualificationOptions.map((label) => (
+                    <Checkbox
+                      key={label}
+                      isSelected={draft.qualifications.includes(label)}
+                      onChange={() => toggleQualification(label)}
+                      className="gap-2"
+                    >
+                      <Checkbox.Control
+                        className="before:!rounded-[4px]"
+                        style={{
+                          borderRadius: 4,
+                          borderWidth: 1,
+                          borderStyle: 'solid',
+                          borderColor: draft.qualifications.includes(label)
+                            ? 'var(--accent)'
+                            : '#dedee0',
+                          ['--field-background' as string]: draft.qualifications.includes(
+                            label,
+                          )
+                            ? 'var(--accent)'
+                            : '#ffffff',
+                          ['--field-shadow' as string]: '0 0 #0000',
+                        }}
+                      >
+                        <Checkbox.Indicator />
+                      </Checkbox.Control>
+                      <Checkbox.Content>
+                        <span className="text-sm leading-5 text-[#18181b]">{label}</span>
+                      </Checkbox.Content>
+                    </Checkbox>
+                  ))}
+                </div>
+              </div>
+
               <MultiSelectField
                 label="Навыки"
                 placeholder="Выберите навык"
@@ -95,15 +166,34 @@ export function EngineersFiltersPopover({
                 value={draft.skills}
                 onChange={(skills) => setDraft((prev) => ({ ...prev, skills }))}
               />
-              <MultiSelectField
-                label="Транспорт"
-                placeholder="Выберите транспорт"
-                options={transportOptions}
-                value={draft.transports}
-                onChange={(transports) =>
-                  setDraft((prev) => ({ ...prev, transports }))
-                }
-              />
+
+              <div className="flex flex-col gap-2">
+                <span className="text-sm font-medium leading-6 text-[#18181b]">
+                  Транспорт
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {transportOptions.map((label) => {
+                    const active = draft.transports.includes(label)
+                    return (
+                      <button
+                        key={label}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => toggleTransport(label)}
+                        className={cn(
+                          'inline-flex h-7 cursor-pointer items-center px-2.5 text-sm font-medium leading-5 transition-colors',
+                          active
+                            ? 'bg-[#0485f7] text-[#fcfcfc]'
+                            : 'bg-[#ebebec] text-[#18181b] hover:bg-[#e0e0e2]',
+                        )}
+                        style={{ borderRadius: 8 }}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
 
             <div className="flex" style={{ marginTop: 16, gap: 12 }}>

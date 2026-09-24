@@ -1,5 +1,5 @@
 import { ScrollShadow } from '@heroui/react'
-import { RiAddCircleLine, RiUser3Line, RiVipCrown2Line } from '@remixicon/react'
+import { RiUser3Line, RiVipCrown2Line } from '@remixicon/react'
 
 import type { PersonnelBrigade } from '@/features/personnel/types'
 import { cn } from '@/shared/lib/cn'
@@ -99,18 +99,6 @@ export function BrigadesPanel({
           )}
         </div>
       </ScrollShadow>
-
-      <div className="shrink-0 px-3 pt-2 pb-3">
-        <button
-          type="button"
-          disabled
-          className="inline-flex h-9 w-full items-center justify-center gap-2 border border-[#dedee0] bg-white text-sm font-medium leading-5 text-[#18181b] disabled:cursor-not-allowed disabled:opacity-50"
-          style={{ borderRadius: 8, padding: '8px 16px' }}
-        >
-          <RiAddCircleLine size={16} className="shrink-0" />
-          Добавить бригаду
-        </button>
-      </div>
     </AppPanel>
   )
 }

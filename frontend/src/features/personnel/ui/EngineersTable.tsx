@@ -10,6 +10,7 @@ import {
 
 import { useDeleteEngineerMutation } from '@/features/personnel/api'
 import {
+  QUALIFICATION_OPTIONS,
   SKILL_LABEL,
   TRANSPORT_LABEL,
   type PersonnelEngineer,
@@ -54,8 +55,6 @@ function RowCheckbox({
       className="shrink-0"
     >
       <Checkbox.Content>
-        {/* Квадрат 16px из макета: радиус HeroUI считается от --radius (16px),
-            рамка и тень берутся из полей формы — задаём явно */}
         <Checkbox.Control
           className="before:!rounded-[4px]"
           style={{
@@ -68,7 +67,6 @@ function RowCheckbox({
             ['--field-shadow' as string]: '0 0 #0000',
           }}
         >
-          {/* Своя иконка: стандартная галочка HeroUI смещена от центра */}
           <Checkbox.Indicator className="!size-2.5">
             {({ isSelected, isIndeterminate }) =>
               isIndeterminate ? (
@@ -106,7 +104,10 @@ function IconButton({
       type="button"
       aria-label={label}
       disabled={disabled}
-      onClick={onClick}
+      onClick={(event) => {
+        event.stopPropagation()
+        onClick?.()
+      }}
       className={cn(
         'flex size-8 shrink-0 cursor-pointer items-center justify-center transition-colors disabled:cursor-not-allowed disabled:opacity-40',
         tone === 'outline'
@@ -143,6 +144,7 @@ function SkillsCell({ skills }: { skills: SkillCode[] }) {
         <Tooltip.Trigger
           aria-label="Список навыков"
           className="inline-flex cursor-help text-[#71717a] outline-none"
+          onClick={(event) => event.stopPropagation()}
         >
           <RiInformationLine size={16} />
         </Tooltip.Trigger>
@@ -162,38 +164,55 @@ function SkillsCell({ skills }: { skills: SkillCode[] }) {
 
 function EngineerRow({
   engineer,
-  selected,
+  checked,
+  active,
   highlighted,
   deleting,
   onToggle,
+  onOpen,
   onDelete,
 }: {
   engineer: PersonnelEngineer
-  selected: boolean
+  checked: boolean
+  active: boolean
   highlighted: boolean
   deleting?: boolean
   onToggle: (next: boolean) => void
+  onOpen: () => void
   onDelete: () => void
 }) {
   const TransportIcon = TRANSPORT_ICON[engineer.transport]
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onOpen()
+        }
+      }}
       className={cn(
         GRID,
-        'h-14 border-b border-[#e4e4e7] transition-colors duration-700',
-        highlighted && 'bg-[#34c759]/[0.08]',
+        'h-14 cursor-pointer border-b border-[#e4e4e7] transition-colors duration-700',
+        active && 'bg-[#f5f5f5]',
+        highlighted && !active && 'bg-[#34c759]/[0.08]',
+        !active && !highlighted && 'hover:bg-[#fafafa]',
       )}
     >
       <div className="flex min-w-0 items-center gap-3">
-        <RowCheckbox
-          label={`Выбрать ${engineer.name}`}
-          isSelected={selected}
-          onChange={onToggle}
-        />
+        <span onClick={(event) => event.stopPropagation()}>
+          <RowCheckbox
+            label={`Выбрать ${engineer.name}`}
+            isSelected={checked}
+            onChange={onToggle}
+          />
+        </span>
         <span
           className="relative flex size-8 shrink-0 items-center justify-center bg-[#ebebec] text-xs font-medium leading-5 text-[#18181b]"
-          style={{ borderRadius: 8 }}
+          style={{ borderRadius: 999 }}
         >
           {getInitials(engineer.name)}
           {engineer.isLead ? (
@@ -206,8 +225,15 @@ function EngineerRow({
             </span>
           ) : null}
         </span>
-        <span className="truncate text-sm font-medium leading-6 text-[#18181b]">
-          {engineer.name}
+        <span className="flex min-w-0 flex-col">
+          <span className="truncate text-sm font-medium leading-5 text-[#18181b]">
+            {engineer.name}
+          </span>
+          {engineer.position ? (
+            <span className="truncate text-xs leading-4 text-[#71717a]">
+              {engineer.position}
+            </span>
+          ) : null}
         </span>
       </div>
 
@@ -223,7 +249,7 @@ function EngineerRow({
       </span>
 
       <div className="flex justify-end gap-1.5">
-        <IconButton label={`Редактировать ${engineer.name}`} tone="outline">
+        <IconButton label={`Редактировать ${engineer.name}`} tone="outline" onClick={onOpen}>
           <RiPencilLine size={16} />
         </IconButton>
         <IconButton
@@ -244,12 +270,17 @@ type EngineersTableProps = {
   /** Только что добавленные строки — подсвечиваются зелёным. */
   highlightIds?: ReadonlySet<number>
   isLoading?: boolean
+  /** Открытая карточка инженера. */
+  activeId?: number | null
+  onOpenEngineer?: (engineer: PersonnelEngineer) => void
 }
 
 export function EngineersTable({
   engineers,
   highlightIds,
   isLoading = false,
+  activeId = null,
+  onOpenEngineer,
 }: EngineersTableProps) {
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState<EngineersFiltersState>(EMPTY_ENGINEERS_FILTERS)
@@ -261,6 +292,12 @@ export function EngineersTable({
     const needle = query.trim().toLowerCase()
     return engineers.filter((item) => {
       if (needle && !item.name.toLowerCase().includes(needle)) return false
+      if (
+        filters.qualifications.length > 0 &&
+        !(item.position && filters.qualifications.includes(item.position))
+      ) {
+        return false
+      }
       if (
         filters.skills.length > 0 &&
         !item.skills.some((code) => filters.skills.includes(SKILL_LABEL[code]))
@@ -340,6 +377,8 @@ export function EngineersTable({
         <EngineersFiltersPopover
           value={filters}
           onChange={setFilters}
+          matchedCount={visible.length}
+          qualificationOptions={QUALIFICATION_OPTIONS}
           skillOptions={SKILL_OPTIONS}
           transportOptions={TRANSPORT_OPTIONS}
         />
@@ -380,10 +419,12 @@ export function EngineersTable({
             <EngineerRow
               key={engineer.id}
               engineer={engineer}
-              selected={selected.has(engineer.id)}
+              checked={selected.has(engineer.id)}
+              active={activeId === engineer.id}
               highlighted={highlightIds?.has(engineer.id) ?? false}
               deleting={isDeleting && deletingId === engineer.id}
               onToggle={(next) => toggle(engineer.id, next)}
+              onOpen={() => onOpenEngineer?.(engineer)}
               onDelete={() => void handleDelete(engineer.id)}
             />
           ))

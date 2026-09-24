@@ -8,6 +8,7 @@ import type {
   PersonnelBrigade,
   PersonnelEngineer,
   PersonnelFilterOptions,
+  QualificationCode,
   SkillCode,
   TransportCode,
 } from './types'
@@ -26,11 +27,15 @@ type ApiEngineer = {
   id: number
   name: string
   brigade_id: number
+  brigade_name?: string | null
   transport: string
   transport_label: string
   skill: string | null
   skills: string[]
   skill_labels: string[]
+  qualification?: string | null
+  position?: string | null
+  qualification_hint?: string | null
   is_lead: boolean
   start_work?: string | null
   end_work?: string | null
@@ -52,10 +57,17 @@ function mapPersonnelEngineer(item: ApiEngineer): PersonnelEngineer {
   return {
     id: item.id,
     brigadeId: item.brigade_id,
+    brigadeName: item.brigade_name,
     name: item.name,
     skills: item.skills as SkillCode[],
+    skillLabels: item.skill_labels,
     transport: item.transport as TransportCode,
     isLead: item.is_lead,
+    qualification: (item.qualification as QualificationCode | null) ?? null,
+    position: item.position,
+    qualificationHint: item.qualification_hint,
+    startWork: item.start_work,
+    endWork: item.end_work,
   }
 }
 
@@ -66,6 +78,7 @@ function engineersQueryString(args: EngineersListArgs): string {
   if (args.q) params.set('q', args.q)
   for (const value of args.skills ?? []) params.append('skill', value)
   for (const value of args.transports ?? []) params.append('transport', value)
+  for (const value of args.qualifications ?? []) params.append('qualification', value)
   const query = params.toString()
   return query ? `?${query}` : ''
 }

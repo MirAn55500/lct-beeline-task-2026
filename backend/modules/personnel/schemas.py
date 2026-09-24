@@ -43,9 +43,11 @@ class EngineerResponse(BaseModel):
     skill_labels: list[str] = Field(default_factory=list)
     qualification: str | None = None
     position: str | None = None
+    qualification_hint: str | None = None
     is_lead: bool = False
     start_work: time | None = None
     end_work: time | None = None
+    brigade_name: str | None = None
 
 
 class EngineersQuery(BaseModel):
@@ -72,3 +74,4 @@ class CreateEngineerRequest(BaseModel):
 class PersonnelFilterOptions(BaseModel):
     skills: list[str]
     transports: list[str]
+    qualifications: list[str] = Field(default_factory=list)

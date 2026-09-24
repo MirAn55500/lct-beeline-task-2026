@@ -8,6 +8,7 @@ from modules.personnel.models.engineer import Engineer
 from modules.personnel.qualification import (
     QUALIFICATION_LABELS,
     normalize_qualification,
+    qualification_hint,
     qualification_label,
 )
 from modules.personnel.repository import PersonnelRepository
@@ -60,6 +61,7 @@ class PersonnelService:
         return PersonnelFilterOptions(
             skills=list(SKILL_LABELS.values()),
             transports=list(_TRANSPORT_UI_LABEL.values()),
+            qualifications=list(QUALIFICATION_LABELS.values()),
         )
 
     async def list_brigades(self, region_id: int | None = None) -> list[BrigadeResponse]:
@@ -172,6 +174,7 @@ class PersonnelService:
 
         qualification = normalize_qualification(engineer.qualification)
         position = qualification_label(qualification)
+        brigade_name = engineer.brigade.name if engineer.brigade is not None else None
 
         return EngineerResponse(
             id=engineer.engineer_id or 0,
@@ -184,9 +187,11 @@ class PersonnelService:
             skill_labels=skill_labels,
             qualification=qualification,
             position=position,
+            qualification_hint=qualification_hint(qualification),
             is_lead=bool(engineer.is_lead),
             start_work=engineer.start_work,
             end_work=engineer.end_work,
+            brigade_name=brigade_name,
         )
 
     def _matches(self, item: EngineerResponse, query: EngineersQuery) -> bool:

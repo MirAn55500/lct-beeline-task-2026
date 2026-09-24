@@ -13,16 +13,24 @@ class QualificationCode(StrEnum):
 
 QUALIFICATION_LABELS: dict[str, str] = {
     QualificationCode.MASTER: "Мастер",
-    QualificationCode.WORKER: "Бывалый",
-    QualificationCode.NOVICE: "Новичек",
+    QualificationCode.WORKER: "Работник",
+    QualificationCode.NOVICE: "Новичок",
 }
 
 _BY_LABEL: dict[str, str] = {
     label.lower(): code for code, label in QUALIFICATION_LABELS.items()
 }
 _BY_LABEL.update({code: code for code in QUALIFICATION_LABELS})
-# Старое имя из ранних макетов.
+# Старые имена из ранних макетов / сидов.
 _BY_LABEL["работяга"] = QualificationCode.WORKER
+_BY_LABEL["бывалый"] = QualificationCode.WORKER
+_BY_LABEL["новичек"] = QualificationCode.NOVICE
+
+QUALIFICATION_HINTS: dict[str, str] = {
+    QualificationCode.MASTER: "Выполняет задачи быстрее нормативов",
+    QualificationCode.WORKER: "Выполняет задачи в рамках нормативов",
+    QualificationCode.NOVICE: "Выполняет задачи дольше нормативов",
+}
 
 
 def normalize_qualification(value: str | None) -> str | None:
@@ -38,3 +46,12 @@ def qualification_label(code: str | None) -> str | None:
     if normalized is None:
         return code
     return QUALIFICATION_LABELS[normalized]
+
+
+def qualification_hint(code: str | None) -> str | None:
+    if not code:
+        return None
+    normalized = normalize_qualification(code)
+    if normalized is None:
+        return None
+    return QUALIFICATION_HINTS.get(normalized)

@@ -11,13 +11,13 @@ import {
 import {
   AddEngineerPanel,
   BrigadesPanel,
+  EngineerCardPanel,
   EngineersTable,
   PersonnelHeader,
   downloadEngineers,
   useGetBrigadesQuery,
   useGetPersonnelEngineersQuery,
   type PersonnelEngineer,
-  type PersonnelTab,
 } from '@/features/personnel'
 import {
   DayOverviewWorkspace,
@@ -74,6 +74,7 @@ const HIGHLIGHT_MS = 4000
 function PersonnelPage() {
   const [params, setParams] = useSearchParams()
   const [isAddOpen, setAddOpen] = useState(false)
+  const [activeEngineerId, setActiveEngineerId] = useState<number | null>(null)
   const [highlightIds, setHighlightIds] = useState<ReadonlySet<number>>(
     () => new Set(),
   )
@@ -84,7 +85,6 @@ function PersonnelPage() {
   const brigadeId =
     brigades.find((item) => item.id === requestedId)?.id ?? brigades[0]?.id ?? null
   const brigade = brigades.find((item) => item.id === brigadeId)
-  const tab: PersonnelTab = params.get('tab') === 'info' ? 'info' : 'engineers'
 
   const { data: engineers = [], isLoading: engineersLoading } =
     useGetPersonnelEngineersQuery(
@@ -92,11 +92,21 @@ function PersonnelPage() {
       { skip: brigadeId == null },
     )
 
+  const activeEngineer =
+    activeEngineerId == null
+      ? null
+      : (engineers.find((item) => item.id === activeEngineerId) ?? null)
+
   useEffect(() => {
     if (highlightIds.size === 0) return
     const timer = setTimeout(() => setHighlightIds(new Set()), HIGHLIGHT_MS)
     return () => clearTimeout(timer)
   }, [highlightIds])
+
+  // Смена бригады закрывает карточку другого состава.
+  useEffect(() => {
+    setActiveEngineerId(null)
+  }, [brigadeId])
 
   // Если в URL нет/устарела бригада — подставляем первую из ответа API.
   useEffect(() => {
@@ -119,12 +129,12 @@ function PersonnelPage() {
     brigades.map((item) => [item.id, item.leaderShortName ?? undefined]),
   )
 
-  const update = (next: { brigade?: number; tab?: PersonnelTab }) =>
+  const update = (next: { brigade?: number }) =>
     setParams(
       (prev) => {
         const copy = new URLSearchParams(prev)
         if (next.brigade != null) copy.set('brigade', String(next.brigade))
-        if (next.tab != null) copy.set('tab', next.tab)
+        copy.delete('tab')
         return copy
       },
       { replace: true },
@@ -133,9 +143,7 @@ function PersonnelPage() {
   const handleAdded = (added: PersonnelEngineer[]) => {
     setHighlightIds(new Set(added.map((item) => item.id)))
     const target = added[0]?.brigadeId
-    if (target != null && target !== brigadeId)
-      update({ brigade: target, tab: 'engineers' })
-    else if (tab !== 'engineers') update({ tab: 'engineers' })
+    if (target != null && target !== brigadeId) update({ brigade: target })
   }
 
   return (
@@ -152,10 +160,11 @@ function PersonnelPage() {
       }
       header={
         <PersonnelHeader
-          title={brigade?.name ?? 'Бригада'}
-          tab={tab}
-          onTabChange={(next) => update({ tab: next })}
-          onAddEngineer={() => setAddOpen(true)}
+          title="Бригада"
+          onAddEngineer={() => {
+            setActiveEngineerId(null)
+            setAddOpen(true)
+          }}
           onExport={(format) =>
             downloadEngineers(
               engineers,
@@ -167,21 +176,22 @@ function PersonnelPage() {
       }
     >
       <div className="flex min-h-0 flex-1 gap-4">
-        {tab === 'engineers' && brigadeId != null ? (
+        {brigadeId != null ? (
           <EngineersTable
             key={brigadeId}
             engineers={engineers}
             highlightIds={highlightIds}
             isLoading={engineersLoading}
+            activeId={activeEngineerId}
+            onOpenEngineer={(engineer) => {
+              setAddOpen(false)
+              setActiveEngineerId(engineer.id)
+            }}
           />
         ) : (
           <AppPanel className="flex min-h-0 flex-1 items-center justify-center">
             <p className="text-sm leading-6 text-[#71717a]">
-              {brigadeId == null
-                ? brigadesLoading
-                  ? 'Загружаем бригады…'
-                  : 'Выберите бригаду'
-                : 'Информация о бригаде появится позже'}
+              {brigadesLoading ? 'Загружаем бригады…' : 'Выберите бригаду'}
             </p>
           </AppPanel>
         )}
@@ -190,9 +200,13 @@ function PersonnelPage() {
           <AddEngineerPanel
             brigades={brigades}
             defaultBrigadeId={brigadeId}
-            engineers={engineers}
             onAdd={handleAdded}
             onClose={() => setAddOpen(false)}
+          />
+        ) : activeEngineer ? (
+          <EngineerCardPanel
+            engineer={activeEngineer}
+            onClose={() => setActiveEngineerId(null)}
           />
         ) : null}
       </div>
