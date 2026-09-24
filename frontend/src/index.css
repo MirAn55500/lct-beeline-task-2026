@@ -4,6 +4,11 @@
 
 @import "./theme/radius.css";
 
+/* Тосты по макету: заголовок тёмный, цвет статуса несёт только иконка. */
+.toast .toast__title {
+  color: var(--foreground);
+}
+
 body {
   margin: 0;
   min-width: 320px;

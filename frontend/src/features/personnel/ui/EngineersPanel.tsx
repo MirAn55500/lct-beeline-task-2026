@@ -13,6 +13,7 @@ import { useGetEngineersQuery } from '@/features/personnel/api'
 import type { Engineer } from '@/features/personnel/types'
 import { routes } from '@/shared/config/routes'
 import { cn } from '@/shared/lib/cn'
+import { getInitials } from '@/shared/lib/text'
 
 const TRANSPORT_ICON: Record<
   string,
@@ -21,15 +22,6 @@ const TRANSPORT_ICON: Record<
   public: RiBus2Fill,
   bike: RiRidingFill,
   car: RiCarFill,
-}
-
-function getInitials(name: string) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]!.toUpperCase())
-    .join('')
 }
 
 function EngineerCard({ engineer }: { engineer: Engineer }) {

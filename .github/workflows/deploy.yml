@@ -95,6 +95,10 @@ jobs:
               f"{host}:{port}/{db}"
           )
 
+          # Compose интерполирует % как %(…)s — URL-encoded пароль (%24) иначе ValueError.
+          # В .env пишем %%, compose отдаст в контейнер уже одиночный %.
+          database_url_for_compose = database_url.replace("%", "%%")
+
           # Одинарные кавычки: compose не интерполирует $ внутри них
           # (в двойных "abc$7def" превращается в "abcdef").
           def q(name: str, value: str) -> str:
@@ -103,7 +107,7 @@ jobs:
               return f"{name}='{value}'"
 
           lines = [
-              q("DATABASE_URL", database_url),
+              q("DATABASE_URL", database_url_for_compose),
               q("POSTGRES_USER", user),
               q("POSTGRES_PASSWORD", password),
               q("POSTGRES_DB", db),

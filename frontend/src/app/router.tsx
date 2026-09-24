@@ -1,14 +1,27 @@
-import { useRef, useState } from 'react'
-import { Navigate, Route, Routes } from 'react-router'
+import { useEffect, useRef, useState } from 'react'
+import { Navigate, Route, Routes, useSearchParams } from 'react-router'
 
 import {
   HomeAreaLayout,
   WorkAreaGanttLayout,
   WorkAreaMapLayout,
 } from '@/app/layouts'
+import {
+  AddEngineerPanel,
+  BrigadesPanel,
+  EngineersTable,
+  MOCK_BRIGADES,
+  MOCK_ENGINEERS,
+  PersonnelHeader,
+  downloadEngineers,
+  shortName,
+  type PersonnelEngineer,
+  type PersonnelTab,
+} from '@/features/personnel'
 import { DayOverviewWorkspace } from '@/features/planning'
 import { useUploadTicketsMutation } from '@/features/tickets'
 import { routes } from '@/shared/config/routes'
+import { AppPanel } from '@/shared/ui'
 
 function isAcceptedTicketFile(file: File) {
   const name = file.name.toLowerCase()
@@ -88,6 +101,113 @@ function OverviewPage() {
   )
 }
 
+// Сколько держится зелёная подсветка только что добавленных инженеров.
+const HIGHLIGHT_MS = 4000
+
+function PersonnelPage() {
+  const [params, setParams] = useSearchParams()
+  // Список на моках живёт в состоянии страницы, чтобы форма могла его пополнять.
+  const [allEngineers, setAllEngineers] = useState<PersonnelEngineer[]>(MOCK_ENGINEERS)
+  const [isAddOpen, setAddOpen] = useState(false)
+  const [highlightIds, setHighlightIds] = useState<ReadonlySet<number>>(() => new Set())
+
+  useEffect(() => {
+    if (highlightIds.size === 0) return
+    const timer = setTimeout(() => setHighlightIds(new Set()), HIGHLIGHT_MS)
+    return () => clearTimeout(timer)
+  }, [highlightIds])
+
+  const requestedId = Number(params.get('brigade'))
+  const brigadeId =
+    MOCK_BRIGADES.find((item) => item.id === requestedId)?.id ??
+    MOCK_BRIGADES[0]?.id ??
+    null
+  const brigade = MOCK_BRIGADES.find((item) => item.id === brigadeId)
+  const tab: PersonnelTab = params.get('tab') === 'info' ? 'info' : 'engineers'
+  const engineers = allEngineers.filter((item) => item.brigadeId === brigadeId)
+  const countById = Object.fromEntries(
+    MOCK_BRIGADES.map((item) => [
+      item.id,
+      allEngineers.filter((engineer) => engineer.brigadeId === item.id).length,
+    ]),
+  )
+
+  const leaderById = Object.fromEntries(
+    MOCK_BRIGADES.map((item) => {
+      const lead = allEngineers.find(
+        (engineer) => engineer.brigadeId === item.id && engineer.isLead,
+      )
+      return [item.id, lead ? shortName(lead.name) : undefined]
+    }),
+  )
+
+  const handleAdded = (added: PersonnelEngineer[]) => {
+    setAllEngineers((prev) => [...prev, ...added])
+    setHighlightIds(new Set(added.map((item) => item.id)))
+    // Показываем бригаду, куда попали новые инженеры.
+    const target = added[0]?.brigadeId
+    if (target != null && target !== brigadeId) update({ brigade: target, tab: 'engineers' })
+    else if (tab !== 'engineers') update({ tab: 'engineers' })
+  }
+
+  const update = (next: { brigade?: number; tab?: PersonnelTab }) =>
+    setParams(
+      (prev) => {
+        const copy = new URLSearchParams(prev)
+        if (next.brigade != null) copy.set('brigade', String(next.brigade))
+        if (next.tab != null) copy.set('tab', next.tab)
+        return copy
+      },
+      { replace: true },
+    )
+
+  return (
+    <WorkAreaMapLayout
+      sidebar={
+        <BrigadesPanel
+          brigades={MOCK_BRIGADES}
+          countById={countById}
+          leaderById={leaderById}
+          selectedId={brigadeId}
+          onSelect={(brigade) => update({ brigade })}
+        />
+      }
+      header={
+        <PersonnelHeader
+          tab={tab}
+          onTabChange={(next) => update({ tab: next })}
+          onAddEngineer={() => setAddOpen(true)}
+          onExport={(format) =>
+            downloadEngineers(engineers, format, `engineers-${brigade?.name ?? 'all'}`)
+          }
+        />
+      }
+    >
+      <div className="flex min-h-0 flex-1 gap-4">
+        {tab === 'engineers' && brigadeId != null ? (
+          <EngineersTable key={brigadeId} engineers={engineers} highlightIds={highlightIds} />
+        ) : (
+          <AppPanel className="flex min-h-0 flex-1 items-center justify-center">
+            <p className="text-sm leading-6 text-[#71717a]">
+              {brigadeId == null ? 'Выберите бригаду' : 'Информация о бригаде появится позже'}
+            </p>
+          </AppPanel>
+        )}
+
+        {isAddOpen ? (
+          <AddEngineerPanel
+            brigades={MOCK_BRIGADES}
+            defaultBrigadeId={brigadeId}
+            engineers={allEngineers}
+            onAdd={handleAdded}
+            onClose={() => setAddOpen(false)}
+          />
+        ) : null}
+      </div>
+    </WorkAreaMapLayout>
+  )
+}
+
 function PlaceholderPage() {
   return <HomeAreaLayout />
 }
@@ -104,7 +224,7 @@ export function AppRouter() {
       <Route path={routes.planGantt} element={<WorkAreaGanttLayout />} />
       <Route path={routes.planMap} element={<WorkAreaMapLayout />} />
 
-      <Route path={routes.personnel} element={<PlaceholderPage />} />
+      <Route path={routes.personnel} element={<PersonnelPage />} />
       <Route path={routes.config} element={<PlaceholderPage />} />
       <Route path={routes.help} element={<PlaceholderPage />} />
 
