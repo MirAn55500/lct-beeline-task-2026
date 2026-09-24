@@ -38,6 +38,9 @@ jobs:
           ORS_URL: ${{ vars.ORS_URL }}
           ORS_XMS: ${{ vars.ORS_XMS }}
           ORS_XMX: ${{ vars.ORS_XMX }}
+          ORS_GRAPHS_DATA_ACCESS: ${{ vars.ORS_GRAPHS_DATA_ACCESS }}
+          ORS_TRANSIT: ${{ vars.ORS_TRANSIT }}
+          ORS_MEM_LIMIT: ${{ vars.ORS_MEM_LIMIT }}
           DADATA_API_KEY: ${{ secrets.DADATA_API_KEY }}
           DADATA_SECRET_KEY: ${{ secrets.DADATA_SECRET_KEY }}
           GEOCODER_OSM_ENABLED: ${{ vars.GEOCODER_OSM_ENABLED }}
@@ -72,8 +75,14 @@ jobs:
           frontend_port = os.environ.get("FRONTEND_PORT") or "8080"
           cors = os.environ.get("CORS_ORIGINS") or '["http://localhost:8080"]'
           ors_url = os.environ.get("ORS_URL") or "http://ors:8082/ors"
-          ors_xms = os.environ.get("ORS_XMS") or "4g"
-          ors_xmx = os.environ.get("ORS_XMX") or "10g"
+          # По умолчанию — экономный режим стенда (3-4 ГБ RAM): графы с диска, heap 1 ГБ,
+          # потолок контейнера 2 ГБ, без общественного транспорта. Графы заливаются
+          # готовыми (solution/deploy/ors/upload-graphs.sh), собрать их тут не хватит памяти
+          ors_xms = os.environ.get("ORS_XMS") or "512m"
+          ors_xmx = os.environ.get("ORS_XMX") or "1g"
+          ors_data_access = os.environ.get("ORS_GRAPHS_DATA_ACCESS") or "MMAP"
+          ors_transit = os.environ.get("ORS_TRANSIT") or "false"
+          ors_mem_limit = os.environ.get("ORS_MEM_LIMIT") or "2g"
           dadata_key = os.environ.get("DADATA_API_KEY") or ""
           dadata_secret = os.environ.get("DADATA_SECRET_KEY") or ""
           osm_geocoder = os.environ.get("GEOCODER_OSM_ENABLED") or "true"
@@ -107,6 +116,9 @@ jobs:
               q("ORS_URL", ors_url),
               q("ORS_XMS", ors_xms),
               q("ORS_XMX", ors_xmx),
+              q("ORS_GRAPHS_DATA_ACCESS", ors_data_access),
+              q("ORS_TRANSIT", ors_transit),
+              q("ORS_MEM_LIMIT", ors_mem_limit),
               q("DADATA_API_KEY", dadata_key),
               q("DADATA_SECRET_KEY", dadata_secret),
               q("GEOCODER_OSM_ENABLED", osm_geocoder),

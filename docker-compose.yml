@@ -104,6 +104,14 @@ services:
       # Правило ORS: <размер pbf> × <число профилей> × 2 — для ЦФО минимум 6 ГБ
       XMS: ${ORS_XMS:-4g}
       XMX: ${ORS_XMX:-10g}
+      # Экономный режим для машины с 3-4 ГБ RAM: графы читаются с диска (MMAP), а не
+      # держатся в heap; без общественного транспорта — backend его у ORS не запрашивает
+      ors.engine.graphs_data_access: ${ORS_GRAPHS_DATA_ACCESS:-RAM_STORE}
+      ors.engine.profiles.public-transport.enabled: ${ORS_TRANSIT:-true}
+    # Потолок памяти вместе с кэшем страниц графов: при нехватке ядро ужимает ORS,
+    # а не backend; oom_score_adj — чтобы и при общей нехватке первым падал ORS
+    mem_limit: ${ORS_MEM_LIMIT:-16g}
+    oom_score_adj: 500
     healthcheck:
       test: wget --no-verbose --tries=1 --spider http://localhost:8082/ors/v2/health || exit 1
       start_period: 45m

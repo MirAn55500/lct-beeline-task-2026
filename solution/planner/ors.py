@@ -834,6 +834,22 @@ class OrsTravelModel:
         legs: dict[str, dict[tuple[str, str], tuple[float, float]]] = {}
         warnings: list[str] = []
 
+        # Недостающие матрицы профилей запрашиваются одновременно: при графах на диске
+        # (graphs_data_access: MMAP) каждый запрос ждёт чтения, а профили независимы
+        prefetch: dict[TransportMode, concurrent.futures.Future] = {}
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(wanted)))
+        for mode in wanted:
+            try:
+                profile = client.profile_of(mode)
+            except OrsError:
+                continue
+            if profile in NO_MATRIX_PROFILES:
+                continue
+            table = {} if refresh else (cache.legs_of(sections[mode]) if cache else {})
+            if not _covers(table, points):
+                prefetch[mode] = pool.submit(fetch_missing, client, profile, points, table)
+        pool.shutdown(wait=False)
+
         for mode in wanted:
             try:
                 profile = client.profile_of(mode)
@@ -874,7 +890,7 @@ class OrsTravelModel:
                     legs[section] = table
                     continue
                 try:
-                    fetched = fetch_matrix(client, profile, points)
+                    fetched = prefetch[mode].result()
                 except OrsError as exc:
                     warnings.append(
                         f"ORS: {exc}; «{TRANSPORT_TITLES[mode]}» считается по координатам"
@@ -1173,8 +1189,66 @@ def _covers(table: Mapping[tuple[str, str], tuple[float, float]], points: Sequen
     return True
 
 
+def _missing_points(
+    table: Mapping[tuple[str, str], tuple[float, float]], points: Sequence[GeoPoint]
+) -> list[int]:
+    """Точки, чьи строки и столбцы покрывают все пары, которых нет в таблице.
+
+    Жадно: сначала точка с наибольшим числом дыр. Новый адрес — это дыра со всеми
+    остальными, и он один закрывает всё; помечать оба конца каждой пары нельзя —
+    тогда «недостающими» окажутся все точки и дозапрос выродится в полный пересчёт.
+    """
+    keys = [point_key(p) for p in points]
+    holes = {
+        (a, b)
+        for a, ka in enumerate(keys)
+        for b, kb in enumerate(keys)
+        if a != b and (ka, kb) not in table
+    }
+    chosen: list[int] = []
+    while holes:
+        count: dict[int, int] = {}
+        for a, b in holes:
+            count[a] = count.get(a, 0) + 1
+            count[b] = count.get(b, 0) + 1
+        best = max(count, key=lambda i: (count[i], -i))
+        chosen.append(best)
+        holes = {(a, b) for a, b in holes if best not in (a, b)}
+    return sorted(chosen)
+
+
+def fetch_missing(
+    client: OrsClient,
+    profile: str,
+    points: Sequence[GeoPoint],
+    table: Mapping[tuple[str, str], tuple[float, float]],
+) -> dict[tuple[str, str], tuple[float, float]]:
+    """Дозапросить только недостающее: строки и столбцы точек с дырками в таблице.
+
+    Новый адрес в загрузке — это одна строка и один столбец матрицы, а не вся она:
+    пересчёт «все со всеми» из-за одной точки стоит десятки секунд на пеших и
+    велосипедных профилях. Пары, которые сервис построить не может (точка вне графа),
+    в кэш не попадают, поэтому их точки дозапрашиваются каждый раз — но это единицы.
+    """
+    missing = _missing_points(table, points)
+    if not missing:
+        return {}
+    if len(missing) * 2 >= len(points):
+        return fetch_matrix(client, profile, points)
+    missing_set = set(missing)
+    others = [i for i in range(len(points)) if i not in missing_set]
+    fetched = fetch_matrix(client, profile, points, sources=missing)
+    fetched.update(fetch_matrix(client, profile, points, sources=others, destinations=missing))
+    return fetched
+
+
 def fetch_matrix(
-    client: OrsClient, profile: str, points: Sequence[GeoPoint]
+    client: OrsClient,
+    profile: str,
+    points: Sequence[GeoPoint],
+    *,
+    sources: Sequence[int] | None = None,
+    destinations: Sequence[int] | None = None,
 ) -> dict[tuple[str, str], tuple[float, float]]:
     """Матрица «все со всеми» для профиля, при необходимости — блоками.
 
@@ -1185,20 +1259,32 @@ def fetch_matrix(
 
     Результат от размера блока не зависит: это то же самое «все со всеми», просто
     собранное за несколько запросов.
+
+    `sources` / `destinations` — индексы точек, если нужна не вся матрица, а её часть:
+    дозапрос строк и столбцов новых точек вместо пересчёта всего (см. `_missing_points`).
     """
     count = len(points)
     if count < 2:
         return {}
 
     keys = [point_key(p) for p in points]
-    rows_per_request = max(1, client.max_routes_per_request // count)
+    rows = list(sources) if sources is not None else list(range(count))
+    columns = list(destinations) if destinations is not None else list(range(count))
+    if not rows or not columns:
+        return {}
+    rows_per_request = max(1, client.max_routes_per_request // len(columns))
     table: dict[tuple[str, str], tuple[float, float]] = {}
 
     start = 0
-    while start < count:
-        block = list(range(start, min(start + rows_per_request, count)))
+    while start < len(rows):
+        block = rows[start : start + rows_per_request]
         try:
-            payload = client.matrix(profile, points, sources=block)
+            payload = client.matrix(
+                profile,
+                points,
+                sources=block,
+                destinations=columns if destinations is not None else None,
+            )
         except OrsError as exc:
             # Инстанс ограничивает не только число пар, но и обход графа
             # (`maximum_visited_nodes`), причём бюджет тратится на запрос целиком.
@@ -1225,14 +1311,15 @@ def fetch_matrix(
                 f"строк вместо {len(block)}"
             )
 
-        start = block[-1] + 1
+        start += len(block)
         for row_index, source_index in enumerate(block):
             distance_row = distances[row_index]
             duration_row = durations[row_index]
             if not isinstance(distance_row, list) or not isinstance(duration_row, list):
                 continue
-            for column, key_b in enumerate(keys):
-                if column == source_index:
+            for column, target_index in enumerate(columns):
+                key_b = keys[target_index]
+                if target_index == source_index:
                     continue  # диагональ: точка сама с собой, значение известно и так
                 # Короткий ряд — та же несчитанная пара, что и null: ряд обрывается
                 # молча, а падение по индексу посреди сборки матрицы уронило бы весь
