@@ -59,7 +59,7 @@ export function BrandBar({
         alt="билайн маршруты"
         width={272}
         height={36}
-        className="h-9 w-[272px]"
+        className="h-9 w-[272px] min-w-0 shrink object-contain object-left"
       />
 
       {showMenu ? (

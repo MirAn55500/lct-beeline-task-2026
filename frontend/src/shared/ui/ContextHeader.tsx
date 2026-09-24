@@ -93,6 +93,10 @@ type ContextHeaderProps = {
   onUploadClick?: () => void
   isRecalculating?: boolean
   onRecalculate?: () => void
+  /** Блок по центру шапки, например переключатель вида плана. */
+  center?: ReactNode
+  /** Показывать ли день недели рядом с датой. */
+  showWeekday?: boolean
 }
 
 export function ContextHeader({
@@ -112,6 +116,8 @@ export function ContextHeader({
   onUploadClick,
   isRecalculating = false,
   onRecalculate,
+  center,
+  showWeekday = true,
 }: ContextHeaderProps) {
   const [regionOpen, setRegionOpen] = useState(false)
   const [dateOpen, setDateOpen] = useState(false)
@@ -159,7 +165,9 @@ export function ContextHeader({
     <AppPanel
       ref={rootRef}
       className={cn(
-        'relative flex h-[60px] shrink-0 items-center justify-between px-3',
+        'relative h-[60px] shrink-0 items-center px-3',
+        // С центральным блоком края делят остаток поровну, чтобы центр стоял ровно посередине.
+        center ? 'grid grid-cols-[1fr_auto_1fr] gap-4' : 'flex justify-between',
         className,
       )}
     >
@@ -210,7 +218,7 @@ export function ContextHeader({
         <div className="h-7 w-px bg-[#e4e4e7]" />
 
         <ContextSelect
-          label={formatDayLabel(date)}
+          label={formatDayLabel(date, { weekday: showWeekday })}
           open={dateOpen}
           onToggle={() => {
             setRegionOpen(false)
@@ -294,7 +302,9 @@ export function ContextHeader({
 
       </div>
 
-      <div className="flex items-center gap-2">
+      {center}
+
+      <div className="flex items-center justify-end gap-2">
         {selectedPlan ? (
           <div className="relative">
             <button

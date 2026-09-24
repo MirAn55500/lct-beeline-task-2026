@@ -30,12 +30,15 @@ export function formatDateTime(value: string | Date): string {
   return dateTimeFormatter.format(date)
 }
 
-export function formatDayLabel(value: CalendarDate | Date): string {
+export function formatDayLabel(
+  value: CalendarDate | Date,
+  { weekday: withWeekday = true }: { weekday?: boolean } = {},
+): string {
   const date =
     value instanceof Date ? value : value.toDate(getLocalTimeZone())
   const parts = dayLabelFormatter.formatToParts(date)
   const day = parts.find((part) => part.type === 'day')?.value ?? ''
   const month = parts.find((part) => part.type === 'month')?.value ?? ''
   const weekday = parts.find((part) => part.type === 'weekday')?.value ?? ''
-  return `${day} ${month}, ${weekday}`
+  return withWeekday ? `${day} ${month}, ${weekday}` : `${day} ${month}`
 }

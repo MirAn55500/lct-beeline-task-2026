@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useSearchParams } from 'react-router'
+import { parseDate } from '@internationalized/date'
 
 import {
   HomeAreaLayout,
@@ -18,10 +19,21 @@ import {
   type PersonnelEngineer,
   type PersonnelTab,
 } from '@/features/personnel'
-import { DayOverviewWorkspace } from '@/features/planning'
+import {
+  DayOverviewWorkspace,
+  EngineersSidebar,
+  MOCK_MAP_DATE,
+  MOCK_MAP_PLANNED_DATES,
+  MOCK_MAP_PLANS,
+  MOCK_MAP_REGIONS,
+  PlanGanttBoard,
+  PlanMapBoard,
+  usePlanGanttBoard,
+  usePlanMapBoard,
+} from '@/features/planning'
 import { useUploadTicketsMutation } from '@/features/tickets'
 import { routes } from '@/shared/config/routes'
-import { AppPanel } from '@/shared/ui'
+import { AppPanel, ContextHeader, PlanViewTabs } from '@/shared/ui'
 
 function isAcceptedTicketFile(file: File) {
   const name = file.name.toLowerCase()
@@ -208,6 +220,76 @@ function PersonnelPage() {
   )
 }
 
+function PlanMapPage() {
+  // Шапка на моках: карта пока не ходит в бэк.
+  const [regionId, setRegionId] = useState(MOCK_MAP_REGIONS[0]?.id ?? null)
+  const [date, setDate] = useState(() => parseDate(MOCK_MAP_DATE))
+  const [planId, setPlanId] = useState(MOCK_MAP_PLANS[0]?.id ?? null)
+  const board = usePlanMapBoard(regionId)
+
+  return (
+    <WorkAreaMapLayout
+      sidebar={
+        <EngineersSidebar
+          engineers={board.engineers}
+          selectedId={board.selectedId}
+          hoveredId={board.hoveredId}
+          onSelect={board.select}
+          onHover={board.hover}
+        />
+      }
+      header={
+        <ContextHeader
+          regions={MOCK_MAP_REGIONS}
+          regionId={regionId}
+          onRegionIdChange={setRegionId}
+          date={date}
+          onDateChange={setDate}
+          showWeekday={false}
+          plannedDates={MOCK_MAP_PLANNED_DATES}
+          plans={MOCK_MAP_PLANS}
+          planId={planId}
+          onPlanIdChange={setPlanId}
+          center={<PlanViewTabs />}
+        />
+      }
+    >
+      <PlanMapBoard board={board} />
+    </WorkAreaMapLayout>
+  )
+}
+
+function PlanGanttPage() {
+  // Шапка на моках, как у карты: Гант пока не ходит в бэк.
+  const [regionId, setRegionId] = useState(MOCK_MAP_REGIONS[0]?.id ?? null)
+  const [date, setDate] = useState(() => parseDate(MOCK_MAP_DATE))
+  const [planId, setPlanId] = useState(MOCK_MAP_PLANS[0]?.id ?? null)
+  const board = usePlanGanttBoard(regionId, date.toString())
+
+  return (
+    <WorkAreaGanttLayout
+      header={
+        <ContextHeader
+          className="min-w-0 flex-1"
+          regions={MOCK_MAP_REGIONS}
+          regionId={regionId}
+          onRegionIdChange={setRegionId}
+          date={date}
+          onDateChange={setDate}
+          showWeekday={false}
+          plannedDates={MOCK_MAP_PLANNED_DATES}
+          plans={board.hasPlan ? MOCK_MAP_PLANS : []}
+          planId={board.hasPlan ? planId : null}
+          onPlanIdChange={setPlanId}
+          center={<PlanViewTabs />}
+        />
+      }
+    >
+      <PlanGanttBoard board={board} viewKey={`${regionId}:${date.toString()}`} />
+    </WorkAreaGanttLayout>
+  )
+}
+
 function PlaceholderPage() {
   return <HomeAreaLayout />
 }
@@ -221,8 +303,8 @@ export function AppRouter() {
         path={routes.plan}
         element={<Navigate to={routes.planGantt} replace />}
       />
-      <Route path={routes.planGantt} element={<WorkAreaGanttLayout />} />
-      <Route path={routes.planMap} element={<WorkAreaMapLayout />} />
+      <Route path={routes.planGantt} element={<PlanGanttPage />} />
+      <Route path={routes.planMap} element={<PlanMapPage />} />
 
       <Route path={routes.personnel} element={<PersonnelPage />} />
       <Route path={routes.config} element={<PlaceholderPage />} />
