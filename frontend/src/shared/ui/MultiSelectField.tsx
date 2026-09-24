@@ -67,10 +67,10 @@ export function MultiSelectField({
       </Label>
       <Select.Trigger
         className={cn(
-          'flex min-h-9 w-full items-center justify-between gap-2 border border-[#dedee0] bg-white text-left shadow-none outline-none',
+          'flex min-h-9 w-full items-center justify-between gap-2 border border-[#dedee0] bg-white !px-3 !py-2 text-left shadow-none outline-none',
           'data-[focus-visible]:outline data-[focus-visible]:outline-2 data-[focus-visible]:outline-offset-2 data-[focus-visible]:outline-[#0485f7]',
         )}
-        style={{ borderRadius: 8, padding: '8px 12px' }}
+        style={{ borderRadius: 8 }}
       >
         <Select.Value className="min-w-0 flex-1">
           {({ defaultChildren, isPlaceholder, state }) => {
@@ -83,7 +83,7 @@ export function MultiSelectField({
             }
 
             return (
-              <span className="flex flex-wrap gap-1.5">
+              <span className="flex flex-wrap gap-1.5 py-0.5">
                 {state.selectedItems.map((item) => {
                   const id = String(item.key)
                   return (
@@ -100,7 +100,7 @@ export function MultiSelectField({
             )
           }}
         </Select.Value>
-        <Select.Indicator className="shrink-0 text-[#71717a]">
+        <Select.Indicator className="shrink-0 self-center text-[#71717a]">
           <RiArrowDownSLine size={16} />
         </Select.Indicator>
       </Select.Trigger>
