@@ -377,7 +377,6 @@ export function EngineersTable({
         <EngineersFiltersPopover
           value={filters}
           onChange={setFilters}
-          matchedCount={visible.length}
           qualificationOptions={QUALIFICATION_OPTIONS}
           skillOptions={SKILL_OPTIONS}
           transportOptions={TRANSPORT_OPTIONS}

@@ -125,9 +125,6 @@ function PersonnelPage() {
   const countById = Object.fromEntries(
     brigades.map((item) => [item.id, item.engineersCount]),
   )
-  const leaderById = Object.fromEntries(
-    brigades.map((item) => [item.id, item.leaderShortName ?? undefined]),
-  )
 
   const update = (next: { brigade?: number }) =>
     setParams(
@@ -152,7 +149,6 @@ function PersonnelPage() {
         <BrigadesPanel
           brigades={brigades}
           countById={countById}
-          leaderById={leaderById}
           selectedId={brigadeId}
           isLoading={brigadesLoading}
           onSelect={(next) => update({ brigade: next })}

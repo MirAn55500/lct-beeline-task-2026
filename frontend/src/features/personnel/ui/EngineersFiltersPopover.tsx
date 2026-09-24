@@ -3,7 +3,6 @@ import { Checkbox, Popover } from '@heroui/react'
 import { RiEqualizer2Line } from '@remixicon/react'
 
 import { cn } from '@/shared/lib/cn'
-import { pluralRu } from '@/shared/lib/text'
 import { MultiSelectField } from '@/shared/ui'
 
 export type EngineersFiltersState = {
@@ -21,8 +20,6 @@ export const EMPTY_ENGINEERS_FILTERS: EngineersFiltersState = {
 type EngineersFiltersPopoverProps = {
   value: EngineersFiltersState
   onChange: (next: EngineersFiltersState) => void
-  /** Сколько строк сейчас видно в таблице (для подписи «Найдено»). */
-  matchedCount: number
   qualificationOptions: string[]
   skillOptions: string[]
   transportOptions: string[]
@@ -31,7 +28,6 @@ type EngineersFiltersPopoverProps = {
 export function EngineersFiltersPopover({
   value,
   onChange,
-  matchedCount,
   qualificationOptions,
   skillOptions,
   transportOptions,
@@ -54,14 +50,6 @@ export function EngineersFiltersPopover({
       qualifications: prev.qualifications.includes(label)
         ? prev.qualifications.filter((item) => item !== label)
         : [...prev.qualifications, label],
-    }))
-
-  const toggleTransport = (label: string) =>
-    setDraft((prev) => ({
-      ...prev,
-      transports: prev.transports.includes(label)
-        ? prev.transports.filter((item) => item !== label)
-        : [...prev.transports, label],
     }))
 
   return (
@@ -106,21 +94,17 @@ export function EngineersFiltersPopover({
         }}
       >
         <Popover.Dialog className="p-0 outline-none" style={{ borderRadius: 16 }}>
-          <div className="flex flex-col" style={{ padding: '12px 20px 20px' }}>
+          {/* padding body по Figma: 8 / 12 / 12 */}
+          <div className="flex flex-col" style={{ padding: '8px 12px 12px' }}>
             <Popover.Heading className="text-base font-semibold leading-6 text-[#18181b]">
               Фильтрация
             </Popover.Heading>
             <p className="text-sm leading-6 text-[#71717a]" style={{ marginTop: 4 }}>
-              Найдено: {matchedCount}{' '}
-              {pluralRu(matchedCount, [
-                'подходящий инженер',
-                'подходящих инженера',
-                'подходящих инженеров',
-              ])}
+              Найдите подходящего инженера
             </p>
 
             <div className="flex flex-col" style={{ marginTop: 16, gap: 16 }}>
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-1">
                 <span className="text-sm font-medium leading-6 text-[#18181b]">
                   Квалификация
                 </span>
@@ -152,7 +136,7 @@ export function EngineersFiltersPopover({
                         <Checkbox.Indicator />
                       </Checkbox.Control>
                       <Checkbox.Content>
-                        <span className="text-sm leading-5 text-[#18181b]">{label}</span>
+                        <span className="text-sm leading-6 text-[#18181b]">{label}</span>
                       </Checkbox.Content>
                     </Checkbox>
                   ))}
@@ -167,33 +151,15 @@ export function EngineersFiltersPopover({
                 onChange={(skills) => setDraft((prev) => ({ ...prev, skills }))}
               />
 
-              <div className="flex flex-col gap-2">
-                <span className="text-sm font-medium leading-6 text-[#18181b]">
-                  Транспорт
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {transportOptions.map((label) => {
-                    const active = draft.transports.includes(label)
-                    return (
-                      <button
-                        key={label}
-                        type="button"
-                        aria-pressed={active}
-                        onClick={() => toggleTransport(label)}
-                        className={cn(
-                          'inline-flex h-7 cursor-pointer items-center px-2.5 text-sm font-medium leading-5 transition-colors',
-                          active
-                            ? 'bg-[#0485f7] text-[#fcfcfc]'
-                            : 'bg-[#ebebec] text-[#18181b] hover:bg-[#e0e0e2]',
-                        )}
-                        style={{ borderRadius: 8 }}
-                      >
-                        {label}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
+              <MultiSelectField
+                label="Транспорт"
+                placeholder="Выберите транспорт"
+                options={transportOptions}
+                value={draft.transports}
+                onChange={(transports) =>
+                  setDraft((prev) => ({ ...prev, transports }))
+                }
+              />
             </div>
 
             <div className="flex" style={{ marginTop: 16, gap: 12 }}>
