@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "backend/**"
+      - "solution/planner/**"
+      - "solution/data/*.json"
       - "frontend/**"
       - "docker-compose.yml"
       - ".github/workflows/deploy.yml"

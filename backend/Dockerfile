@@ -11,6 +11,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# scenario_builder/importer ищут planner в /solution (parents[3] от модуля)
+COPY --from=solution planner /solution/planner
+COPY --from=solution data/*.json /solution/data/
+
 RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 8000
