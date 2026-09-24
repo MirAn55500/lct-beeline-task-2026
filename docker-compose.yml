@@ -39,6 +39,8 @@ services:
       ORS_URL: ${ORS_URL-http://ors:8082/ors}
       # ORS на отдельной машине: токен nginx и потоки фонового досчёта расписаний
       ORS_API_KEY: ${ORS_API_KEY:-}
+      # Запасной ORS (сервис ors ниже), если основной на отдельной машине не отвечает
+      ORS_FALLBACK_URL: ${ORS_FALLBACK_URL:-}
       TRANSIT_WORKERS: ${TRANSIT_WORKERS:-2}
       # Кэш ответов ORS переживает пересборку образа; при первом старте берётся из образа
       ROUTING_CACHE_PATH: /cache/routing_cache.json

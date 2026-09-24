@@ -43,8 +43,14 @@ from planner.ors import (  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
+RETRY_DELAY = 600.0
+"""Через сколько секунд повторить досчёт, если основной ORS не ответил."""
+RETRY_ATTEMPTS = 6
+"""Повторов подряд (~час); дальше — до следующей загрузки или пересчёта плана."""
+
 _queue: asyncio.Queue[tuple[int, date]] | None = None
 _pending: set[tuple[int, date]] = set()
+_retries: dict[tuple[int, date], int] = {}
 
 
 def schedule(region_id: int, day: date) -> None:
@@ -77,6 +83,20 @@ async def _warm(region_id: int, day: date) -> None:
     if scenario is None:
         return
     added = await asyncio.to_thread(warm_transit, scenario)
+    if added is None:
+        # Основной ORS не ответил: запасной расписаний не знает — попробовать позже
+        attempt = _retries.get((region_id, day), 0) + 1
+        if attempt <= RETRY_ATTEMPTS:
+            _retries[(region_id, day)] = attempt
+            logger.warning(
+                "Досчёт расписаний: ORS недоступен, повтор %d/%d через %.0f мин",
+                attempt, RETRY_ATTEMPTS, RETRY_DELAY / 60,
+            )
+            asyncio.get_running_loop().call_later(RETRY_DELAY, schedule, region_id, day)
+        else:
+            _retries.pop((region_id, day), None)
+        return
+    _retries.pop((region_id, day), None)
     if not added:
         return
     logger.info(
@@ -87,18 +107,23 @@ async def _warm(region_id: int, day: date) -> None:
         await PlanningService(session).recalculate(region_id, day, warm_transit=False)
 
 
-def _ors_has_transit(client: OrsClient, profile: str, points, departure: str) -> bool:
-    """Есть ли у инстанса расписания: одна пробная пара вместо тысяч отказов.
+def _probe_transit(client: OrsClient, profile: str, points, departure: str) -> str:
+    """Одна пробная пара вместо тысяч отказов: "ok", "outage" или "no-transit".
 
     `/v2/status` для этого не годится — список профилей он отдаёт не всем клиентам.
-    Сервис лежит или профиль выключен (стенд без графа транспорта) — не досчитываем.
     """
     _, failures = fetch_transit_legs(client, profile, points[:2], departure, workers=1)
-    return not (failures.outage or failures.rejected)
+    if failures.outage:
+        return "outage"
+    return "no-transit" if failures.rejected else "ok"
 
 
-def warm_transit(scenario: Scenario) -> int:
-    """Досчитать недостающие пары общественного транспорта. Возвращает число новых."""
+def warm_transit(scenario: Scenario) -> int | None:
+    """Досчитать недостающие пары общественного транспорта.
+
+    Возвращает число новых пар; None — основной ORS не ответил, стоит повторить.
+    Считается только на основном ORS: у запасного на стенде расписаний нет.
+    """
     settings = get_settings()
     if not settings.ors_url:
         return 0
@@ -129,7 +154,12 @@ def warm_transit(scenario: Scenario) -> int:
             section, departure = spare, transit_section_moment(spare)
 
     points = collect_points(scenario)
-    if len(points) < 2 or not _ors_has_transit(client, profile, points, departure):
+    if len(points) < 2:
+        return 0
+    probe = _probe_transit(client, profile, points, departure)
+    if probe == "outage":
+        return None
+    if probe == "no-transit":
         return 0
 
     unroutable = _load_unroutable(unroutable_path)

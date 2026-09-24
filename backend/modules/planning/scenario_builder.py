@@ -29,6 +29,7 @@ from planner import (  # noqa: E402
 )
 from planner.result import PlanResult  # noqa: E402
 
+from core import ors_endpoint
 from core.config import get_settings
 from modules.personnel.models.engineer import Engineer
 from modules.planning.models.assignment import Assignment
@@ -216,10 +217,9 @@ def run_plan(scenario: Scenario) -> PlanResult:
     # Без ORS_URL берутся сохранённые ответы сервиса, без кэша — расстояния по координатам
     settings = get_settings()
     options = {"cache_path": settings.routing_cache_path} if settings.routing_cache_path else {}
+    url, api_key = ors_endpoint.pick(settings)  # основной или запасной ORS
     with routing_cache_lock:
-        routing = setup_routing(
-            scenario, url=settings.ors_url or None, api_key=settings.ors_api_key or None, **options
-        )
+        routing = setup_routing(scenario, url=url, api_key=api_key, **options)
     result = plan(scenario, travel=routing.travel)
     notes = list(routing.notes)
     if isinstance(routing.travel, OrsTravelModel):

@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     ors_url: str | None = None
     # Токен ORS на отдельной машине (nginx перед ним проверяет заголовок Authorization)
     ors_api_key: str | None = None
+    # Запасной ORS (на стенде, без общественного транспорта), если основной не отвечает
+    ors_fallback_url: str | None = None
     # Параллельных запросов фонового досчёта расписаний: 2 — ORS на стенде рядом с
     # backend; на отдельной машине под ORS — 6-8
     transit_workers: int = 2

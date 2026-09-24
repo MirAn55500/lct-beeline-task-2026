@@ -78,6 +78,9 @@ jobs:
           cors = os.environ.get("CORS_ORIGINS") or '["http://localhost:8080"]'
           ors_url = os.environ.get("ORS_URL") or "http://ors:8082/ors"
           ors_api_key = os.environ.get("ORS_API_KEY") or ""
+          # ORS на отдельной машине — основной, свой на стенде остаётся запасным
+          local_ors = "http://ors:8082/ors"
+          ors_fallback = local_ors if ors_url != local_ors else ""
           transit_workers = os.environ.get("TRANSIT_WORKERS") or "2"
           # По умолчанию — экономный режим стенда (3-4 ГБ RAM): графы с диска, heap 1 ГБ,
           # потолок контейнера 2 ГБ, без общественного транспорта. Графы заливаются
@@ -123,6 +126,7 @@ jobs:
               q("CORS_ORIGINS", cors),
               q("ORS_URL", ors_url),
               q("ORS_API_KEY", ors_api_key),
+              q("ORS_FALLBACK_URL", ors_fallback),
               q("TRANSIT_WORKERS", transit_workers),
               q("ORS_XMS", ors_xms),
               q("ORS_XMX", ors_xmx),
@@ -141,7 +145,6 @@ jobs:
           # важнее .env: пустой ORS_XMX давал дефолт 10g, пустой ORS_URL выключал ORS.
           # Источник правды — .env, поэтому все его ключи из окружения убираются
           db_host="$POSTGRES_HOST"
-          ors_url="$(grep '^ORS_URL=' .env | cut -d"'" -f2)"
           frontend_port="${FRONTEND_PORT:-8080}"
           backend_port="${BACKEND_PORT:-8000}"
           unset $(sed -n 's/=.*//p' .env)
@@ -164,14 +167,7 @@ jobs:
 
           # ORS после приложения; ждать его не нужно — до готовности backend считает на
           # кэше маршрутов. Графы на стенде заливаются готовыми (upload-graphs.sh).
-          # ORS_URL на отдельную машину (solution/deploy/ors/REMOTE.md) — свой не нужен
-          case "$ors_url" in
-            http://ors:*)
-              docker compose --profile ors up -d ors
-              docker compose --profile ors ps ors
-              ;;
-            *)
-              echo "ORS на отдельной машине: $ors_url — локальный lct-ors не нужен"
-              docker compose --profile ors rm -sf ors ors-init || true
-              ;;
-          esac
+          # При ORS_URL на отдельную машину (solution/deploy/ors/REMOTE.md) этот —
+          # запасной: авто, пешком и велосипед, если основной не отвечает
+          docker compose --profile ors up -d ors
+          docker compose --profile ors ps ors
