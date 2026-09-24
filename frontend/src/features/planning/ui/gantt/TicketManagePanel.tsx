@@ -3,7 +3,7 @@ import { Dropdown, Tooltip } from '@heroui/react'
 import { RiArrowDownSLine, RiInformationLine, RiRouterFill, RiTimeLine, RiTvLine } from '@remixicon/react'
 
 import { cn } from '@/shared/lib/cn'
-import { AppPanel } from '@/shared/ui'
+import { AppPanel, AppTooltipContent } from '@/shared/ui'
 
 import type { GanttUnassigned } from '../../ganttTypes'
 import { formatClock } from '../../lib/ganttPlacement'
@@ -37,7 +37,7 @@ function FieldLabel({ children, required, hint }: { children: ReactNode; require
           <Tooltip.Trigger className="inline-flex cursor-help text-[#71717a] outline-none">
             <RiInformationLine size={12} />
           </Tooltip.Trigger>
-          <Tooltip.Content className="max-w-[280px] text-sm leading-5">{hint}</Tooltip.Content>
+          <AppTooltipContent className="max-w-[280px] text-left">{hint}</AppTooltipContent>
         </Tooltip>
       ) : null}
     </div>

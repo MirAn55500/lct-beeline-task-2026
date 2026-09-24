@@ -139,7 +139,7 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
             regionId == null ? undefined : () => setRebuildOpen(true)
           }
           onExport={
-            regionId == null || !overview?.tickets.total
+            regionId == null
               ? undefined
               : async (format) => {
                   try {

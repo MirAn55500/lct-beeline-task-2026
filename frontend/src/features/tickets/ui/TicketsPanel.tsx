@@ -9,6 +9,7 @@ import {
 
 import { useGetTicketsQuery, type Ticket } from '@/features/tickets/api'
 import { cn } from '@/shared/lib/cn'
+import { AppTooltipContent } from '@/shared/ui'
 import {
   EMPTY_TICKETS_FILTERS,
   TicketsFiltersPopover,
@@ -51,9 +52,9 @@ function TicketTag({
       <Tooltip.Trigger className="inline-flex max-w-full cursor-help outline-none">
         {tag}
       </Tooltip.Trigger>
-      <Tooltip.Content className="max-w-[280px] text-sm leading-5 break-normal">
+      <AppTooltipContent className="max-w-[280px] text-left break-normal">
         {hint}
-      </Tooltip.Content>
+      </AppTooltipContent>
     </Tooltip>
   )
 }

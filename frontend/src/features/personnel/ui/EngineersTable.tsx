@@ -17,7 +17,7 @@ import {
 } from '@/features/personnel/mocks'
 import { cn } from '@/shared/lib/cn'
 import { getInitials, pluralRu } from '@/shared/lib/text'
-import { AppPanel } from '@/shared/ui'
+import { AppPanel, AppTooltipContent } from '@/shared/ui'
 
 import {
   EMPTY_ENGINEERS_FILTERS,
@@ -147,7 +147,7 @@ function SkillsCell({ skills }: { skills: SkillCode[] }) {
         >
           <RiInformationLine size={16} />
         </Tooltip.Trigger>
-        <Tooltip.Content className="max-w-[320px] text-sm leading-5 break-normal">
+        <AppTooltipContent className="max-w-[320px] text-left break-normal">
           <ul className="flex flex-col gap-0.5">
             {known.map((code) => (
               <li key={code} className="whitespace-nowrap">
@@ -155,7 +155,7 @@ function SkillsCell({ skills }: { skills: SkillCode[] }) {
               </li>
             ))}
           </ul>
-        </Tooltip.Content>
+        </AppTooltipContent>
       </Tooltip>
     </span>
   )

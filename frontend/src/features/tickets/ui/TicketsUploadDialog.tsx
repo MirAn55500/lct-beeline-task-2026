@@ -13,7 +13,7 @@ import { DropZone, FileTrigger, Button as AriaButton, isFileDropItem } from 'rea
 
 import { useGetRegionsQuery } from '@/features/catalogs'
 import { cn } from '@/shared/lib/cn'
-import { AppModal, FieldLabel, buttonClass } from '@/shared/ui'
+import { AppModal, AppTooltipContent, FieldLabel, buttonClass } from '@/shared/ui'
 
 import type { UploadTicketsResult } from '../api'
 import {
@@ -92,7 +92,9 @@ export function TicketsUploadDialog({ isOpen, onClose, defaultRegionId = null, d
                 <Tooltip.Trigger className="inline-flex cursor-help text-[#71717a] outline-none">
                   <RiInformationLine size={12} />
                 </Tooltip.Trigger>
-                <Tooltip.Content className="text-xs leading-5">Все заявки должны относиться к выбранному региону</Tooltip.Content>
+                <AppTooltipContent>
+                  Все заявки должны относиться к выбранному региону
+                </AppTooltipContent>
               </Tooltip>
             }
           >

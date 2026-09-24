@@ -28,6 +28,7 @@ import { useGetRegionsQuery } from '@/features/catalogs'
 import { isAcceptedTicketFile } from '@/features/tickets/ui/TicketsDropzone'
 import { cn } from '@/shared/lib/cn'
 import { pluralRu } from '@/shared/lib/text'
+import { AppTooltipContent } from '@/shared/ui'
 
 function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} Б`
@@ -149,9 +150,9 @@ export function UploadTicketsModal({
                     >
                       <RiInformationLine size={16} />
                     </Tooltip.Trigger>
-                    <Tooltip.Content className="max-w-[260px] text-sm leading-5">
+                    <AppTooltipContent>
                       Все заявки должны относиться к выбранному региону
-                    </Tooltip.Content>
+                    </AppTooltipContent>
                   </Tooltip>
                 </div>
                 <Select

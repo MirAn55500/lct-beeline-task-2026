@@ -4,6 +4,7 @@ import { RiErrorWarningLine, RiRouterLine, RiTimeLine, RiTvLine } from '@remixic
 
 import { cn } from '@/shared/lib/cn'
 import { getInitials } from '@/shared/lib'
+import { AppTooltipContent } from '@/shared/ui'
 
 import type { MapEngineer, MapTicket } from '../../mapTypes'
 import { TRANSPORT_FILL_ICON, TRANSPORT_LABEL } from './transport'
@@ -137,9 +138,9 @@ export function ReasonTag({ label, explanation }: { label: string; explanation: 
           <span className="truncate">{label}</span>
         </Tag>
       </Tooltip.Trigger>
-      <Tooltip.Content className="max-w-[360px] text-sm leading-5 break-normal">
+      <AppTooltipContent className="max-w-[360px] text-left break-normal">
         {explanation}
-      </Tooltip.Content>
+      </AppTooltipContent>
     </Tooltip>
   )
 }

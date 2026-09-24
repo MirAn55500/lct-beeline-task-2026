@@ -69,14 +69,24 @@ export function PersonnelHeader({
                 className="flex flex-col outline-none"
                 onAction={(key) => {
                   if (key === 'add') onAddEngineer()
-                  else onExport(key as EngineersExportFormat)
+                  else if (key === 'csv' || key === 'json') onExport(key)
                 }}
               >
-                <Dropdown.Item id="csv" textValue="Экспорт csv" className={MENU_ITEM} style={{ borderRadius: 8 }}>
+                <Dropdown.Item
+                  id="csv"
+                  textValue="Экспорт csv"
+                  className={MENU_ITEM}
+                  style={{ borderRadius: 8 }}
+                >
                   <RiFileTextLine size={16} className="shrink-0 text-[#71717a]" />
                   Экспорт csv
                 </Dropdown.Item>
-                <Dropdown.Item id="json" textValue="Экспорт json" className={MENU_ITEM} style={{ borderRadius: 8 }}>
+                <Dropdown.Item
+                  id="json"
+                  textValue="Экспорт json"
+                  className={MENU_ITEM}
+                  style={{ borderRadius: 8 }}
+                >
                   <RiDownload2Line size={16} className="shrink-0 text-[#71717a]" />
                   Экспорт json
                 </Dropdown.Item>

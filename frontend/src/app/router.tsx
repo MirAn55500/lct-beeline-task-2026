@@ -156,7 +156,7 @@ function PersonnelPage() {
       }
       header={
         <PersonnelHeader
-          title="Бригада"
+          title={brigade?.name ?? 'Бригада'}
           onAddEngineer={() => {
             setActiveEngineerId(null)
             setAddOpen(true)

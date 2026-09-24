@@ -12,6 +12,7 @@ import {
 } from '@remixicon/react'
 
 import { cn } from '@/shared/lib/cn'
+import { AppTooltipContent } from '@/shared/ui'
 
 import type { GanttStatus, GanttTask, GanttUnassigned } from '../../ganttTypes'
 import { equipmentLabel, formatRange } from '../../lib/ganttPlacement'
@@ -237,9 +238,9 @@ export function GanttTicketCard({ ticket, selected = false, className, onPointer
                   {UNASSIGNED_REASON_LABEL[ticket.reason]}
                 </span>
               </Tooltip.Trigger>
-              <Tooltip.Content className="max-w-[360px] text-sm leading-5 break-normal">
+              <AppTooltipContent className="max-w-[360px] text-left break-normal">
                 {ticket.explanation}
-              </Tooltip.Content>
+              </AppTooltipContent>
             </Tooltip>
           )}
         </div>

@@ -1,3 +1,5 @@
+import { toast } from '@heroui/react'
+
 import type { Ticket } from '../api'
 
 export type TicketsExportFormat = 'csv' | 'json'
@@ -78,6 +80,10 @@ export function downloadTickets(
   format: TicketsExportFormat,
   fileName: string,
 ) {
+  if (tickets.length === 0) {
+    toast.danger('Нет заявок для экспорта')
+    return
+  }
   const { body, type } = serialize(tickets, format)
   const url = URL.createObjectURL(new Blob([body], { type: `${type};charset=utf-8` }))
   const link = document.createElement('a')
@@ -85,4 +91,5 @@ export function downloadTickets(
   link.download = `${fileName}.${format}`
   link.click()
   URL.revokeObjectURL(url)
+  toast.success(format === 'csv' ? 'CSV скачан' : 'JSON скачан')
 }
