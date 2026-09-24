@@ -69,24 +69,36 @@ jobs:
               f"{host}:{port}/{db}"
           )
 
-          def esc(value: str) -> str:
-              return value.replace("\\", "\\\\").replace('"', '\\"')
+          # Одинарные кавычки: compose не интерполирует $ внутри них
+          # (в двойных "abc$7def" превращается в "abcdef").
+          def q(name: str, value: str) -> str:
+              if "'" in value or "\n" in value:
+                  raise SystemExit(f"{name}: одинарная кавычка/перевод строки не поддерживаются")
+              return f"{name}='{value}'"
 
           lines = [
-              f'DATABASE_URL="{esc(database_url)}"',
-              f'POSTGRES_USER="{esc(user)}"',
-              f'POSTGRES_PASSWORD="{esc(password)}"',
-              f'POSTGRES_DB="{esc(db)}"',
-              f'POSTGRES_HOST="{esc(host)}"',
-              f'POSTGRES_PORT="{esc(port)}"',
-              f'DEBUG="{esc(debug)}"',
-              f'BACKEND_PORT="{esc(backend_port)}"',
-              f'FRONTEND_PORT="{esc(frontend_port)}"',
-              f'CORS_ORIGINS="{esc(cors)}"',
+              q("DATABASE_URL", database_url),
+              q("POSTGRES_USER", user),
+              q("POSTGRES_PASSWORD", password),
+              q("POSTGRES_DB", db),
+              q("POSTGRES_HOST", host),
+              q("POSTGRES_PORT", port),
+              q("DEBUG", debug),
+              q("BACKEND_PORT", backend_port),
+              q("FRONTEND_PORT", frontend_port),
+              q("CORS_ORIGINS", cors),
           ]
           with open(".env", "w", encoding="utf-8") as fh:
               fh.write("\n".join(lines) + "\n")
           PY
+
+          # При падении показать, почему backend не поднялся
+          trap 'docker compose ps -a; docker compose logs --tail=100 backend db || true' ERR
+
+          # db в профиле local-db и сам не стартует — без него хост "db" не резолвится
+          if [ "$POSTGRES_HOST" = "db" ]; then
+            docker compose --profile local-db up -d --wait db
+          fi
 
           docker compose up -d --build backend frontend
           docker compose ps
