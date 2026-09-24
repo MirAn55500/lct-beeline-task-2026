@@ -114,29 +114,29 @@ export function EngineersFiltersPopover({
                       key={label}
                       isSelected={draft.qualifications.includes(label)}
                       onChange={() => toggleQualification(label)}
-                      className="gap-2"
                     >
-                      <Checkbox.Control
-                        className="before:!rounded-[4px]"
-                        style={{
-                          borderRadius: 4,
-                          borderWidth: 1,
-                          borderStyle: 'solid',
-                          borderColor: draft.qualifications.includes(label)
-                            ? 'var(--accent)'
-                            : '#dedee0',
-                          ['--field-background' as string]: draft.qualifications.includes(
-                            label,
-                          )
-                            ? 'var(--accent)'
-                            : '#ffffff',
-                          ['--field-shadow' as string]: '0 0 #0000',
-                        }}
-                      >
-                        <Checkbox.Indicator />
-                      </Checkbox.Control>
-                      <Checkbox.Content>
-                        <span className="text-sm leading-6 text-[#18181b]">{label}</span>
+                      <Checkbox.Content className="flex cursor-pointer items-center gap-2">
+                        <Checkbox.Control
+                          className="before:!rounded-[4px]"
+                          style={{
+                            borderRadius: 4,
+                            borderWidth: 1,
+                            borderStyle: 'solid',
+                            borderColor: draft.qualifications.includes(label)
+                              ? 'var(--accent)'
+                              : '#dedee0',
+                            ['--field-background' as string]:
+                              draft.qualifications.includes(label)
+                                ? 'var(--accent)'
+                                : '#ffffff',
+                            ['--field-shadow' as string]: '0 0 #0000',
+                          }}
+                        >
+                          <Checkbox.Indicator />
+                        </Checkbox.Control>
+                        <span className="text-sm leading-6 text-[#18181b]">
+                          {label}
+                        </span>
                       </Checkbox.Content>
                     </Checkbox>
                   ))}
