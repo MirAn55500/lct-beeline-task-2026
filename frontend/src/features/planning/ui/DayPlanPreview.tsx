@@ -1,5 +1,5 @@
 import { ScrollShadow } from '@heroui/react'
-import { RiArrowRightLine, RiCalendarScheduleLine } from '@remixicon/react'
+import { RiArrowRightLine } from '@remixicon/react'
 import { Link } from 'react-router'
 
 import { routes } from '@/shared/config/routes'
@@ -8,7 +8,6 @@ import { cn } from '@/shared/lib/cn'
 const DAY_START = 9
 const DAY_END = 18
 const DAY_SPAN = DAY_END - DAY_START
-const HOURS = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18] as const
 const LABELS = [9, 12, 15, 18] as const
 
 type BlockTone = 'soft' | 'strong'
@@ -71,10 +70,10 @@ function TimeLabels() {
 function TimeGrid() {
   return (
     <div className="pointer-events-none absolute inset-0">
-      {HOURS.map((hour) => (
+      {LABELS.map((hour) => (
         <span
           key={hour}
-          className="absolute top-0 bottom-0 border-l border-dashed border-[#dedee0]"
+          className="absolute top-0 bottom-0 w-px bg-[#e4e4e7]"
           style={{ left: `${hourToPercent(hour)}%` }}
         />
       ))}
@@ -156,7 +155,6 @@ export function DayPlanPreview({
           className="inline-flex h-9 cursor-pointer items-center gap-2 bg-[#0485f7] px-4 text-sm font-medium text-[#fcfcfc] transition-colors hover:bg-[#0374d9]"
           style={{ borderRadius: 8 }}
         >
-          <RiCalendarScheduleLine size={16} className="shrink-0" />
           Перейти к плану
           <RiArrowRightLine size={16} className="shrink-0" />
         </Link>

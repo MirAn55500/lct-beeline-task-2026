@@ -82,5 +82,6 @@ export const ticketsApi = baseApi.injectEndpoints({
 export const {
   useGetTicketsHealthQuery,
   useGetTicketsQuery,
+  useLazyGetTicketsQuery,
   useUploadTicketsMutation,
 } = ticketsApi

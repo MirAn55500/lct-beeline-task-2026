@@ -10,8 +10,7 @@ import type { GanttEngineer, GanttTask } from '../../ganttTypes'
 import { GanttTaskCard } from './cards'
 import { EngineerCell } from './EngineerCell'
 
-/** Размеры сетки из макета: колонка инженеров, час и строка. */
-export const GANTT_COLUMN = 306
+/** Размеры сетки из макета: час и строка. Колонка инженеров — общая левая колонка (useAsideWidth). */
 export const GANTT_HOUR = 120
 export const GANTT_HEADER = 48
 export const GANTT_ROW = 60
@@ -28,6 +27,8 @@ export type GanttTarget = {
 }
 
 type GanttTimelineProps = {
+  /** Ширина колонки инженеров — совпадает с брендом над ней. */
+  column: number
   engineers: GanttEngineer[]
   tasks: GanttTask[]
   fromHour: number
@@ -48,6 +49,7 @@ type GanttTimelineProps = {
 }
 
 export function GanttTimeline({
+  column,
   engineers,
   tasks,
   fromHour,
@@ -76,12 +78,12 @@ export function GanttTimeline({
         ref={scrollRef}
         className="min-h-0 flex-1 overflow-auto [scrollbar-color:#e1e1e1_transparent] [scrollbar-width:thin]"
       >
-        <div className="relative flex min-h-full flex-col" style={{ width: GANTT_COLUMN + width }}>
+        <div className="relative flex min-h-full flex-col" style={{ width: column + width }}>
           {/* Шкала часов прилипает сверху, угол с «План работ» — ещё и слева. */}
           <div className="sticky top-0 z-40 flex shrink-0 bg-white" style={{ height: GANTT_HEADER }}>
             <div
               className="sticky left-0 z-10 flex shrink-0 items-center border-r-[3px] border-b border-[#e4e4e7] bg-white px-1.5"
-              style={{ width: GANTT_COLUMN }}
+              style={{ width: column }}
             >
               <Link
                 to={routes.overview}
@@ -122,7 +124,7 @@ export function GanttTimeline({
           <div className="flex flex-1">
             <div
               className="sticky left-0 z-30 shrink-0 border-r-[3px] border-[#e4e4e7] bg-white"
-              style={{ width: GANTT_COLUMN }}
+              style={{ width: column }}
             >
               {engineers.map((engineer) => (
                 <EngineerCell

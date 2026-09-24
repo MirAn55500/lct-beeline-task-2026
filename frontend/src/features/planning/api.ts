@@ -1,7 +1,7 @@
 import { baseApi } from '@/shared/api/baseApi'
 import type { ModuleHealth } from '@/shared/types'
 
-import type { DayOverview, RecalculateResult } from './types'
+import type { DayOverview, PlanDistribution, PlanRebuildLevel, RecalculateResult } from './types'
 
 export const planningApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
@@ -24,12 +24,18 @@ export const planningApi = baseApi.injectEndpoints({
     }),
     recalculatePlan: build.mutation<
       RecalculateResult,
-      { regionId: number; date: string }
+      { regionId: number; date: string; level?: PlanRebuildLevel; distribution?: PlanDistribution }
     >({
-      query: ({ regionId, date }) => ({
+      // level и distribution backend пока не читает — уходят заранее, чтобы включить их без правок фронта.
+      query: ({ regionId, date, level, distribution }) => ({
         url: '/api/planning/recalculate',
         method: 'POST',
-        params: { region_id: regionId, date },
+        params: {
+          region_id: regionId,
+          date,
+          ...(level ? { level } : {}),
+          ...(distribution ? { distribution } : {}),
+        },
       }),
       invalidatesTags: ['Plan', 'Ticket'],
     }),

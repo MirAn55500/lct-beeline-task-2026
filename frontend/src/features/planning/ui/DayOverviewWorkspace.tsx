@@ -1,4 +1,5 @@
 import { Link } from 'react-router'
+import { RiArrowRightUpLine } from '@remixicon/react'
 
 import beesPromo from '@/shared/assets/day-overview-bees-promo.png'
 import { EngineersPanel } from '@/features/personnel'
@@ -48,6 +49,13 @@ function SummaryCounter({
   )
 }
 
+/** «Алексеев Александр» → «Алексеев А.», как в превью плана из макета. */
+function shortName(name: string) {
+  const [first, second] = name.trim().split(/\s+/)
+  if (!first || !second || /бригада/i.test(first)) return name
+  return `${first} ${second[0]}.`
+}
+
 function planRowsFromTickets(tickets: Ticket[]): PlanRow[] {
   const grouped = new Map<string, PlanRow['blocks']>()
   for (const ticket of tickets) {
@@ -65,7 +73,7 @@ function planRowsFromTickets(tickets: Ticket[]): PlanRow[] {
     })
     grouped.set(ticket.engineer, blocks)
   }
-  return [...grouped.entries()].map(([name, blocks]) => ({ id: name, name, blocks }))
+  return [...grouped.entries()].map(([name, blocks]) => ({ id: name, name: shortName(name), blocks }))
 }
 
 type DayOverviewWorkspaceProps = {
@@ -104,18 +112,17 @@ export function DayOverviewWorkspace({
       <AppPanel className="flex h-24 shrink-0 items-center gap-12 px-5">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <h2 className="text-xl font-semibold leading-7 text-foreground">
-            {hasTickets ? 'План работ' : 'Создайте план работ'}
+            {hasTickets ? 'План работ составлен' : 'Создайте план работ'}
           </h2>
           {hasTickets ? (
             <p className="flex min-w-0 items-center text-sm leading-6 text-[#71717a]">
-              <span className="truncate">
-                Расписание и маршруты инженеров доступны в плане работ
-              </span>
+              <span className="truncate">Расписание и маршруты инженеров доступны в</span>
               <Link
                 to={routes.planGantt}
-                className="ms-1 shrink-0 font-medium text-[#0485f7] hover:underline"
+                className="ms-1 inline-flex shrink-0 items-start font-medium text-[#18181b] transition-colors hover:text-[#0485f7]"
               >
-                Перейти к плану
+                плане работ
+                <RiArrowRightUpLine size={12} className="mt-0.5" />
               </Link>
             </p>
           ) : (
@@ -157,12 +164,12 @@ export function DayOverviewWorkspace({
         </AppPanel>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
-          <AppPanel className="flex min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden">
+          <AppPanel className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <EngineersPanel regionId={regionId} />
           </AppPanel>
 
           {hasTickets ? (
-            <AppPanel className="flex min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden">
+            <AppPanel className="flex h-[303px] min-w-0 shrink-0 flex-col overflow-hidden">
               <DayPlanPreview rows={planRowsFromTickets(chartTickets)} />
             </AppPanel>
           ) : (

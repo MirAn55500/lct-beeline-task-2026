@@ -29,3 +29,8 @@ export type DayOverview = {
   planned_dates: string[]
   plans: PlanVersion[]
 }
+
+/** Насколько пересчёт может менять уже составленный план (Modal «Обновить план»). */
+export type PlanRebuildLevel = 'fixed' | 'engineer' | 'free'
+/** Как делить заявки между инженерами. */
+export type PlanDistribution = 'even' | 'efficient'

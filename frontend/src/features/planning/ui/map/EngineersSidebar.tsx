@@ -169,7 +169,7 @@ export function EngineersSidebar({
                         <MetaSeparator />
                         <span className="flex items-center gap-0.5">
                           <RiTimeLine size={14} />
-                          {engineer.routeFrom}-{engineer.routeTo}
+                          {engineer.routeFrom ? `${engineer.routeFrom}-${engineer.routeTo}` : engineer.shift}
                         </span>
                       </span>
                     </span>

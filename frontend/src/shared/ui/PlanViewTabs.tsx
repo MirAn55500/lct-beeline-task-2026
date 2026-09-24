@@ -1,43 +1,37 @@
-import { NavLink } from 'react-router'
+import { NavLink, useLocation } from 'react-router'
 
 import { routes } from '@/shared/config/routes'
 import { cn } from '@/shared/lib/cn'
+import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 
 const VIEWS = [
-  { to: routes.planGantt, label: 'Гант' },
-  { to: routes.planMap, label: 'Карта' },
+  { id: routes.planGantt, label: 'Гант' },
+  { id: routes.planMap, label: 'Карта' },
 ]
 
 type PlanViewTabsProps = {
   className?: string
 }
 
-/** Переключатель вида плана работ из шапки: диаграмма Ганта или карта. */
+/**
+ * Переключатель вида плана работ из шапки: диаграмма Ганта или карта.
+ * Регион, день и версия плана лежат в адресе и переезжают вместе с видом.
+ */
 export function PlanViewTabs({ className }: PlanViewTabsProps) {
+  const { pathname, search } = useLocation()
+  const value = VIEWS.find((view) => pathname.startsWith(view.id))?.id ?? routes.planGantt
+
   return (
-    <nav
+    <SegmentedControl
       aria-label="Вид плана"
-      className={cn('flex h-9 w-[214px] items-center gap-[5px] bg-[#ebebec] px-1.5 py-0.5 min-[1400px]:w-[334px]', className)}
-      style={{ borderRadius: 8 }}
-    >
-      {VIEWS.map((item) => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          replace
-          className={({ isActive }) =>
-            cn(
-              'flex h-8 flex-1 items-center justify-center px-3 text-sm font-medium leading-6 transition-colors',
-              isActive
-                ? 'bg-white text-[#18181b] shadow-[0_2px_8px_rgb(0_0_0/0.06)]'
-                : 'text-[#71717a] hover:text-[#18181b]',
-            )
-          }
-          style={{ borderRadius: 6 }}
-        >
-          {item.label}
+      options={VIEWS}
+      value={value}
+      className={cn('w-[214px] min-[1400px]:w-[334px]', className)}
+      renderOption={(option, { className: segment }) => (
+        <NavLink key={option.id} to={{ pathname: option.id, search }} replace className={segment}>
+          {option.label}
         </NavLink>
-      ))}
-    </nav>
+      )}
+    />
   )
 }

@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useSearchParams } from 'react-router'
-import { parseDate } from '@internationalized/date'
+import { toast } from '@heroui/react'
 
 import {
   HomeAreaLayout,
   WorkAreaGanttLayout,
   WorkAreaMapLayout,
+  type HomeAreaContext,
 } from '@/app/layouts'
 import {
   AddEngineerPanel,
@@ -22,95 +23,46 @@ import {
 import {
   DayOverviewWorkspace,
   EngineersSidebar,
-  MOCK_MAP_DATE,
   MOCK_MAP_PLANNED_DATES,
-  MOCK_MAP_PLANS,
   MOCK_MAP_REGIONS,
   PlanGanttBoard,
   PlanMapBoard,
+  PlanRebuildDialog,
+  usePlanContext,
   usePlanGanttBoard,
   usePlanMapBoard,
 } from '@/features/planning'
-import { useUploadTicketsMutation } from '@/features/tickets'
+import { TicketsUploadDialog, isTicketsFile, useTicketsUpload } from '@/features/tickets'
 import { routes } from '@/shared/config/routes'
 import { AppPanel, ContextHeader, PlanViewTabs } from '@/shared/ui'
 
-function isAcceptedTicketFile(file: File) {
-  const name = file.name.toLowerCase()
-  return name.endsWith('.csv') || file.type === 'text/csv'
+function OverviewContent({ context }: { context: HomeAreaContext }) {
+  const { regionId, regionName, date, planId, focusDay } = context
+  const { upload, isUploading } = useTicketsUpload((result) => {
+    if (result.date) focusDay(result.date)
+  })
+
+  return (
+    <DayOverviewWorkspace
+      regionId={regionId}
+      regionName={regionName}
+      date={date}
+      planId={planId}
+      isUploading={isUploading}
+      onFiles={
+        regionId == null
+          ? undefined
+          : async (files) => {
+              const file = files.find(isTicketsFile)
+              if (file) await upload({ file, regionId, date })
+            }
+      }
+    />
+  )
 }
 
 function OverviewPage() {
-  const inputRef = useRef<HTMLInputElement>(null)
-  const [pending, setPending] = useState(false)
-  const [uploadTickets, { isLoading }] = useUploadTicketsMutation()
-  const isUploading = pending || isLoading
-
-  const handleFiles = async (
-    files: File[],
-    regionId: number,
-    date: string,
-    focusDay: (isoDate: string) => void,
-  ) => {
-    const file = files.find(isAcceptedTicketFile)
-    if (!file || isUploading) return
-
-    const body = new FormData()
-    body.append('file', file)
-    body.append('region_id', String(regionId))
-    body.append('date', date)
-
-    setPending(true)
-    try {
-      const result = await uploadTickets(body).unwrap()
-      if (result.date) focusDay(result.date)
-    } catch {
-      // Ошибка загрузки возвращает дропзону в покой.
-    } finally {
-      setPending(false)
-    }
-  }
-
-  return (
-    <HomeAreaLayout
-      isUploadDisabled={isUploading}
-      onUploadClick={() => {
-        if (!isUploading) inputRef.current?.click()
-      }}
-    >
-      {({ regionId, regionName, date, planId, focusDay }) => (
-        <>
-          <input
-            ref={inputRef}
-            type="file"
-            accept=".csv,text/csv"
-            className="sr-only"
-            tabIndex={-1}
-            disabled={isUploading || regionId == null}
-            onChange={async (event) => {
-              const files = Array.from(event.target.files ?? [])
-              event.target.value = ''
-              if (files.length > 0 && regionId != null) {
-                await handleFiles(files, regionId, date, focusDay)
-              }
-            }}
-          />
-          <DayOverviewWorkspace
-            regionId={regionId}
-            regionName={regionName}
-            date={date}
-            planId={planId}
-            isUploading={isUploading}
-            onFiles={
-              regionId == null
-                ? undefined
-                : (files) => handleFiles(files, regionId, date, focusDay)
-            }
-          />
-        </>
-      )}
-    </HomeAreaLayout>
-  )
+  return <HomeAreaLayout>{(context) => <OverviewContent context={context} />}</HomeAreaLayout>
 }
 
 // Сколько держится зелёная подсветка только что добавленных инженеров.
@@ -186,6 +138,7 @@ function PersonnelPage() {
       }
       header={
         <PersonnelHeader
+          title={brigade?.name ?? 'Бригада'}
           tab={tab}
           onTabChange={(next) => update({ tab: next })}
           onAddEngineer={() => setAddOpen(true)}
@@ -220,12 +173,53 @@ function PersonnelPage() {
   )
 }
 
+type PlanContextState = ReturnType<typeof usePlanContext>
+
+/**
+ * Шапка плана работ — одна на Гант и карту: те же регион, день, версия плана
+ * и окна «Загрузить заявки» / «Обновить план», чтобы при переключении вида ничего не менялось.
+ */
+function PlanWorkHeader({ context, hasPlan }: { context: PlanContextState; hasPlan: boolean }) {
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const [rebuildOpen, setRebuildOpen] = useState(false)
+
+  return (
+    <>
+      <ContextHeader
+        regions={MOCK_MAP_REGIONS}
+        regionId={context.regionId}
+        onRegionIdChange={context.setRegionId}
+        date={context.date}
+        onDateChange={context.setDate}
+        plannedDates={MOCK_MAP_PLANNED_DATES}
+        plans={hasPlan ? context.plans : []}
+        planId={hasPlan ? context.planId : null}
+        onPlanIdChange={context.setPlanId}
+        onUploadClick={() => setUploadOpen(true)}
+        onRecalculate={() => setRebuildOpen(true)}
+        center={<PlanViewTabs />}
+      />
+      <TicketsUploadDialog
+        isOpen={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        date={context.date.toString()}
+      />
+      <PlanRebuildDialog
+        isOpen={rebuildOpen}
+        onClose={() => setRebuildOpen(false)}
+        onConfirm={() => {
+          // План работ пока на моках: новая версия с теми же назначениями.
+          const plan = context.addPlan()
+          toast.success(`План №${plan.version} составлен`)
+        }}
+      />
+    </>
+  )
+}
+
 function PlanMapPage() {
-  // Шапка на моках: карта пока не ходит в бэк.
-  const [regionId, setRegionId] = useState(MOCK_MAP_REGIONS[0]?.id ?? null)
-  const [date, setDate] = useState(() => parseDate(MOCK_MAP_DATE))
-  const [planId, setPlanId] = useState(MOCK_MAP_PLANS[0]?.id ?? null)
-  const board = usePlanMapBoard(regionId)
+  const context = usePlanContext()
+  const board = usePlanMapBoard(context.regionId, context.date.toString())
 
   return (
     <WorkAreaMapLayout
@@ -238,21 +232,7 @@ function PlanMapPage() {
           onHover={board.hover}
         />
       }
-      header={
-        <ContextHeader
-          regions={MOCK_MAP_REGIONS}
-          regionId={regionId}
-          onRegionIdChange={setRegionId}
-          date={date}
-          onDateChange={setDate}
-          showWeekday={false}
-          plannedDates={MOCK_MAP_PLANNED_DATES}
-          plans={MOCK_MAP_PLANS}
-          planId={planId}
-          onPlanIdChange={setPlanId}
-          center={<PlanViewTabs />}
-        />
-      }
+      header={<PlanWorkHeader context={context} hasPlan={board.hasPlan} />}
     >
       <PlanMapBoard board={board} />
     </WorkAreaMapLayout>
@@ -260,32 +240,12 @@ function PlanMapPage() {
 }
 
 function PlanGanttPage() {
-  // Шапка на моках, как у карты: Гант пока не ходит в бэк.
-  const [regionId, setRegionId] = useState(MOCK_MAP_REGIONS[0]?.id ?? null)
-  const [date, setDate] = useState(() => parseDate(MOCK_MAP_DATE))
-  const [planId, setPlanId] = useState(MOCK_MAP_PLANS[0]?.id ?? null)
-  const board = usePlanGanttBoard(regionId, date.toString())
+  const context = usePlanContext()
+  const board = usePlanGanttBoard(context.regionId, context.date.toString())
 
   return (
-    <WorkAreaGanttLayout
-      header={
-        <ContextHeader
-          className="min-w-0 flex-1"
-          regions={MOCK_MAP_REGIONS}
-          regionId={regionId}
-          onRegionIdChange={setRegionId}
-          date={date}
-          onDateChange={setDate}
-          showWeekday={false}
-          plannedDates={MOCK_MAP_PLANNED_DATES}
-          plans={board.hasPlan ? MOCK_MAP_PLANS : []}
-          planId={board.hasPlan ? planId : null}
-          onPlanIdChange={setPlanId}
-          center={<PlanViewTabs />}
-        />
-      }
-    >
-      <PlanGanttBoard board={board} viewKey={`${regionId}:${date.toString()}`} />
+    <WorkAreaGanttLayout header={<PlanWorkHeader context={context} hasPlan={board.hasPlan} />}>
+      <PlanGanttBoard board={board} viewKey={`${context.regionId}:${context.date.toString()}`} />
     </WorkAreaGanttLayout>
   )
 }

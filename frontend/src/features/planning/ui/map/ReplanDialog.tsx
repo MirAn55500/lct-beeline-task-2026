@@ -70,7 +70,7 @@ export function ReplanDialog({ ticketId, engineerName, onConfirm, onCancel }: Re
             type="button"
             aria-label="Закрыть"
             onClick={onCancel}
-            className="absolute top-4 right-4 flex size-6 cursor-pointer items-center justify-center rounded-full bg-[#ebebec] text-[#71717a] transition-colors hover:bg-[#e0e0e2]"
+            className="absolute top-4 right-2.5 flex size-6 cursor-pointer items-center justify-center rounded-full bg-[#ebebec] text-[#71717a] transition-colors hover:bg-[#e0e0e2]"
           >
             <RiCloseLine size={16} />
           </button>

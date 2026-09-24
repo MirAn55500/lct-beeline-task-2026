@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 
+import { ASIDE_WIDTH_CLASS } from '@/shared/lib'
 import { AppPanel, BrandBar } from '@/shared/ui'
 
 type WorkAreaGanttLayoutProps = {
@@ -12,8 +13,8 @@ export function WorkAreaGanttLayout({ header, children }: WorkAreaGanttLayoutPro
   return (
     <div className="flex h-svh flex-col gap-4 bg-[#f5f5f5] p-4">
       <div className="flex shrink-0 gap-4">
-        <BrandBar className="w-[306px]" showMenu />
-        {header ?? <AppPanel className="h-[60px] min-w-0 flex-1" />}
+        <BrandBar className={ASIDE_WIDTH_CLASS} showMenu />
+        <div className="min-w-0 flex-1">{header ?? <AppPanel className="h-[60px]" />}</div>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-4">

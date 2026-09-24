@@ -4,7 +4,14 @@ export {
   useGetPlanningHealthQuery,
   useRecalculatePlanMutation,
 } from './api'
-export type { AssignmentId, DayOverview, PlanId, PlanVersion } from './types'
+export type {
+  AssignmentId,
+  DayOverview,
+  PlanDistribution,
+  PlanId,
+  PlanRebuildLevel,
+  PlanVersion,
+} from './types'
 export { DayOverviewWorkspace } from './ui/DayOverviewWorkspace'
 export { usePlanGanttBoard } from './lib/usePlanGanttBoard'
 export { usePlanMapBoard } from './lib/usePlanMapBoard'
@@ -20,3 +27,5 @@ export type { MapPlan, MapRegion } from './mocks'
 export { EngineersSidebar } from './ui/map/EngineersSidebar'
 export { PlanMapBoard } from './ui/map/PlanMapBoard'
 export { PlanGanttBoard } from './ui/gantt/PlanGanttBoard'
+export { PlanRebuildDialog } from './ui/PlanRebuildDialog'
+export { usePlanContext } from './lib/usePlanContext'

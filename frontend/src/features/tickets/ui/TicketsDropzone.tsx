@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { ProgressCircle } from '@heroui/react'
-import { RiUploadCloud2Line } from '@remixicon/react'
+import { RiDownload2Line, RiUploadCloud2Line } from '@remixicon/react'
 import {
   Button,
   DropZone,
@@ -10,16 +10,19 @@ import {
 } from 'react-aria-components'
 
 import { cn } from '@/shared/lib/cn'
+import { buttonClass } from '@/shared/ui'
+
+import {
+  TICKETS_FILE_TYPES,
+  TICKETS_TEMPLATE_SIZE,
+  downloadTicketsTemplate,
+  isTicketsFile,
+} from '../lib/template'
 
 type TicketsDropzoneProps = {
   className?: string
   isUploading?: boolean
   onFiles?: (files: File[]) => void | Promise<void>
-}
-
-function isAccepted(file: File) {
-  const name = file.name.toLowerCase()
-  return name.endsWith('.csv') || file.type === 'text/csv'
 }
 
 function DropzoneSurface({
@@ -78,7 +81,7 @@ export function TicketsDropzone({
   const uploading = isUploading || pending
 
   const handleFiles = async (files: File[]) => {
-    const accepted = files.filter(isAccepted)
+    const accepted = files.filter(isTicketsFile)
     if (accepted.length === 0 || uploading) return
 
     setPending(true)
@@ -90,7 +93,7 @@ export function TicketsDropzone({
   }
 
   return (
-    <div className={cn('flex min-h-0 flex-1 p-5 pt-4', className)}>
+    <div className={cn('flex min-h-0 flex-1 flex-col gap-4 p-5 pt-4', className)}>
       {uploading ? (
         <UploadingState />
       ) : (
@@ -113,7 +116,7 @@ export function TicketsDropzone({
           )}
         >
           <FileTrigger
-            acceptedFileTypes={['.csv', 'text/csv']}
+            acceptedFileTypes={TICKETS_FILE_TYPES}
             onSelect={async (list) => {
               if (!list) return
               await handleFiles(Array.from(list))
@@ -133,13 +136,17 @@ export function TicketsDropzone({
                 </Text>
                 <span className="text-xs leading-5 text-[#71717a]">
                   Нажмите на это поле или перетащите
-                  <br />в него csv файл
+                  <br />в него json или csv файл
                 </span>
               </div>
             </Button>
           </FileTrigger>
         </DropZone>
       )}
+      <button type="button" onClick={downloadTicketsTemplate} className={cn(buttonClass.outline, 'self-end')}>
+        <RiDownload2Line size={16} />
+        Скачать шаблон ({TICKETS_TEMPLATE_SIZE})
+      </button>
     </div>
   )
 }

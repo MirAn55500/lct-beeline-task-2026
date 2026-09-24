@@ -19,22 +19,35 @@ const LOAD_PER_MANUAL_STOP = 8
  * Состояние страницы карты на моках: выбор и наведение, маршруты и неназначенные заявки.
  * Когда появится API, маршруты и заявки придут из RTK Query, а перепланирование — мутацией.
  */
-export function usePlanMapBoard(regionId: number | null) {
-  const [loadedRegion, setLoadedRegion] = useState(regionId)
-  const [engineers, setEngineers] = useState<MapEngineer[]>(() => getMapDataset(regionId).engineers)
-  const [routes, setRoutes] = useState<EngineerRoute[]>(() => getMapDataset(regionId).routes)
+/** План региона на день; в другие дни плана нет — инженеры без маршрутов, как пустой Гант. */
+function datasetFor(regionId: number | null, date: string) {
+  const dataset = getMapDataset(regionId)
+  if (date === dataset.date) return dataset
+  return {
+    ...dataset,
+    engineers: dataset.engineers.map((engineer) => ({ ...engineer, load: 0, routeFrom: '', routeTo: '' })),
+    routes: [],
+    unassigned: [],
+  }
+}
+
+export function usePlanMapBoard(regionId: number | null, date: string) {
+  const viewKey = `${regionId}:${date}`
+  const [loadedKey, setLoadedKey] = useState(viewKey)
+  const [engineers, setEngineers] = useState<MapEngineer[]>(() => datasetFor(regionId, date).engineers)
+  const [routes, setRoutes] = useState<EngineerRoute[]>(() => datasetFor(regionId, date).routes)
   const [unassigned, setUnassigned] = useState<UnassignedTicket[]>(
-    () => getMapDataset(regionId).unassigned,
+    () => datasetFor(regionId, date).unassigned,
   )
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [activeStopId, setActiveStopId] = useState<string | null>(null)
   const [pendingDrop, setPendingDrop] = useState<PendingDrop | null>(null)
 
-  // Другой регион — другой план: сбрасываем всё прямо в рендере, без лишнего кадра со старыми данными.
-  if (loadedRegion !== regionId) {
-    const dataset = getMapDataset(regionId)
-    setLoadedRegion(regionId)
+  // Другой регион или день — другой план: сбрасываем всё прямо в рендере, без лишнего кадра со старыми данными.
+  if (loadedKey !== viewKey) {
+    const dataset = datasetFor(regionId, date)
+    setLoadedKey(viewKey)
     setEngineers(dataset.engineers)
     setRoutes(dataset.routes)
     setUnassigned(dataset.unassigned)
@@ -43,6 +56,8 @@ export function usePlanMapBoard(regionId: number | null) {
     setActiveStopId(null)
     setPendingDrop(null)
   }
+
+  const hasPlan = date === getMapDataset(regionId).date
 
   const selectedEngineer = engineers.find((item) => item.id === selectedId) ?? null
   const selectedRoute = routes.find((item) => item.engineerId === selectedId) ?? null
@@ -99,7 +114,8 @@ export function usePlanMapBoard(regionId: number | null) {
   }
 
   return {
-    regionId: loadedRegion,
+    regionId,
+    hasPlan,
     engineers,
     routes,
     unassigned,

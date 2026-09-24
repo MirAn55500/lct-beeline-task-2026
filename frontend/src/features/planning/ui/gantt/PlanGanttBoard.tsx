@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as Reac
 import { createPortal } from 'react-dom'
 
 import { cn } from '@/shared/lib/cn'
+import { useAsideWidth } from '@/shared/lib/layout'
 
 import type { GanttTask, GanttTicket, GanttUnassigned } from '../../ganttTypes'
 import {
@@ -17,7 +18,6 @@ import { getClientContact } from '../../mocks/gantt'
 import { GanttTaskCard, GanttTicketCard } from './cards'
 import { ClientApprovalDialog } from './ClientApprovalDialog'
 import {
-  GANTT_COLUMN,
   GANTT_HEADER,
   GANTT_HOUR,
   GANTT_ROW,
@@ -77,6 +77,7 @@ export function PlanGanttBoard({ board, viewKey }: PlanGanttBoardProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const lanesRef = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
+  const column = useAsideWidth()
   const { engineers, tasks, now, change } = board
 
   const edges = [
@@ -100,7 +101,7 @@ export function PlanGanttBoard({ board, viewKey }: PlanGanttBoardProps) {
     const node = scrollRef.current
     if (!node) return
     const nowX = ((now - fromHour * 60) / 60) * GANTT_HOUR
-    node.scrollLeft = Math.max(0, nowX - (node.clientWidth - GANTT_COLUMN) / 2)
+    node.scrollLeft = Math.max(0, nowX - (node.clientWidth - column) / 2)
     node.scrollTop = 0
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewKey])
@@ -123,7 +124,7 @@ export function PlanGanttBoard({ board, viewKey }: PlanGanttBoardProps) {
     const lanes = lanesRef.current?.getBoundingClientRect()
     if (!scroller || !lanes) return null
     if (
-      clientX < scroller.left + GANTT_COLUMN ||
+      clientX < scroller.left + column ||
       clientX > scroller.right ||
       clientY < scroller.top + GANTT_HEADER ||
       clientY > scroller.bottom
@@ -177,11 +178,11 @@ export function PlanGanttBoard({ board, viewKey }: PlanGanttBoardProps) {
       if (node) {
         const rect = node.getBoundingClientRect()
         const insideY = last.y > rect.top && last.y < rect.bottom
-        const insideX = last.x > rect.left + GANTT_COLUMN && last.x < rect.right
+        const insideX = last.x > rect.left + column && last.x < rect.right
         let dx = 0
         let dy = 0
         if (insideY && last.x > rect.right - EDGE && last.x < rect.right) dx = EDGE_SPEED
-        if (insideY && last.x > rect.left + GANTT_COLUMN && last.x < rect.left + GANTT_COLUMN + EDGE) dx = -EDGE_SPEED
+        if (insideY && last.x > rect.left + column && last.x < rect.left + column + EDGE) dx = -EDGE_SPEED
         if (insideX && last.y > rect.bottom - EDGE && last.y < rect.bottom) dy = EDGE_SPEED
         if (insideX && last.y > rect.top + GANTT_HEADER && last.y < rect.top + GANTT_HEADER + EDGE) dy = -EDGE_SPEED
         if (dx !== 0 || dy !== 0) {
@@ -240,6 +241,7 @@ export function PlanGanttBoard({ board, viewKey }: PlanGanttBoardProps) {
     <div className="flex min-h-0 flex-1 gap-4">
       <div className="flex min-w-0 flex-1 flex-col gap-4">
         <GanttTimeline
+          column={column}
           engineers={engineers}
           tasks={tasks}
           fromHour={fromHour}
