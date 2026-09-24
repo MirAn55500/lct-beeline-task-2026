@@ -44,6 +44,21 @@ jobs:
             echo "Need vars POSTGRES_USER/DB/HOST/PORT and secret POSTGRES_PASSWORD."
             exit 1
           fi
+
+          # docker compose читает .env из корня проекта; GitHub vars живут только в этом шаге
+          umask 077
+          {
+            printf 'POSTGRES_USER=%s\n' "$POSTGRES_USER"
+            printf 'POSTGRES_PASSWORD=%s\n' "$POSTGRES_PASSWORD"
+            printf 'POSTGRES_DB=%s\n' "$POSTGRES_DB"
+            printf 'POSTGRES_HOST=%s\n' "$POSTGRES_HOST"
+            printf 'POSTGRES_PORT=%s\n' "${POSTGRES_PORT:-5432}"
+            printf 'DEBUG=%s\n' "${DEBUG:-false}"
+            printf 'BACKEND_PORT=%s\n' "${BACKEND_PORT:-8000}"
+            printf 'FRONTEND_PORT=%s\n' "${FRONTEND_PORT:-8080}"
+            printf 'CORS_ORIGINS=%s\n' "${CORS_ORIGINS:-[\"http://localhost:8080\"]}"
+          } > .env
+
           docker compose up -d --build backend frontend
           docker compose ps
           docker compose logs --tail=80 backend
