@@ -45,19 +45,48 @@ jobs:
             exit 1
           fi
 
-          # docker compose читает .env из корня проекта; GitHub vars живут только в этом шаге
+          echo "Postgres host=${POSTGRES_HOST} port=${POSTGRES_PORT:-5432} db=${POSTGRES_DB} user=${POSTGRES_USER}"
+
+          # Пароль/логин URL-encode, иначе @ : / в пароле ломают host и дают gaierror
           umask 077
-          {
-            printf 'POSTGRES_USER=%s\n' "$POSTGRES_USER"
-            printf 'POSTGRES_PASSWORD=%s\n' "$POSTGRES_PASSWORD"
-            printf 'POSTGRES_DB=%s\n' "$POSTGRES_DB"
-            printf 'POSTGRES_HOST=%s\n' "$POSTGRES_HOST"
-            printf 'POSTGRES_PORT=%s\n' "${POSTGRES_PORT:-5432}"
-            printf 'DEBUG=%s\n' "${DEBUG:-false}"
-            printf 'BACKEND_PORT=%s\n' "${BACKEND_PORT:-8000}"
-            printf 'FRONTEND_PORT=%s\n' "${FRONTEND_PORT:-8080}"
-            printf 'CORS_ORIGINS=%s\n' "${CORS_ORIGINS:-[\"http://localhost:8080\"]}"
-          } > .env
+          python3 - <<'PY'
+          import os
+          from urllib.parse import quote
+
+          user = os.environ["POSTGRES_USER"]
+          password = os.environ["POSTGRES_PASSWORD"]
+          host = os.environ["POSTGRES_HOST"].strip().strip('"').strip("'")
+          port = os.environ.get("POSTGRES_PORT") or "5432"
+          db = os.environ["POSTGRES_DB"]
+          debug = os.environ.get("DEBUG") or "false"
+          backend_port = os.environ.get("BACKEND_PORT") or "8000"
+          frontend_port = os.environ.get("FRONTEND_PORT") or "8080"
+          cors = os.environ.get("CORS_ORIGINS") or '["http://localhost:8080"]'
+
+          database_url = (
+              "postgresql+asyncpg://"
+              f"{quote(user, safe='')}:{quote(password, safe='')}@"
+              f"{host}:{port}/{db}"
+          )
+
+          def esc(value: str) -> str:
+              return value.replace("\\", "\\\\").replace('"', '\\"')
+
+          lines = [
+              f'DATABASE_URL="{esc(database_url)}"',
+              f'POSTGRES_USER="{esc(user)}"',
+              f'POSTGRES_PASSWORD="{esc(password)}"',
+              f'POSTGRES_DB="{esc(db)}"',
+              f'POSTGRES_HOST="{esc(host)}"',
+              f'POSTGRES_PORT="{esc(port)}"',
+              f'DEBUG="{esc(debug)}"',
+              f'BACKEND_PORT="{esc(backend_port)}"',
+              f'FRONTEND_PORT="{esc(frontend_port)}"',
+              f'CORS_ORIGINS="{esc(cors)}"',
+          ]
+          with open(".env", "w", encoding="utf-8") as fh:
+              fh.write("\n".join(lines) + "\n")
+          PY
 
           docker compose up -d --build backend frontend
           docker compose ps
