@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from core.config import get_settings
 from core.exceptions import AppError, NotFoundError
 from modules.catalogs.enums import DictGroup
+from modules.catalogs.models.address import Address
+from modules.geocoding import suggest as address_suggest
+from modules.geocoding.geocoder import HOUSE, AddressGeocoder, has_house
+from modules.personnel.models.brigade import Brigade
 from modules.personnel.models.engineer import Engineer
 from modules.personnel.qualification import (
     QUALIFICATION_LABELS,
@@ -13,11 +18,16 @@ from modules.personnel.qualification import (
 )
 from modules.personnel.repository import PersonnelRepository
 from modules.personnel.schemas import (
+    AddressSuggestionResponse,
+    AreaResponse,
     BrigadeResponse,
     CreateEngineerRequest,
     EngineerResponse,
     EngineersQuery,
     PersonnelFilterOptions,
+    ReverseGeocodeResponse,
+    UpdateBrigadeRequest,
+    UpdateBrigadeResponse,
 )
 from modules.personnel.skills import SKILL_LABELS, map_skill, skill_code
 from modules.personnel.transport import map_transport
@@ -52,6 +62,7 @@ _TRANSPORT_UI_LABEL: dict[str, str] = {
 
 class PersonnelService:
     def __init__(self, session: AsyncSession) -> None:
+        self._session = session
         self._repo = PersonnelRepository(session)
 
     def health(self) -> dict[str, str]:
@@ -66,26 +77,149 @@ class PersonnelService:
 
     async def list_brigades(self, region_id: int | None = None) -> list[BrigadeResponse]:
         brigades = await self._repo.list_brigades(region_id)
-        items: list[BrigadeResponse] = []
-        for brigade in brigades:
-            assert brigade.brigade_id is not None
-            engineers = brigade.engineers or []
-            lead = next((item for item in engineers if item.is_lead), None)
-            if lead is None and engineers:
-                lead = min(engineers, key=lambda item: item.engineer_id or 0)
-            leader_name = lead.name if lead else None
-            items.append(
-                BrigadeResponse(
-                    id=brigade.brigade_id,
-                    name=brigade.name,
-                    number=brigade.number,
-                    region_id=brigade.region_id,
-                    engineers_count=len(engineers),
-                    leader_name=leader_name,
-                    leader_short_name=short_name(leader_name) if leader_name else None,
-                )
+        return [self._brigade_response(brigade) for brigade in brigades]
+
+    async def list_areas(self, region_id: int) -> list[AreaResponse]:
+        areas = await self._repo.list_areas(region_id)
+        return [AreaResponse(id=area.id or 0, name=area.area) for area in areas]
+
+    async def update_brigade(
+        self, brigade_id: int, body: UpdateBrigadeRequest
+    ) -> UpdateBrigadeResponse:
+        """Сохранить карточку «Управление бригадой».
+
+        Новый адрес офиса геокодируется — это точка старта инженеров. Рабочий день
+        переставляется тем инженерам, у кого он совпадал с прежним днём бригады;
+        свою смену инженера не трогаем. План сам не пересчитывается.
+        """
+        brigade = await self._repo.get_brigade_full(brigade_id)
+        if brigade is None:
+            raise NotFoundError("Бригада не найдена")
+
+        name = body.name.strip()
+        if not name:
+            raise AppError("Укажите название бригады")
+        if body.end_work <= body.start_work:
+            raise AppError("Конец рабочего дня должен быть позже начала")
+        days = sorted(set(body.work_days))
+        if not days or any(day < 1 or day > 7 for day in days):
+            raise AppError("Выберите хотя бы один рабочий день")
+
+        areas = {area.id: area for area in await self._repo.list_areas(brigade.region_id)}
+        if any(area_id not in areas for area_id in body.area_ids):
+            raise AppError("Район не из региона бригады")
+
+        address = " ".join(body.office_address.split())
+        office = brigade.office_address
+        point = (
+            (body.office_lat, body.office_lon)
+            if body.office_lat is not None and body.office_lon is not None
+            else None
+        )
+        renamed = office is None or address != " ".join(office.address.split())
+        moved = point is not None and (
+            office is None
+            or abs(point[0] - office.latitude) > 1e-6
+            or abs(point[1] - office.longitude) > 1e-6
+        )
+        office_moved = moved
+        if moved or renamed:
+            # Свободный текст геокодер путает (Невский проспект находился в Москве):
+            # новый офис — только адрес из подсказок или точка на карте, оба с точкой
+            if point is None:
+                raise AppError("Выберите адрес офиса из подсказок или укажите его на карте")
+            if not has_house(address):
+                raise AppError("Укажите адрес офиса с номером дома")
+            office = await self._place_office(brigade, address, point)
+            brigade.office_address_id = office.address_id or 0
+
+        rescheduled = 0
+        old_day = (brigade.start_work, brigade.end_work)
+        if (body.start_work, body.end_work) != old_day:
+            for engineer in brigade.engineers or []:
+                if (engineer.start_work, engineer.end_work) == old_day:
+                    engineer.start_work = body.start_work
+                    engineer.end_work = body.end_work
+                    self._session.add(engineer)
+                    rescheduled += 1
+
+        brigade.name = name
+        brigade.start_work = body.start_work
+        brigade.end_work = body.end_work
+        brigade.work_days = "".join(str(day) for day in days)
+        brigade.in_planning = body.in_planning
+        brigade.areas = [areas[area_id] for area_id in dict.fromkeys(body.area_ids)]
+        self._session.add(brigade)
+        await self._repo.commit()
+
+        saved = await self._repo.get_brigade_full(brigade_id)
+        assert saved is not None
+        return UpdateBrigadeResponse(
+            **self._brigade_response(saved).model_dump(),
+            rescheduled_engineers=rescheduled,
+            office_moved=office_moved,
+        )
+
+    async def suggest_addresses(self, query: str) -> list[AddressSuggestionResponse]:
+        items = await address_suggest.suggest(query)
+        return [
+            AddressSuggestionResponse(
+                address=item.address, lat=item.lat, lon=item.lon, has_house=item.house
             )
-        return items
+            for item in items
+        ]
+
+    async def reverse_geocode(self, lat: float, lon: float) -> ReverseGeocodeResponse:
+        async with AddressGeocoder(get_settings()) as geocoder:
+            if not geocoder.in_region(lat, lon):
+                raise AppError("Точка вне Москвы и Московской области")
+            return ReverseGeocodeResponse(address=await geocoder.reverse(lat, lon))
+
+    async def _place_office(
+        self, brigade: Brigade, address: str, point: tuple[float, float]
+    ) -> Address:
+        """Офис в точке, поставленной на карте; адрес — подпись к ней."""
+        if brigade.office_address is None:
+            raise AppError("У бригады нет офиса, к району которого привязать новый адрес")
+        async with AddressGeocoder(get_settings()) as geocoder:
+            if not geocoder.in_region(*point):
+                raise AppError("Офис должен быть в Москве или Московской области")
+        return await self._repo.add_address(
+            Address(
+                area_id=brigade.office_address.area_id,
+                address=address,
+                latitude=point[0],
+                longitude=point[1],
+                geo_precision=HOUSE,
+                geo_source="map",
+            )
+        )
+
+    def _brigade_response(self, brigade: Brigade) -> BrigadeResponse:
+        assert brigade.brigade_id is not None
+        engineers = brigade.engineers or []
+        lead = next((item for item in engineers if item.is_lead), None)
+        if lead is None and engineers:
+            lead = min(engineers, key=lambda item: item.engineer_id or 0)
+        leader_name = lead.name if lead else None
+        office = brigade.office_address
+        return BrigadeResponse(
+            id=brigade.brigade_id,
+            name=brigade.name,
+            number=brigade.number,
+            region_id=brigade.region_id,
+            engineers_count=len(engineers),
+            leader_name=leader_name,
+            leader_short_name=short_name(leader_name) if leader_name else None,
+            office_address=office.address if office else None,
+            office_lat=office.latitude if office else None,
+            office_lon=office.longitude if office else None,
+            start_work=brigade.start_work,
+            end_work=brigade.end_work,
+            work_days=brigade.weekdays,
+            in_planning=brigade.in_planning,
+            area_ids=sorted(area.id for area in brigade.areas or [] if area.id is not None),
+        )
 
     async def list_engineers(self, query: EngineersQuery) -> list[EngineerResponse]:
         if query.region_id is None and query.brigade_id is None:

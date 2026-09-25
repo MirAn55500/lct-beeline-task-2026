@@ -41,4 +41,6 @@ export type DayOverview = {
   planning?: boolean
   /** Почему последний фоновый расчёт не удался. */
   planning_error?: string | null
+  /** Примерно через сколько секунд фоновый расчёт закончится. */
+  planning_eta_seconds?: number | null
 }

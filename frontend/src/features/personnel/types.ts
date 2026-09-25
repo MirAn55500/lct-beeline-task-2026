@@ -25,6 +25,48 @@ export type PersonnelBrigade = {
   engineersCount: number
   leaderName?: string | null
   leaderShortName?: string | null
+  officeAddress: string | null
+  /** Точка офиса [lng, lat] — старт инженеров. */
+  officePoint: [number, number] | null
+  /** Рабочий день бригады, «HH:MM:SS». */
+  startWork: string | null
+  endWork: string | null
+  /** ISO-номера рабочих дней: 1 — понедельник, 7 — воскресенье. */
+  workDays: number[]
+  inPlanning: boolean
+  areaIds: number[]
+}
+
+export type AddressSuggestion = {
+  address: string
+  lat: number
+  lon: number
+  /** С номером дома — только такой адрес годится для офиса. */
+  hasHouse: boolean
+}
+
+export type BrigadeArea = {
+  id: number
+  name: string
+}
+
+export type UpdateBrigadeBody = {
+  name: string
+  office_address: string
+  /** Точка, поставленная на карте; без неё адрес ищет геокодер. */
+  office_lat?: number
+  office_lon?: number
+  area_ids: number[]
+  work_days: number[]
+  start_work: string
+  end_work: string
+  in_planning: boolean
+}
+
+export type UpdateBrigadeResult = PersonnelBrigade & {
+  /** Скольким инженерам рабочий день переставлен вслед за бригадой. */
+  rescheduledEngineers: number
+  officeMoved: boolean
 }
 
 export type PersonnelEngineer = {

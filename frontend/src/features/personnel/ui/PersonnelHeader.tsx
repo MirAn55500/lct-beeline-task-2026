@@ -9,8 +9,14 @@ import { Separator } from 'react-aria-components'
 
 import { cn } from '@/shared/lib/cn'
 import { AppPanel } from '@/shared/ui'
+import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 
-export type PersonnelTab = 'engineers'
+export type PersonnelTab = 'info' | 'engineers'
+
+const TABS: { id: PersonnelTab; label: string }[] = [
+  { id: 'info', label: 'Информация' },
+  { id: 'engineers', label: 'Инженеры' },
+]
 export type EngineersExportFormat = 'csv' | 'json'
 
 const MENU_ITEM =
@@ -19,20 +25,32 @@ const MENU_ITEM =
 type PersonnelHeaderProps = {
   /** Название выбранной бригады. */
   title: string
+  tab: PersonnelTab
+  onTabChange: (tab: PersonnelTab) => void
   onAddEngineer: () => void
   onExport: (format: EngineersExportFormat) => void
 }
 
 export function PersonnelHeader({
   title,
+  tab,
+  onTabChange,
   onAddEngineer,
   onExport,
 }: PersonnelHeaderProps) {
   return (
-    <AppPanel className="flex h-[60px] shrink-0 items-center justify-between gap-4 p-3">
+    <AppPanel className="grid h-[60px] shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 p-3">
       <h1 className="min-w-0 truncate px-1 text-xl font-semibold leading-7 text-foreground">
         {title}
       </h1>
+
+      <SegmentedControl
+        aria-label="Разделы бригады"
+        options={TABS}
+        value={tab}
+        onChange={onTabChange}
+        className="w-[334px]"
+      />
 
       <div className="flex shrink-0 justify-end">
         <div

@@ -57,6 +57,8 @@ MAX_KM = {True: 15.0, False: 30.0}  # от центра района: Москв
 _DADATA_LOCATIONS = [{"region": "Москва"}, {"region": "Московская"}]
 _DADATA_QC_GEO = {"0": HOUSE, "1": HOUSE, "2": STREET, "3": SETTLEMENT, "4": SETTLEMENT}
 _REGION_MARK = re.compile(r"\bобл\b|област|\bмо\b", re.IGNORECASE)
+REVERSE_TIMEOUT = 8.0
+"""Секунд на источник при поиске адреса по точке."""
 MAX_FAILURES = 3
 """Сетевых ошибок подряд, после которых источник пропускается до конца пакета."""
 
@@ -142,6 +144,12 @@ class DadataProvider:
             return None
         return GeoHit(float(data["geo_lat"]), float(data["geo_lon"]), precision, self.name)
 
+    async def reverse(self, lat: float, lon: float) -> str | None:
+        """Ближайший к точке адрес. Общий клиент подсказок: соединение уже открыто."""
+        from modules.geocoding.suggest import geolocate
+
+        return await geolocate(lat, lon)
+
     async def close(self) -> None:
         await self._client.close()
 
@@ -168,6 +176,20 @@ class FileCacheProvider:
         return GeoHit(float(entry["lat"]), float(entry["lon"]), precision, self.name)
 
 
+def address_text(city: str | None, street: str | None, house: str | None) -> str | None:
+    """«г. Москва, Рязанский проспект, д. 86/1» из частей ответа OpenStreetMap."""
+    chunks = [f"г. {city}" if city else None, street, f"д. {house}" if house and street else None]
+    return ", ".join(chunk for chunk in chunks if chunk) or None
+
+
+_HOUSE_MARK = re.compile(r"(?:^|[\s,])(?:д|дом|вл|влд|стр|к|корп)\.?\s*\d", re.IGNORECASE)
+
+
+def has_house(address: str) -> bool:
+    """В адресе есть номер дома: «д 86/1», «д. 8 с7», «вл 5», «стр 1»."""
+    return bool(_HOUSE_MARK.search(address))
+
+
 class OsmProvider:
     """Photon, затем Nominatim — по лестнице запросов «дом → улица → населённый пункт».
 
@@ -186,6 +208,9 @@ class OsmProvider:
         self._nominatim = RateLimiter(
             nominatim.geocode, min_delay_seconds=1.1, max_retries=0, swallow_exceptions=False
         )
+        self._reverse = RateLimiter(
+            nominatim.reverse, min_delay_seconds=1.1, max_retries=0, swallow_exceptions=False
+        )
         self._lock = asyncio.Lock()
         south, west, north, east = REGION_BBOX
         self._box = [(south, west), (north, east)]
@@ -193,6 +218,40 @@ class OsmProvider:
     async def lookup(self, address: str) -> GeoHit | None:
         async with self._lock:
             return await asyncio.to_thread(self._lookup, address)
+
+    async def reverse(self, lat: float, lon: float) -> str | None:
+        """Nominatim — по одному запросу в секунду, общая очередь с поиском адресов."""
+        async with self._lock:
+            return await asyncio.to_thread(self._ask_reverse, lat, lon)
+
+    async def reverse_photon(self, lat: float, lon: float) -> str | None:
+        return await asyncio.to_thread(self._ask_photon_reverse, lat, lon)
+
+    def _ask_photon_reverse(self, lat: float, lon: float) -> str | None:
+        try:
+            found = self._photon.reverse((lat, lon), exactly_one=True, limit=1)
+        except GeopyError as exc:
+            logger.warning("Photon reverse: %r", exc)
+            return None
+        if found is None:
+            return None
+        parts = found.raw.get("properties", {})
+        return address_text(parts.get("city"), parts.get("street"), parts.get("housenumber"))
+
+    def _ask_reverse(self, lat: float, lon: float) -> str | None:
+        try:
+            found = self._reverse((lat, lon), language="ru", zoom=18)
+        except GeopyError as exc:
+            logger.warning("Nominatim reverse: %r", exc)
+            return None
+        if found is None:
+            return None
+        parts = found.raw.get("address", {})
+        return address_text(
+            parts.get("city") or parts.get("town") or parts.get("village"),
+            parts.get("road") or parts.get("pedestrian"),
+            parts.get("house_number"),
+        ) or found.address
 
     def _lookup(self, address: str) -> GeoHit | None:
         best: GeoHit | None = None
@@ -304,6 +363,54 @@ class AddressGeocoder:
             return best
         logger.warning("Геокодер: %s не найден, точка по району «%s»", address, district)
         return self.approximate(address, district)
+
+    def in_region(self, lat: float, lon: float) -> bool:
+        """Точка в Москве или Московской области."""
+        return _in_bbox(lat, lon, REGION_BBOX)
+
+    async def reverse(self, lat: float, lon: float) -> str | None:
+        """Адрес по точке. None — не нашёл никто.
+
+        Ответа ждёт человек у карты, поэтому источники спрашиваются разом, каждый — не
+        дольше REVERSE_TIMEOUT. Порядок доверия: DaData, Photon, Nominatim; берётся первый
+        по порядку ответ с номером дома, а если дома нет ни у кого — первый с улицей.
+        """
+        askers: list[tuple[str, object]] = []
+        for provider in self._providers:
+            if provider.broken:
+                continue
+            if isinstance(provider, DadataProvider):
+                askers.append(("dadata", provider.reverse))
+            elif isinstance(provider, OsmProvider):
+                askers.append(("photon", provider.reverse_photon))
+                askers.append(("nominatim", provider.reverse))
+
+        async def ask(name: str, fn) -> str | None:
+            try:
+                return await asyncio.wait_for(fn(lat, lon), REVERSE_TIMEOUT)
+            except TimeoutError:
+                logger.warning("Адрес по точке: %s не ответил за %.0f с", name, REVERSE_TIMEOUT)
+            except Exception:  # noqa: BLE001 — один источник не должен ронять остальные
+                logger.warning("Адрес по точке: %s", name, exc_info=True)
+            return None
+
+        tasks = [asyncio.create_task(ask(name, fn)) for name, fn in askers]
+        try:
+            pending = set(tasks)
+            while pending:
+                _, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                # Ответ с домом годится, только когда все, кому верим больше, уже ответили
+                for task in tasks:
+                    if not task.done():
+                        break
+                    address = task.result()
+                    if address and has_house(address):
+                        return address
+            # Без дома годится адрес с улицей; один город («г Москва») — не подпись офиса
+            return next((task.result() for task in tasks if "," in (task.result() or "")), None)
+        finally:
+            for task in tasks:
+                task.cancel()
 
     async def locate_many(self, items: list[tuple[str, str]]) -> dict[tuple[str, str], GeoHit]:
         """(district, address) → точка. Уникальные пары геокодируются параллельно."""

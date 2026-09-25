@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Calendar } from '@heroui/react'
+import { Calendar, Tooltip } from '@heroui/react'
 import type { CalendarDate } from '@internationalized/date'
 import {
   RiAddCircleLine,
   RiArrowDownSLine,
   RiDownloadFill,
   RiFileDownloadLine,
+  RiLoader4Line,
 } from '@remixicon/react'
 
 import { cn } from '@/shared/lib/cn'
-import { formatDayLabel } from '@/shared/lib/format'
+import { formatDayLabel, formatWait, formatWaitShort } from '@/shared/lib/format'
 import { AppPanel } from '@/shared/ui/AppPanel'
+import { AppTooltipContent } from '@/shared/ui/AppTooltip'
 
 function ContextSelect({
   label,
@@ -92,6 +94,10 @@ type ContextHeaderProps = {
   onUploadClick?: () => void
   isRecalculating?: boolean
   onRecalculate?: () => void
+  /** План дня считается в фоне после загрузки заявок. */
+  isPlanning?: boolean
+  /** Примерно сколько секунд ему осталось. */
+  planningSeconds?: number | null
   /** Блок по центру шапки, например переключатель вида плана. */
   center?: ReactNode
   /** Показывать ли день недели рядом с датой; в макетах его нет. */
@@ -117,6 +123,8 @@ export function ContextHeader({
   onUploadClick,
   isRecalculating = false,
   onRecalculate,
+  isPlanning = false,
+  planningSeconds = null,
   center,
   showWeekday = false,
   onExport,
@@ -307,6 +315,25 @@ export function ContextHeader({
       {center}
 
       <div className="flex items-center justify-end gap-2">
+        {isPlanning ? (
+          // Рядом с версией плана места мало — там только время, остальное в подсказке
+          <Tooltip delay={200}>
+            <Tooltip.Trigger
+              aria-label="Считаем новый план"
+              className="flex h-9 cursor-default items-center gap-1.5 px-1 text-sm leading-5 whitespace-nowrap text-muted outline-none"
+            >
+              <RiLoader4Line size={16} className="shrink-0 animate-spin" />
+              {selectedPlan ? null : 'Считаем план'}
+              {planningSeconds != null ? (
+                <span>{selectedPlan ? '' : '· '}{formatWaitShort(planningSeconds)}</span>
+              ) : null}
+            </Tooltip.Trigger>
+            <AppTooltipContent className="max-w-[280px] text-left break-normal">
+              Заявки загружены, считаем новый план
+              {planningSeconds != null ? ` — осталось ${formatWait(planningSeconds)}` : ''}. Он откроется сам
+            </AppTooltipContent>
+          </Tooltip>
+        ) : null}
         {selectedPlan ? (
           <div className="relative">
             <button
@@ -317,7 +344,7 @@ export function ContextHeader({
                 setTicketsOpen(false)
                 setVersionOpen((value) => !value)
               }}
-              className="flex h-9 cursor-pointer items-center gap-5 border border-border bg-surface px-3 text-sm leading-5 text-foreground transition-colors hover:bg-surface-hover"
+              className="flex h-9 shrink-0 cursor-pointer items-center gap-5 border border-border bg-surface px-3 text-sm leading-5 whitespace-nowrap text-foreground transition-colors hover:bg-surface-hover"
               style={{ borderRadius: 8 }}
             >
               План №{selectedPlan.version}
@@ -356,7 +383,7 @@ export function ContextHeader({
                   <div className="mx-2 my-1 h-px bg-separator" />
                   <button
                     type="button"
-                    disabled={isRecalculating || !onRecalculate}
+                    disabled={isRecalculating || isPlanning || !onRecalculate}
                     onClick={() => {
                       setVersionOpen(false)
                       onRecalculate?.()
@@ -364,7 +391,7 @@ export function ContextHeader({
                     className="flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <RiAddCircleLine size={16} className="shrink-0" />
-                    {isRecalculating ? 'Считаем план' : 'Новый план'}
+                    {isRecalculating || isPlanning ? 'Считаем план' : 'Новый план'}
                   </button>
                 </div>
               </div>

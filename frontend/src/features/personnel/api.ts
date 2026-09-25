@@ -2,6 +2,8 @@ import { baseApi } from '@/shared/api/baseApi'
 import type { ModuleHealth } from '@/shared/types'
 
 import type {
+  AddressSuggestion,
+  BrigadeArea,
   CreateEngineerBody,
   Engineer,
   EngineersListArgs,
@@ -11,6 +13,8 @@ import type {
   QualificationCode,
   SkillCode,
   TransportCode,
+  UpdateBrigadeBody,
+  UpdateBrigadeResult,
 } from './types'
 
 type ApiBrigade = {
@@ -21,6 +25,19 @@ type ApiBrigade = {
   engineers_count: number
   leader_name: string | null
   leader_short_name: string | null
+  office_address: string | null
+  office_lat: number | null
+  office_lon: number | null
+  start_work: string | null
+  end_work: string | null
+  work_days: number[]
+  in_planning: boolean
+  area_ids: number[]
+}
+
+type ApiUpdateBrigadeResult = ApiBrigade & {
+  rescheduled_engineers: number
+  office_moved: boolean
 }
 
 type ApiEngineer = {
@@ -50,6 +67,14 @@ function mapBrigade(item: ApiBrigade): PersonnelBrigade {
     engineersCount: item.engineers_count,
     leaderName: item.leader_name,
     leaderShortName: item.leader_short_name,
+    officeAddress: item.office_address,
+    officePoint:
+      item.office_lat != null && item.office_lon != null ? [item.office_lon, item.office_lat] : null,
+    startWork: item.start_work,
+    endWork: item.end_work,
+    workDays: item.work_days ?? [],
+    inPlanning: item.in_planning ?? true,
+    areaIds: item.area_ids ?? [],
   }
 }
 
@@ -100,6 +125,38 @@ export const personnelApi = baseApi.injectEndpoints({
       transformResponse: (response: ApiBrigade[]) => response.map(mapBrigade),
       providesTags: ['Brigade'],
     }),
+    getBrigadeAreas: build.query<BrigadeArea[], number>({
+      query: (regionId) => ({ url: '/api/personnel/areas', params: { region_id: regionId } }),
+      providesTags: ['Catalog'],
+    }),
+    /** Подсказки адресов для поля «Адрес офиса». */
+    suggestAddress: build.query<AddressSuggestion[], string>({
+      query: (q) => ({ url: '/api/personnel/address-suggest', params: { q } }),
+      transformResponse: (
+        response: { address: string; lat: number; lon: number; has_house: boolean }[],
+      ) =>
+        response.map((item) => ({
+          address: item.address,
+          lat: item.lat,
+          lon: item.lon,
+          hasHouse: item.has_house,
+        })),
+      keepUnusedDataFor: 300,
+    }),
+    /** Адрес точки, поставленной на карте. */
+    reverseGeocode: build.query<{ address: string | null }, { lat: number; lon: number }>({
+      query: ({ lat, lon }) => ({ url: '/api/personnel/reverse-geocode', params: { lat, lon } }),
+    }),
+    updateBrigade: build.mutation<UpdateBrigadeResult, { id: number; body: UpdateBrigadeBody }>({
+      query: ({ id, body }) => ({ url: `/api/personnel/brigades/${id}`, method: 'PATCH', body }),
+      transformResponse: (response: ApiUpdateBrigadeResult) => ({
+        ...mapBrigade(response),
+        rescheduledEngineers: response.rescheduled_engineers,
+        officeMoved: response.office_moved,
+      }),
+      // Офис — старт маршрутов на карте плана, смены инженеров — в таблице и Ганте
+      invalidatesTags: ['Brigade', 'Engineer', 'Plan'],
+    }),
     /** Обзор дня: инженеры региона. */
     getEngineers: build.query<Engineer[], number>({
       query: (regionId) => ({
@@ -144,8 +201,12 @@ export const {
   useGetPersonnelHealthQuery,
   useGetPersonnelFilterOptionsQuery,
   useGetBrigadesQuery,
+  useGetBrigadeAreasQuery,
+  useLazyReverseGeocodeQuery,
+  useLazySuggestAddressQuery,
   useGetEngineersQuery,
   useGetPersonnelEngineersQuery,
   useCreateEngineerMutation,
   useDeleteEngineerMutation,
+  useUpdateBrigadeMutation,
 } = personnelApi

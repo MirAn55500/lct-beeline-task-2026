@@ -1,7 +1,7 @@
-import { useState, type ReactNode } from 'react'
-import { ListBox, ScrollShadow, Select, TimeField, toast } from '@heroui/react'
+import { useState } from 'react'
+import { ListBox, ScrollShadow, Select, toast } from '@heroui/react'
 import { Time } from '@internationalized/date'
-import { RiArrowDownSLine, RiTimeLine } from '@remixicon/react'
+import { RiArrowDownSLine } from '@remixicon/react'
 
 import { useCreateEngineerMutation } from '@/features/personnel/api'
 import {
@@ -14,6 +14,8 @@ import { WORK_TYPE_OPTIONS } from '@/features/tickets'
 import { cn } from '@/shared/lib/cn'
 import { AppPanel } from '@/shared/ui'
 
+import { formatTime, parseTime } from '../lib/time'
+import { FieldLabel, Hint, TextInput, ToggleChip, WorkTimeField } from './formParts'
 import { TRANSPORT_ICON } from './transportIcons'
 
 const TRANSPORT_ORDER: TransportCode[] = ['car', 'public', 'bike', 'walking']
@@ -24,77 +26,6 @@ const WORK_TYPE_TO_SKILL: Record<string, SkillCode> = {
   Подключение: 'connection',
   Дозаказ: 'connection',
   Ремонт: 'local',
-}
-
-function formatTime(value: Time): string {
-  return `${String(value.hour).padStart(2, '0')}:${String(value.minute).padStart(2, '0')}:00`
-}
-
-function FieldLabel({ children, required }: { children: ReactNode; required?: boolean }) {
-  return (
-    <span className="text-sm font-medium leading-6 text-foreground">
-      {children}
-      {required ? <span className="ms-1 text-danger">*</span> : null}
-    </span>
-  )
-}
-
-function Hint({ children }: { children: ReactNode }) {
-  return <p className="text-xs leading-5 text-muted">{children}</p>
-}
-
-function ToggleChip({
-  active,
-  onToggle,
-  className,
-  children,
-}: {
-  active: boolean
-  onToggle: () => void
-  className?: string
-  children: ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onToggle}
-      className={cn(
-        'inline-flex h-7 cursor-pointer items-center gap-1 px-3 text-sm font-medium leading-5 transition-colors',
-        active
-          ? 'bg-accent text-accent-foreground hover:bg-accent-hover'
-          : 'bg-surface-tertiary text-foreground hover:bg-default-hover',
-        className,
-      )}
-      style={{ borderRadius: 8 }}
-    >
-      {children}
-    </button>
-  )
-}
-
-function TextInput({
-  value,
-  onChange,
-  placeholder,
-  'aria-label': ariaLabel,
-}: {
-  value: string
-  onChange: (next: string) => void
-  placeholder: string
-  'aria-label': string
-}) {
-  return (
-    <input
-      type="text"
-      aria-label={ariaLabel}
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={placeholder}
-      className="h-9 w-full border border-border bg-surface px-3 text-sm leading-5 text-foreground outline-none placeholder:text-muted focus-visible:border-focus"
-      style={{ borderRadius: 8 }}
-    />
-  )
 }
 
 function SingleSelect<K extends string | number>({
@@ -155,41 +86,21 @@ function SingleSelect<K extends string | number>({
   )
 }
 
-function WorkTimeField({
-  value,
-  onChange,
-  'aria-label': ariaLabel,
-}: {
-  value: Time | null
-  onChange: (next: Time | null) => void
-  'aria-label': string
-}) {
-  return (
-    <TimeField
-      aria-label={ariaLabel}
-      hourCycle={24}
-      value={value}
-      onChange={onChange}
-      className="min-w-0 flex-1"
-    >
-      <TimeField.Group
-        className="flex h-9 w-full items-center border border-border bg-surface shadow-none"
-        style={{ borderRadius: 8, paddingLeft: 12, paddingRight: 12 }}
-      >
-        <TimeField.Input className="min-w-0 flex-1 text-sm leading-5 text-foreground">
-          {(segment) => <TimeField.Segment segment={segment} />}
-        </TimeField.Input>
-        <TimeField.Suffix className="ms-2">
-          <RiTimeLine size={16} className="text-muted" />
-        </TimeField.Suffix>
-      </TimeField.Group>
-    </TimeField>
-  )
-}
-
 function toggleIn<T>(list: T[], item: T): T[] {
   return list.includes(item) ? list.filter((entry) => entry !== item) : [...list, item]
 }
+
+/** Рабочий день бригады — смена нового инженера по умолчанию. */
+function brigadeHours(brigades: PersonnelBrigade[], brigadeId: number | null) {
+  const brigade = brigades.find((item) => item.id === brigadeId)
+  return {
+    timeFrom: parseTime(brigade?.startWork) ?? new Time(9, 0),
+    timeTo: parseTime(brigade?.endWork) ?? new Time(18, 0),
+  }
+}
+
+const sameTime = (a: Time | null, b: Time | null) =>
+  (a ? formatTime(a) : '') === (b ? formatTime(b) : '')
 
 type ManualDraft = {
   name: string
@@ -222,8 +133,7 @@ export function AddEngineerPanel({
     transports: [],
     workTypes: [],
     brigadeId: defaultBrigadeId,
-    timeFrom: new Time(9, 0),
-    timeTo: new Time(18, 0),
+    ...brigadeHours(brigades, defaultBrigadeId),
   }))
 
   const patch = (next: Partial<ManualDraft>) => setDraft((prev) => ({ ...prev, ...next }))
@@ -341,7 +251,19 @@ export function AddEngineerPanel({
               placeholder="Выберите бригаду"
               options={brigades.map((brigade) => ({ id: brigade.id, label: brigade.name }))}
               value={draft.brigadeId}
-              onChange={(brigadeId) => patch({ brigadeId })}
+              onChange={(brigadeId) =>
+                setDraft((prev) => {
+                  // Часы идут за бригадой, пока их не поменяли руками
+                  const was = brigadeHours(brigades, prev.brigadeId)
+                  const untouched =
+                    sameTime(prev.timeFrom, was.timeFrom) && sameTime(prev.timeTo, was.timeTo)
+                  return {
+                    ...prev,
+                    brigadeId,
+                    ...(untouched ? brigadeHours(brigades, brigadeId) : {}),
+                  }
+                })
+              }
             />
             <Hint>Бригада определяет офис и рабочее время</Hint>
           </div>

@@ -127,6 +127,9 @@ export function usePlanContext() {
     queryPlanId: planId === latestPlanId ? null : planId,
     isRebuilding,
     rebuild,
+    /** План дня считается в фоне после загрузки заявок и примерно сколько секунд осталось. */
+    isPlanning: overview?.planning ?? false,
+    planningSeconds: overview?.planning_eta_seconds ?? null,
     // Другой регион или день — другие версии плана: выбор версии сбрасываем.
     setRegionId: (id: number) => update({ region: String(id), plan: null }),
     setDate: (value: CalendarDate) => update({ date: value.toString(), plan: null }),

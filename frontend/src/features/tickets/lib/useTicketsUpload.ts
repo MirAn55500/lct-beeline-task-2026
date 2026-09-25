@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { toast } from '@heroui/react'
 
+import { formatWait } from '@/shared/lib/format'
 import { pluralRu } from '@/shared/lib/text'
 
 import { useUploadTicketsMutation, type UploadTicketsResult } from '../api'
@@ -20,6 +21,12 @@ function errorReason(error: unknown) {
   if (Array.isArray(detail)) return 'Проверьте формат файла и попробуйте снова'
   if ((error as { status?: unknown } | null)?.status === 'FETCH_ERROR') return 'Нет связи с сервером'
   return 'Проверьте формат файла и попробуйте снова'
+}
+
+/** Что с планом после загрузки: он считается в фоне, готовность видно в шапке. */
+function planningNote(seconds: number | null | undefined) {
+  const wait = seconds != null ? ` — это ${formatWait(seconds)}` : ''
+  return `План составляется${wait}, он обновится сам`
 }
 
 /**
@@ -42,7 +49,7 @@ export function useTicketsUpload(onUploaded?: (result: UploadTicketsResult) => v
       toast.success('Загрузка заявок завершена', {
         description:
           `Добавлено ${result.created} ${pluralRu(result.created, ['заявка', 'заявки', 'заявок'])}, обновлено: ${result.updated}` +
-          (result.planning ? '. План работ составляется' : ''),
+          (result.planning ? `. ${planningNote(result.planning_eta_seconds)}` : ''),
       })
       onUploaded?.(result)
       return true

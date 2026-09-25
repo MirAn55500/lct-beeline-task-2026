@@ -238,7 +238,8 @@ class TicketsService:
         counts = Counter(ticket.window_start.date() for ticket in tickets)
         primary = counts.most_common(1)[0][0] if counts else None
         # План считается в фоне: с сотней новых адресов это минуты, см. planning.background
-        background.schedule(region_id, sorted(counts))
+        days = sorted(counts)
+        background.schedule(region_id, days, await background.estimate(self._session, region_id, days))
 
         return UploadTicketsResult(
             created=created,
@@ -246,6 +247,7 @@ class TicketsService:
             skipped=skipped,
             date=primary,
             planning=bool(counts),
+            planning_eta_seconds=background.status(region_id, primary)[2] if primary else None,
         )
 
     async def _geocode(self, region_id: int, tickets: list[ParsedTicket]) -> list[ParsedTicket]:

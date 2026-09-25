@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Label, ListBox, Select } from '@heroui/react'
 import { RiArrowDownSLine, RiCloseLine } from '@remixicon/react'
 
@@ -44,6 +45,10 @@ type MultiSelectFieldProps = {
   options: readonly string[]
   value: string[]
   onChange: (next: string[]) => void
+  /** Что встать после подписи: звёздочка обязательного поля, значок подсказки. */
+  labelAddon?: ReactNode
+  /** Сколько чипов показать; остальные — счётчиком «+N». */
+  maxVisible?: number
 }
 
 /** Мультиселект фильтров: выбранные значения — чипы с крестиком. */
@@ -53,6 +58,8 @@ export function MultiSelectField({
   options,
   value,
   onChange,
+  labelAddon,
+  maxVisible,
 }: MultiSelectFieldProps) {
   return (
     <Select
@@ -62,9 +69,10 @@ export function MultiSelectField({
       value={value}
       onChange={(keys) => onChange(keys as string[])}
     >
-      <Label className="mb-1 text-sm font-medium leading-6 text-foreground">
-        {label}
-      </Label>
+      <div className="mb-1 flex items-center gap-1">
+        <Label className="text-sm font-medium leading-6 text-foreground">{label}</Label>
+        {labelAddon}
+      </div>
       <Select.Trigger
         className={cn(
           'flex min-h-9 w-full items-center justify-between gap-2 border border-border bg-surface !px-3 !py-2 text-left shadow-none outline-none',
@@ -82,9 +90,12 @@ export function MultiSelectField({
               )
             }
 
+            const hidden =
+              maxVisible != null ? Math.max(0, state.selectedItems.length - maxVisible) : 0
+            const shown = hidden > 0 ? state.selectedItems.slice(0, maxVisible) : state.selectedItems
             return (
-              <span className="flex flex-wrap gap-1.5 py-0.5">
-                {state.selectedItems.map((item) => {
+              <span className="flex flex-wrap items-center gap-1.5 py-0.5">
+                {shown.map((item) => {
                   const id = String(item.key)
                   return (
                     <FilterChip
@@ -96,6 +107,9 @@ export function MultiSelectField({
                     />
                   )
                 })}
+                {hidden > 0 ? (
+                  <span className="text-xs font-medium leading-5 text-muted">+{hidden}</span>
+                ) : null}
               </span>
             )
           }}

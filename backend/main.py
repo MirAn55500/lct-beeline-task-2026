@@ -10,6 +10,7 @@ from api.router import api_router
 from core.config import get_settings
 from core.database import engine
 from core.exceptions import register_exception_handlers
+from modules.geocoding import suggest as address_suggest
 from modules.geocoding.recheck import recheck_addresses
 
 # Сообщения модулей (геокодер, маршрутизация) — в лог контейнера рядом с uvicorn
@@ -21,8 +22,11 @@ logging.getLogger("httpx").setLevel(logging.WARNING)  # строка на каж
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # В фоне: старт и healthcheck не ждут геокодера
     recheck = asyncio.create_task(recheck_addresses())
+    warm = asyncio.create_task(address_suggest.warm_up())
     yield
     recheck.cancel()
+    warm.cancel()
+    await address_suggest.close()
     await engine.dispose()
 
 

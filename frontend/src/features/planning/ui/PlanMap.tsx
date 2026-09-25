@@ -24,7 +24,7 @@ import { MAP_DEFAULT_VIEW } from '../mocks'
 setWorkerUrl(maplibreWorkerUrl)
 
 // Растровые тайлы OSM — та же подложка, что во фрейме макета, ключ не нужен.
-const OSM_STYLE: MapOptions['style'] = {
+export const OSM_STYLE: MapOptions['style'] = {
   version: 8,
   sources: {
     osm: {

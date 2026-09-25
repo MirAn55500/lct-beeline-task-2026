@@ -1,10 +1,10 @@
-import { ScrollShadow } from '@heroui/react'
-import { RiUser3Line } from '@remixicon/react'
+import { ScrollShadow, Tooltip } from '@heroui/react'
+import { RiAddCircleLine, RiUser3Line, RiVipCrown2Line } from '@remixicon/react'
 
 import type { PersonnelBrigade } from '@/features/personnel/types'
 import { cn } from '@/shared/lib/cn'
 import { pluralRu } from '@/shared/lib/text'
-import { AppPanel } from '@/shared/ui'
+import { AppPanel, AppTooltipContent } from '@/shared/ui'
 
 function BrigadeCard({
   brigade,
@@ -31,9 +31,20 @@ function BrigadeCard({
       <span className="truncate text-base font-semibold leading-6 text-foreground">
         {brigade.name}
       </span>
-      <span className="flex shrink-0 items-center gap-1 text-sm font-medium leading-6 text-muted">
-        <RiUser3Line size={16} className="shrink-0" />
-        {count} {pluralRu(count, ['человек', 'человека', 'человек'])}
+      <span className="flex min-w-0 items-center gap-2 text-sm font-medium leading-6 text-muted">
+        {brigade.leaderShortName ? (
+          <>
+            <span className="flex min-w-0 items-center gap-1" title="Бригадир">
+              <RiVipCrown2Line size={16} className="shrink-0" />
+              <span className="truncate">{brigade.leaderShortName}</span>
+            </span>
+            <span aria-hidden className="h-3.5 w-px shrink-0 bg-separator" />
+          </>
+        ) : null}
+        <span className="flex shrink-0 items-center gap-1">
+          <RiUser3Line size={16} className="shrink-0" />
+          {count} {pluralRu(count, ['человек', 'человека', 'человек'])}
+        </span>
       </span>
     </button>
   )
@@ -80,6 +91,25 @@ export function BrigadesPanel({
           )}
         </div>
       </ScrollShadow>
+
+      {/* Бригада — это инженеры одного региона: новая появляется вместе с регионом */}
+      <div className="shrink-0 px-3 pt-2 pb-3">
+        <Tooltip delay={200}>
+          <Tooltip.Trigger className="w-full cursor-not-allowed outline-none">
+            <span
+              aria-disabled
+              className="inline-flex h-9 w-full items-center justify-center gap-2 border border-border text-sm font-medium leading-5 text-foreground opacity-50"
+              style={{ borderRadius: 8 }}
+            >
+              <RiAddCircleLine size={16} className="shrink-0" />
+              Добавить бригаду
+            </span>
+          </Tooltip.Trigger>
+          <AppTooltipContent className="max-w-[260px] text-left break-normal">
+            Бригада — это инженеры одного региона, новая появляется вместе с регионом
+          </AppTooltipContent>
+        </Tooltip>
+      </div>
     </AppPanel>
   )
 }

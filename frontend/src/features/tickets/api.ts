@@ -39,6 +39,8 @@ export type UploadTicketsResult = {
   date: string | null
   /** План на даты из файла считается в фоне — готовность в `planning` обзора дня. */
   planning: boolean
+  /** Примерно сколько секунд считаться плану на `date`. */
+  planning_eta_seconds?: number | null
 }
 
 export const ticketsApi = baseApi.injectEndpoints({

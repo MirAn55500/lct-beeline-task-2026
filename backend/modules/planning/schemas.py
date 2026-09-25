@@ -58,6 +58,8 @@ class DayOverviewResponse(BaseModel):
     planning: bool = False
     """План на этот день считается в фоне после загрузки заявок."""
     planning_error: str | None = None
+    planning_eta_seconds: int | None = None
+    """Примерно через сколько секунд фоновый расчёт закончится (с очередью других дней)."""
     """Почему последний фоновый расчёт не удался."""
 
 

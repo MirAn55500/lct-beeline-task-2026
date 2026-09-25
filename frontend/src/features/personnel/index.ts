@@ -2,13 +2,16 @@ export {
   personnelApi,
   useCreateEngineerMutation,
   useDeleteEngineerMutation,
+  useGetBrigadeAreasQuery,
   useGetBrigadesQuery,
   useGetEngineersQuery,
   useGetPersonnelEngineersQuery,
   useGetPersonnelFilterOptionsQuery,
   useGetPersonnelHealthQuery,
+  useUpdateBrigadeMutation,
 } from './api'
 export type {
+  BrigadeArea,
   BrigadeId,
   CreateEngineerBody,
   Engineer,
@@ -19,6 +22,8 @@ export type {
   QualificationCode,
   SkillCode,
   TransportCode,
+  UpdateBrigadeBody,
+  UpdateBrigadeResult,
 } from './types'
 export {
   QUALIFICATION_LABEL,
@@ -30,6 +35,8 @@ export {
 } from './mocks'
 export { downloadEngineers } from './lib/exportEngineers'
 export { AddEngineerPanel } from './ui/AddEngineerPanel'
+export { BrigadeInfo } from './ui/BrigadeInfo'
+export { BrigadeMap } from './ui/BrigadeMap'
 export { BrigadesPanel } from './ui/BrigadesPanel'
 export { EngineerCardPanel } from './ui/EngineerCardPanel'
 export { EngineersPanel } from './ui/EngineersPanel'

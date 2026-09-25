@@ -16,6 +16,8 @@ class UploadTicketsResult(BaseModel):
     date: date_type | None = None
     planning: bool = False
     """План на даты из файла поставлен в расчёт; готовность — `planning` в обзоре дня."""
+    planning_eta_seconds: int | None = None
+    """Примерно сколько секунд считаться плану на `date` — вместе с днями перед ним в очереди."""
 
 
 class TicketAssignmentFilter(StrEnum):

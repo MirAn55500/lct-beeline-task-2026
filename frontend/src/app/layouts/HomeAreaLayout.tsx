@@ -11,7 +11,7 @@ import { useSearchParams } from 'react-router'
 import { useGetRegionsQuery } from '@/features/catalogs'
 import {
   PlanRebuildDialog,
-  useGetDayOverviewQuery,
+  useDayOverview,
   useRecalculatePlanMutation,
 } from '@/features/planning'
 import { TicketsUploadDialog, useTicketsExport } from '@/features/tickets'
@@ -64,7 +64,8 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
     )
   }
 
-  const { data: overview } = useGetDayOverviewQuery(
+  // Переспрашивается, пока план считается в фоне: индикатор в шапке и обновление по готовности
+  const { data: overview } = useDayOverview(
     { regionId: regionId ?? 0, date: date.toString(), planId },
     { skip: regionId == null },
   )
@@ -130,6 +131,8 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
           isRegionsError={isError}
           onUploadClick={() => setUploadOpen(true)}
           isRecalculating={isRecalculating}
+          isPlanning={overview?.planning ?? false}
+          planningSeconds={overview?.planning_eta_seconds ?? null}
           onRecalculate={
             regionId == null ? undefined : () => setRebuildOpen(true)
           }

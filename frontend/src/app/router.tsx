@@ -10,6 +10,7 @@ import {
 } from '@/app/layouts'
 import {
   AddEngineerPanel,
+  BrigadeInfo,
   BrigadesPanel,
   EngineerCardPanel,
   EngineersTable,
@@ -18,6 +19,7 @@ import {
   useGetBrigadesQuery,
   useGetPersonnelEngineersQuery,
   type PersonnelEngineer,
+  type PersonnelTab,
 } from '@/features/personnel'
 import {
   DayOverviewWorkspace,
@@ -89,6 +91,7 @@ function PersonnelPage() {
   const brigadeId =
     brigades.find((item) => item.id === requestedId)?.id ?? brigades[0]?.id ?? null
   const brigade = brigades.find((item) => item.id === brigadeId)
+  const tab: PersonnelTab = params.get('tab') === 'engineers' ? 'engineers' : 'info'
 
   const { data: engineers = [], isLoading: engineersLoading } =
     useGetPersonnelEngineersQuery(
@@ -130,12 +133,13 @@ function PersonnelPage() {
     brigades.map((item) => [item.id, item.engineersCount]),
   )
 
-  const update = (next: { brigade?: number }) =>
+  const update = (next: { brigade?: number; tab?: PersonnelTab }) =>
     setParams(
       (prev) => {
         const copy = new URLSearchParams(prev)
         if (next.brigade != null) copy.set('brigade', String(next.brigade))
-        copy.delete('tab')
+        if (next.tab === 'engineers') copy.set('tab', 'engineers')
+        else if (next.tab === 'info') copy.delete('tab')
         return copy
       },
       { replace: true },
@@ -144,7 +148,8 @@ function PersonnelPage() {
   const handleAdded = (added: PersonnelEngineer[]) => {
     setHighlightIds(new Set(added.map((item) => item.id)))
     const target = added[0]?.brigadeId
-    if (target != null && target !== brigadeId) update({ brigade: target })
+    // Новых инженеров видно в таблице — туда и переключаемся
+    update({ brigade: target != null && target !== brigadeId ? target : undefined, tab: 'engineers' })
   }
 
   return (
@@ -161,9 +166,17 @@ function PersonnelPage() {
       header={
         <PersonnelHeader
           title={brigade?.name ?? 'Бригада'}
+          tab={tab}
+          onTabChange={(next) => {
+            setAddOpen(false)
+            setActiveEngineerId(null)
+            update({ tab: next })
+          }}
           onAddEngineer={() => {
             setActiveEngineerId(null)
             setAddOpen(true)
+            // Добавленные инженеры подсвечиваются в таблице
+            update({ tab: 'engineers' })
           }}
           onExport={(format) =>
             downloadEngineers(
@@ -176,7 +189,9 @@ function PersonnelPage() {
       }
     >
       <div className="flex min-h-0 flex-1 gap-4">
-        {brigadeId != null ? (
+        {brigade && tab === 'info' ? (
+          <BrigadeInfo key={brigade.id} brigade={brigade} engineers={engineers} />
+        ) : brigadeId != null ? (
           <EngineersTable
             key={brigadeId}
             engineers={engineers}
@@ -241,6 +256,8 @@ function PlanWorkHeader({ context }: { context: PlanContext }) {
         isRegionsError={context.isRegionsError}
         onUploadClick={() => setUploadOpen(true)}
         isRecalculating={context.isRebuilding}
+        isPlanning={context.isPlanning}
+        planningSeconds={context.planningSeconds}
         onRecalculate={regionId == null ? undefined : () => setRebuildOpen(true)}
         onExport={
           context.offline || regionId == null || planId == null

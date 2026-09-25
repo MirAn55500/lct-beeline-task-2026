@@ -5,10 +5,16 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from modules.catalogs.enums import DictGroup
+from modules.catalogs.models.address import Address
+from modules.catalogs.models.area import Area
 from modules.catalogs.models.dictionary import Dictionary
 from modules.personnel.models.brigade import Brigade
 from modules.personnel.models.engineer import Engineer
 from modules.personnel.models.engineer_skill import EngineerSkill
+
+
+OFFICE_AREA = "Офис"
+"""Служебный район региона: в нём адрес офиса бригады (см. seed_east)."""
 
 
 class PersonnelRepository:
@@ -19,6 +25,8 @@ class PersonnelRepository:
         statement = (
             select(Brigade)
             .options(
+                selectinload(Brigade.office_address),
+                selectinload(Brigade.areas),
                 selectinload(Brigade.engineers).selectinload(Engineer.transport),
                 selectinload(Brigade.engineers)
                 .selectinload(Engineer.skills)
@@ -33,6 +41,34 @@ class PersonnelRepository:
 
     async def get_brigade(self, brigade_id: int) -> Brigade | None:
         return await self._session.get(Brigade, brigade_id)
+
+    async def get_brigade_full(self, brigade_id: int) -> Brigade | None:
+        """Бригада со всем, что показывает карточка: офис, районы, состав."""
+        result = await self._session.exec(
+            select(Brigade)
+            .where(Brigade.brigade_id == brigade_id)
+            .options(
+                selectinload(Brigade.office_address).selectinload(Address.area_ref),
+                selectinload(Brigade.areas),
+                selectinload(Brigade.engineers),
+            )
+            .execution_options(populate_existing=True)
+        )
+        return result.first()
+
+    async def list_areas(self, region_id: int) -> list[Area]:
+        """Районы региона без служебного «Офис», в котором лежит адрес офиса."""
+        result = await self._session.exec(
+            select(Area)
+            .where(Area.region_id == region_id, Area.area != OFFICE_AREA)
+            .order_by(Area.area)
+        )
+        return list(result.all())
+
+    async def add_address(self, address: Address) -> Address:
+        self._session.add(address)
+        await self._session.flush()
+        return address
 
     async def list_engineers(
         self,

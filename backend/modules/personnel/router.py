@@ -4,12 +4,17 @@ from fastapi import APIRouter, Depends, Query, status
 
 from modules.personnel.dependencies import get_personnel_service
 from modules.personnel.schemas import (
+    AddressSuggestionResponse,
+    AreaResponse,
     BrigadeResponse,
     CreateEngineerRequest,
     EngineerResponse,
     EngineersQuery,
     HealthResponse,
     PersonnelFilterOptions,
+    ReverseGeocodeResponse,
+    UpdateBrigadeRequest,
+    UpdateBrigadeResponse,
 )
 from modules.personnel.service import PersonnelService
 
@@ -38,6 +43,44 @@ async def list_brigades(
 ) -> list[BrigadeResponse]:
     """Бригады региона или все бригады, если region_id не задан."""
     return await service.list_brigades(region_id)
+
+
+@router.patch("/brigades/{brigade_id}", response_model=UpdateBrigadeResponse)
+async def update_brigade(
+    service: PersonnelServiceDep,
+    brigade_id: int,
+    body: UpdateBrigadeRequest,
+) -> UpdateBrigadeResponse:
+    """Карточка «Управление бригадой»: название, офис, районы, рабочие дни и часы."""
+    return await service.update_brigade(brigade_id, body)
+
+
+@router.get("/address-suggest", response_model=list[AddressSuggestionResponse])
+async def address_suggest(
+    service: PersonnelServiceDep,
+    q: Annotated[str, Query(min_length=3, max_length=200)],
+) -> list[AddressSuggestionResponse]:
+    """Подсказки адресов Москвы и области для поля «Адрес офиса»."""
+    return await service.suggest_addresses(q)
+
+
+@router.get("/reverse-geocode", response_model=ReverseGeocodeResponse)
+async def reverse_geocode(
+    service: PersonnelServiceDep,
+    lat: Annotated[float, Query(ge=-90, le=90)],
+    lon: Annotated[float, Query(ge=-180, le=180)],
+) -> ReverseGeocodeResponse:
+    """Адрес точки, которую поставили на карте, — подпись офиса бригады."""
+    return await service.reverse_geocode(lat, lon)
+
+
+@router.get("/areas", response_model=list[AreaResponse])
+async def list_areas(
+    service: PersonnelServiceDep,
+    region_id: Annotated[int, Query(ge=1)],
+) -> list[AreaResponse]:
+    """Районы региона — варианты для районов бригады."""
+    return await service.list_areas(region_id)
 
 
 @router.get("/engineers", response_model=list[EngineerResponse])

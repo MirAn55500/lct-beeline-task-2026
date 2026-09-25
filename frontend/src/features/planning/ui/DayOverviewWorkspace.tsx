@@ -1,6 +1,4 @@
-import { useEffect, useRef } from 'react'
 import { Link } from 'react-router'
-import { toast } from '@heroui/react'
 import { RiArrowRightUpLine } from '@remixicon/react'
 
 import beesPromo from '@/shared/assets/day-overview-bees-promo.png'
@@ -9,6 +7,7 @@ import { TicketsDropzone, TicketsPanel } from '@/features/tickets'
 import { useGetTicketsQuery, type Ticket } from '@/features/tickets/api'
 import { routes } from '@/shared/config/routes'
 import { cn } from '@/shared/lib/cn'
+import { formatWait } from '@/shared/lib/format'
 import { AppPanel } from '@/shared/ui'
 
 import { useDayOverview } from '../lib/useDayOverview'
@@ -104,15 +103,8 @@ export function DayOverviewWorkspace({
   const hasTickets = (overview?.tickets.total ?? 0) > 0
   const planning = overview?.planning ?? false
   const planningError = overview?.planning_error ?? null
-  // Фоновый расчёт после загрузки закончился — тост, как у пересчёта
-  const wasPlanning = useRef(false)
-  useEffect(() => {
-    if (wasPlanning.current && !planning) {
-      if (planningError) toast.danger('План работ не составлен', { description: planningError })
-      else toast.success('План работ составлен')
-    }
-    wasPlanning.current = planning
-  }, [planning, planningError])
+  const planningSeconds = overview?.planning_eta_seconds ?? null
+  // Об окончании фонового расчёта скажет тост из getDayOverview — один на все экраны
   const { data: chartTickets = [] } = useGetTicketsQuery(
     { regionId: regionId ?? 0, date, planId },
     { skip: !hasTickets || regionId == null },
@@ -144,7 +136,8 @@ export function DayOverviewWorkspace({
           </h2>
           {planning ? (
             <p className="truncate text-sm leading-6 text-muted">
-              Заявки загружены, распределяем их по инженерам — с новыми адресами это пара минут
+              Распределяем заявки по инженерам
+              {planningSeconds != null ? ` — осталось ${formatWait(planningSeconds)}` : ''}
             </p>
           ) : planningError ? (
             <p className="truncate text-sm leading-6 text-muted">{planningError}</p>

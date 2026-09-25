@@ -79,7 +79,7 @@ class PlanningService:
     async def get_day_overview(
         self, region_id: int, day: date, plan_id: int | None = None
     ) -> DayOverviewResponse:
-        planning, planning_error = background.status(region_id, day)
+        planning, planning_error, planning_eta = background.status(region_id, day)
         tickets_total = await self._repo.count_requests(region_id, day)
         engineers_total = await self._repo.count_engineers(region_id)
         planned_dates = await self._repo.list_planned_dates(region_id)
@@ -111,6 +111,7 @@ class PlanningService:
                 plans=versions,
                 planning=planning,
                 planning_error=planning_error,
+                planning_eta_seconds=planning_eta,
             )
 
         assigned = await self._repo.count_assigned_requests(plan.plan_id, region_id)
@@ -126,6 +127,7 @@ class PlanningService:
             plans=versions,
             planning=planning,
             planning_error=planning_error,
+            planning_eta_seconds=planning_eta,
         )
 
     async def _scenario(self, region_id: int, day: date):
@@ -138,6 +140,14 @@ class PlanningService:
             raise AppError("На эту дату в регионе нет заявок")
 
         engineers = await self._repo.list_engineers_for_plan(region_id)
+        # Выключенные из планирования и выходные бригады в новый план не попадают
+        working = [e for e in engineers if e.brigade is None or e.brigade.plans_on(day)]
+        if engineers and not working:
+            raise AppError(
+                "В этот день бригада региона не работает — проверьте рабочий график "
+                "и «Участвует в планировании» в карточке бригады"
+            )
+        engineers = working
         scenario, transport_by_engineer = build_scenario(
             day=day,
             region_id=region_id,

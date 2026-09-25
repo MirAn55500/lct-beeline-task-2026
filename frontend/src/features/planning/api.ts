@@ -1,3 +1,5 @@
+import { toast } from '@heroui/react'
+
 import { baseApi } from '@/shared/api/baseApi'
 import type { ModuleHealth } from '@/shared/types'
 
@@ -7,6 +9,12 @@ import type {
   RecalculateResult,
   RemakeLevel,
 } from './types'
+
+/**
+ * Дни, план которых сейчас считается в фоне, — `регион:день`. Сводку дня запрашивают
+ * несколько экранов с разными параметрами, а об окончании расчёта нужно сказать один раз.
+ */
+const planningDays = new Set<string>()
 
 export const planningApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
@@ -27,11 +35,28 @@ export const planningApi = baseApi.injectEndpoints({
       }),
       providesTags: ['Plan'],
       // Фоновый расчёт после загрузки закончился — обновить план, карту, Гант и заявки
-      async onQueryStarted(_args, { dispatch, getCacheEntry, queryFulfilled }) {
-        const wasPlanning = getCacheEntry().data?.planning ?? false
+      async onQueryStarted(args, { dispatch, getCacheEntry, queryFulfilled }) {
+        const day = `${args.regionId}:${args.date}`
+        if (getCacheEntry().data?.planning) planningDays.add(day)
         try {
           const { data } = await queryFulfilled
-          if (wasPlanning && !data.planning) dispatch(planningApi.util.invalidateTags(['Plan', 'Ticket']))
+          if (data.planning) {
+            planningDays.add(day)
+            return
+          }
+          if (!planningDays.delete(day)) return
+          dispatch(planningApi.util.invalidateTags(['Plan', 'Ticket']))
+          if (data.planning_error) {
+            toast.danger('План работ не составлен', { description: data.planning_error })
+            return
+          }
+          const latest = Math.max(0, ...data.plans.map((plan) => plan.version))
+          toast.success(latest ? `План №${latest} составлен` : 'План работ составлен', {
+            description:
+              data.plan_version === latest && data.tickets.assigned != null
+                ? `Назначено ${data.tickets.assigned} из ${data.tickets.total}`
+                : undefined,
+          })
         } catch {
           // ошибку запроса покажет сам компонент
         }
