@@ -11,7 +11,7 @@ type WorkAreaGanttLayoutProps = {
 
 export function WorkAreaGanttLayout({ header, children }: WorkAreaGanttLayoutProps) {
   return (
-    <div className="flex h-svh flex-col gap-4 bg-[#f5f5f5] p-4">
+    <div className="flex h-svh flex-col gap-4 bg-background p-4">
       <div className="flex shrink-0 gap-4">
         <BrandBar className={ASIDE_WIDTH_CLASS} showMenu />
         <div className="min-w-0 flex-1">{header ?? <AppPanel className="h-[60px]" />}</div>

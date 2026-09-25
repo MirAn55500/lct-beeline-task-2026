@@ -38,7 +38,7 @@ export function GanttUnassignedPanel({
   return (
     <AppPanel className="flex h-[164px] shrink-0 flex-col gap-3 overflow-hidden p-3">
       <div className="flex h-8 shrink-0 items-center gap-2">
-        <h2 className="truncate text-xl leading-7 font-semibold text-[#18181b]">
+        <h2 className="truncate text-xl leading-7 font-semibold text-foreground">
           Неназначенные заявки{empty ? '' : ` · ${tickets.length}`}
         </h2>
         <TicketSortMenu value={sort} onChange={setSort} />
@@ -46,7 +46,7 @@ export function GanttUnassignedPanel({
       </div>
 
       {empty ? null : tickets.length === 0 ? (
-        <p className="flex flex-1 items-center justify-center text-sm leading-5 text-[#71717a]">
+        <p className="flex flex-1 items-center justify-center text-sm leading-5 text-muted">
           {emptyText}
         </p>
       ) : (
@@ -59,7 +59,7 @@ export function GanttUnassignedPanel({
               <div
                 key={ticket.id}
                 aria-hidden
-                className="h-24 w-[288px] shrink-0 snap-start border border-dashed border-[#dedee0] bg-[#efeff0]"
+                className="h-24 w-[288px] shrink-0 snap-start border border-dashed border-border bg-surface-tertiary"
                 style={{ borderRadius: 8 }}
               />
             ) : (

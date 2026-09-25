@@ -52,7 +52,7 @@ export function SwapPopover({ anchorTaskId, displaced, scrollRef, onConfirm, onC
     <div
       role="dialog"
       aria-label="Подтвердите изменения"
-      className="fixed z-50 flex flex-col gap-2 bg-white px-3 pt-2 pb-3"
+      className="fixed z-50 flex flex-col gap-2 bg-surface px-3 pt-2 pb-3"
       style={{
         top: position.top,
         left: position.left,
@@ -62,11 +62,11 @@ export function SwapPopover({ anchorTaskId, displaced, scrollRef, onConfirm, onC
           '0 14px 28px rgb(0 0 0 / 0.08), 0 -6px 12px rgb(0 0 0 / 0.03), 0 2px 8px rgb(0 0 0 / 0.06)',
       }}
     >
-      <p className="text-sm leading-5 font-medium text-[#18181b]">Подтвердите изменения</p>
-      <p className="text-sm leading-5 text-[#18181b]">
+      <p className="text-sm leading-5 font-medium text-foreground">Подтвердите изменения</p>
+      <p className="text-sm leading-5 text-foreground">
         Вы действительно хотите заменить задачу? Это повлияет на общий график работ
       </p>
-      <p className="text-xs leading-4 text-[#71717a]">
+      <p className="text-xs leading-4 text-muted">
         {displaced.length > 1 ? `Заявки ${numbers} уйдут` : `Заявка ${numbers} уйдёт`} в неназначенные —
         потребуется согласовать с клиентом новое время.
       </p>
@@ -74,7 +74,7 @@ export function SwapPopover({ anchorTaskId, displaced, scrollRef, onConfirm, onC
         <button
           type="button"
           onClick={onConfirm}
-          className="h-8 cursor-pointer bg-[#0485f7] px-3 text-sm leading-5 font-medium text-[#fcfcfc] transition-colors hover:bg-[#0374d9]"
+          className="h-8 cursor-pointer bg-accent px-3 text-sm leading-5 font-medium text-accent-foreground transition-colors hover:bg-accent-hover"
           style={{ borderRadius: 8 }}
         >
           Подтвердить и заменить
@@ -82,7 +82,7 @@ export function SwapPopover({ anchorTaskId, displaced, scrollRef, onConfirm, onC
         <button
           type="button"
           onClick={onCancel}
-          className="h-8 cursor-pointer border border-[#dedee0] bg-white px-3 text-sm leading-5 font-medium text-[#18181b] transition-colors hover:bg-[#f5f5f5]"
+          className="h-8 cursor-pointer border border-border bg-surface px-3 text-sm leading-5 font-medium text-foreground transition-colors hover:bg-surface-hover"
           style={{ borderRadius: 8 }}
         >
           Отменить

@@ -89,7 +89,7 @@ export function TicketsUploadDialog({ isOpen, onClose, defaultRegionId = null, d
             required
             hint={
               <Tooltip delay={200}>
-                <Tooltip.Trigger className="inline-flex cursor-help text-[#71717a] outline-none">
+                <Tooltip.Trigger className="inline-flex cursor-help text-muted outline-none">
                   <RiInformationLine size={12} />
                 </Tooltip.Trigger>
                 <AppTooltipContent>
@@ -102,17 +102,17 @@ export function TicketsUploadDialog({ isOpen, onClose, defaultRegionId = null, d
           </FieldLabel>
           <Dropdown>
             <Dropdown.Trigger
-              className="flex h-9 w-full cursor-pointer items-center justify-between rounded-[8px] border border-[#dedee0] bg-white pr-3 pl-3 text-sm leading-5 outline-none transition-colors hover:bg-[#fafafa] focus-visible:border-[#0485f7]"
+              className="flex h-9 w-full cursor-pointer items-center justify-between rounded-[8px] border border-border bg-surface pr-3 pl-3 text-sm leading-5 outline-none transition-colors hover:bg-surface-hover focus-visible:border-focus"
             >
-              <span className={cn('truncate', region ? 'text-[#18181b]' : 'text-[#71717a]')}>
+              <span className={cn('truncate', region ? 'text-foreground' : 'text-muted')}>
                 {region?.name ?? 'Выберите регион'}
               </span>
-              <RiArrowDownSLine size={16} className="shrink-0 text-[#18181b]" />
+              <RiArrowDownSLine size={16} className="shrink-0 text-foreground" />
             </Dropdown.Trigger>
             <Dropdown.Popover
               placement="bottom start"
               offset={4}
-              className="w-[402px] max-w-[calc(100vw-80px)] border-0 bg-white p-1 outline-none"
+              className="w-[402px] max-w-[calc(100vw-80px)] border-0 bg-surface p-1 outline-none"
               style={{ borderRadius: 12, boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)' }}
             >
               <Dropdown.Menu
@@ -127,7 +127,7 @@ export function TicketsUploadDialog({ isOpen, onClose, defaultRegionId = null, d
                     key={item.id}
                     id={String(item.id)}
                     textValue={item.name}
-                    className="flex h-9 cursor-pointer items-center rounded-[8px] px-3 text-sm leading-5 font-medium text-[#18181b] outline-none data-[focused]:bg-[#f5f5f5] data-[selected]:bg-[#f5f5f5]"
+                    className="flex h-9 cursor-pointer items-center rounded-[8px] px-3 text-sm leading-5 font-medium text-foreground outline-none data-[focused]:bg-surface-hover data-[selected]:bg-surface-hover"
                   >
                     {item.name}
                   </Dropdown.Item>
@@ -140,18 +140,18 @@ export function TicketsUploadDialog({ isOpen, onClose, defaultRegionId = null, d
         <div className="flex flex-col gap-1">
           <FieldLabel required>Выгрузка</FieldLabel>
           {file ? (
-            <div className="flex items-center gap-3 rounded-[8px] border border-[#dedee0] bg-white p-3">
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-[8px] bg-[#ebebec] text-[#18181b]">
+            <div className="flex items-center gap-3 rounded-[8px] border border-border bg-surface p-3">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-[8px] bg-surface-tertiary text-foreground">
                 <RiFileTextLine size={16} />
               </span>
               <div className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-xs leading-5 font-medium text-[#18181b]">{file.name}</span>
-                <span className="text-xs leading-4 text-[#71717a]">{formatFileSize(file.size)}</span>
+                <span className="truncate text-xs leading-5 font-medium text-foreground">{file.name}</span>
+                <span className="text-xs leading-4 text-muted">{formatFileSize(file.size)}</span>
               </div>
               <FileTrigger acceptedFileTypes={TICKETS_FILE_TYPES} onSelect={(list) => list && pick(Array.from(list))}>
                 <AriaButton
                   aria-label="Заменить файл"
-                  className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-[8px] bg-[#ebebec] text-[#18181b] outline-none transition-colors hover:bg-[#e0e0e2]"
+                  className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-[8px] bg-surface-tertiary text-foreground outline-none transition-colors hover:bg-default-hover"
                 >
                   <RiLoopRightLine size={16} />
                 </AriaButton>
@@ -160,7 +160,7 @@ export function TicketsUploadDialog({ isOpen, onClose, defaultRegionId = null, d
                 type="button"
                 aria-label="Убрать файл"
                 onClick={() => setFile(null)}
-                className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-[8px] bg-[#ff383c]/15 text-[#ff383c] transition-colors hover:bg-[#ff383c]/25"
+                className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-[8px] bg-danger-soft text-danger transition-colors hover:bg-danger-soft-hover"
               >
                 <RiDeleteBinLine size={16} />
               </button>
@@ -177,14 +177,14 @@ export function TicketsUploadDialog({ isOpen, onClose, defaultRegionId = null, d
                   }
                   pick(files)
                 }}
-                className="flex h-[148px] flex-col items-center justify-center rounded-[8px] border border-dashed border-[#dedee0] bg-[#f5f5f5] outline-none transition-colors data-[drop-target]:border-[#0485f7] data-[drop-target]:bg-[#0485f7]/[0.06]"
+                className="flex h-[148px] flex-col items-center justify-center rounded-[8px] border border-dashed border-border bg-surface-hover outline-none transition-colors data-[drop-target]:border-focus data-[drop-target]:bg-accent/[0.06]"
               >
                 <FileTrigger acceptedFileTypes={TICKETS_FILE_TYPES} onSelect={(list) => list && pick(Array.from(list))}>
                   <AriaButton className="flex size-full cursor-pointer flex-col items-center justify-center gap-2 outline-none">
-                    <RiUploadCloud2Line size={24} className="text-[#71717a]" />
+                    <RiUploadCloud2Line size={24} className="text-muted" />
                     <span className="flex flex-col items-center">
-                      <span className="text-base leading-7 font-medium text-[#18181b]">Загрузите заявки</span>
-                      <span className="text-xs leading-5 text-[#71717a]">
+                      <span className="text-base leading-7 font-medium text-foreground">Загрузите заявки</span>
+                      <span className="text-xs leading-5 text-muted">
                         Нажмите на это поле или перетащите
                         <br />в него csv или json файл
                       </span>
@@ -195,7 +195,7 @@ export function TicketsUploadDialog({ isOpen, onClose, defaultRegionId = null, d
               <button
                 type="button"
                 onClick={downloadTicketsTemplate}
-                className="flex h-9 cursor-pointer items-center gap-2 self-start text-sm leading-5 font-medium text-[#18181b] transition-colors hover:text-[#0485f7]"
+                className="flex h-9 cursor-pointer items-center gap-2 self-start text-sm leading-5 font-medium text-foreground transition-colors hover:text-link"
               >
                 <RiDownload2Line size={16} />
                 Скачать шаблон ({TICKETS_TEMPLATE_SIZE})

@@ -18,17 +18,17 @@ import { RouteStepChip } from './RouteSteps'
 /** Ширина колонки панели поверх карты вместе с отступами — для fitBounds. */
 export const ROUTE_PANEL_INSET = 333
 
-const ACTIVE = '#ff383c'
+const ACTIVE = 'var(--danger)'
 
 function StopMarker({ children, active }: { children: ReactNode; active: boolean }) {
   return (
     <span
-      className="flex size-6 shrink-0 items-center justify-center border border-[#dedee0] bg-white"
+      className="flex size-6 shrink-0 items-center justify-center border border-border bg-surface"
       style={{ borderRadius: 8, margin: -2 }}
     >
       <span
-        className="flex size-[18px] items-center justify-center text-sm leading-5 font-semibold text-white"
-        style={{ borderRadius: 5, background: active ? ACTIVE : '#18181b' }}
+        className="flex size-[18px] items-center justify-center text-sm leading-5 font-semibold text-[var(--beeline-white)]"
+        style={{ borderRadius: 5, background: active ? ACTIVE : 'var(--background-inverse)' }}
       >
         {children}
       </span>
@@ -42,11 +42,11 @@ function DropIndicator({ edge }: { edge: 'top' | 'bottom' }) {
     <span
       aria-hidden
       className={cn(
-        'pointer-events-none absolute right-0 left-0 z-10 h-0.5 bg-[#0485f7]',
+        'pointer-events-none absolute right-0 left-0 z-10 h-0.5 bg-accent',
         edge === 'top' ? '-top-px' : '-bottom-px',
       )}
     >
-      <span className="absolute top-1/2 right-0 size-2.5 -translate-y-1/2 rounded-full bg-[#0485f7]" />
+      <span className="absolute top-1/2 right-0 size-2.5 -translate-y-1/2 rounded-full bg-accent" />
     </span>
   )
 }
@@ -83,20 +83,20 @@ export function RouteDetailsPanel({
       style={{ width: ROUTE_PANEL_INSET }}
     >
       <div
-        className="flex min-h-0 min-w-0 flex-1 flex-col bg-white shadow-lg"
+        className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface shadow-lg"
         style={{ borderRadius: 8 }}
       >
         <div className="flex shrink-0 flex-col gap-1 px-3 pt-3 pb-2">
-          <h2 className="text-base leading-6 font-semibold text-[#18181b]">
+          <h2 className="text-base leading-6 font-semibold text-foreground">
             Маршрут{' '}
-            <span className="text-[#71717a]">
+            <span className="text-muted">
               с {engineer.routeFrom} по {engineer.routeTo}
             </span>
           </h2>
           <button
             type="button"
             onClick={onEditParams}
-            className="inline-flex w-fit cursor-pointer items-start gap-0.5 text-sm leading-5 font-medium text-[#18181b] hover:underline"
+            className="inline-flex w-fit cursor-pointer items-start gap-0.5 text-sm leading-5 font-medium text-foreground hover:underline"
           >
             Изменить параметры маршрута
             <RiArrowRightUpLine size={10} className="mt-0.5 opacity-60" />
@@ -107,26 +107,26 @@ export function RouteDetailsPanel({
           ref={listRef}
           className="relative flex min-h-0 flex-1 flex-col overflow-y-auto"
         >
-          <div className="relative flex items-center gap-2 border-b border-[#dedee0] p-3">
+          <div className="relative flex items-center gap-2 border-b border-border p-3">
             <span
-              className="flex size-6 shrink-0 items-center justify-center border border-[#dedee0] bg-white"
+              className="flex size-6 shrink-0 items-center justify-center border border-border bg-surface"
               style={{ borderRadius: 8, margin: -2 }}
             >
               <span
                 className="flex size-[18px] items-center justify-center"
                 style={{ borderRadius: 5, background: ACTIVE }}
               >
-                <RiBuilding2Fill size={12} className="text-white" />
+                <RiBuilding2Fill size={12} className="text-[var(--beeline-white)]" />
               </span>
             </span>
-            <span className="min-w-0 flex-1 truncate text-sm leading-5 font-medium text-[#18181b]">
+            <span className="min-w-0 flex-1 truncate text-sm leading-5 font-medium text-foreground">
               {engineer.start.address}
             </span>
             {dropIndex === 0 && stops.length === 0 ? <DropIndicator edge="bottom" /> : null}
           </div>
 
           {stops.length === 0 ? (
-            <p className="px-3 py-6 text-center text-sm leading-5 text-[#71717a]">
+            <p className="px-3 py-6 text-center text-sm leading-5 text-muted">
               В маршруте пока нет заявок
             </p>
           ) : null}
@@ -138,7 +138,7 @@ export function RouteDetailsPanel({
               <div
                 key={stop.id}
                 data-stop-index={index}
-                className="relative border-b border-[#dedee0]"
+                className="relative border-b border-border"
               >
                 {dropIndex === index ? <DropIndicator edge="top" /> : null}
                 {dropIndex === stops.length && index === stops.length - 1 ? (
@@ -148,16 +148,16 @@ export function RouteDetailsPanel({
                   type="button"
                   aria-expanded={expanded}
                   onClick={() => onToggleStop(stop.id)}
-                  className="flex w-full cursor-pointer flex-col gap-2 p-3 text-left outline-none transition-colors hover:bg-[#fafafa] focus-visible:bg-[#fafafa]"
+                  className="flex w-full cursor-pointer flex-col gap-2 p-3 text-left outline-none transition-colors hover:bg-surface-hover focus-visible:bg-surface-hover"
                 >
                   <span className="flex flex-col gap-1">
                     <span className="flex items-center gap-2">
                       <StopMarker active={expanded}>{index + 1}</StopMarker>
-                      <span className="min-w-0 flex-1 truncate text-sm leading-5 font-medium text-[#18181b]">
+                      <span className="min-w-0 flex-1 truncate text-sm leading-5 font-medium text-foreground">
                         {stop.address}
                       </span>
                     </span>
-                    <span className="flex items-center gap-2 text-sm leading-5 font-medium text-[#71717a]">
+                    <span className="flex items-center gap-2 text-sm leading-5 font-medium text-muted">
                       <span>№{stop.id}</span>
                       <MetaSeparator />
                       <span className="min-w-0 flex-1 truncate">{stop.typeLabel}</span>
@@ -174,7 +174,7 @@ export function RouteDetailsPanel({
                         {legSteps(stop.transit, engineer.transport, stop.travelMinutes).map((step, stepIndex) => (
                           <Fragment key={stepIndex}>
                             {stepIndex > 0 ? (
-                              <RiArrowRightSFill size={14} aria-hidden className="shrink-0 text-[#71717a]" />
+                              <RiArrowRightSFill size={14} aria-hidden className="shrink-0 text-muted" />
                             ) : null}
                             <RouteStepChip step={step} />
                           </Fragment>
@@ -192,7 +192,7 @@ export function RouteDetailsPanel({
           <button
             type="button"
             onClick={onAddTicket}
-            className="flex h-9 w-full cursor-pointer items-center justify-center gap-2 px-4 text-sm leading-5 font-medium text-[#18181b] transition-colors hover:bg-[#f5f5f5]"
+            className="flex h-9 w-full cursor-pointer items-center justify-center gap-2 px-4 text-sm leading-5 font-medium text-foreground transition-colors hover:bg-surface-hover"
             style={{ borderRadius: 8 }}
           >
             <RiMapPinAddLine size={16} />

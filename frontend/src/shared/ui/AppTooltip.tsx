@@ -5,10 +5,10 @@ import { cn } from '@/shared/lib/cn'
 
 /**
  * Стили тултипа по Figma Ready for dev:
- * тёмный фон #18181b, белый текст 12/20, padding 4×8, radius 8, стрелка.
+ * инверсный фон темы, белый текст 12/20, padding 4×8, radius 8, стрелка.
  */
 export const appTooltipContentClass =
-  'z-50 max-w-[340px] rounded-lg bg-[#18181b] px-2 py-1 text-center text-xs font-normal leading-5 text-white shadow-none outline-none'
+  'z-50 max-w-[340px] rounded-lg bg-background-inverse px-2 py-1 text-center text-xs font-normal leading-5 text-[var(--beeline-white)] shadow-none outline-none'
 
 type AppTooltipContentProps = {
   children: ReactNode
@@ -29,7 +29,7 @@ export function AppTooltipContent({
     >
       {children}
       {showArrow ? (
-        <Tooltip.Arrow className="fill-[#18181b] text-[#18181b]" />
+        <Tooltip.Arrow className="fill-background-inverse text-background-inverse" />
       ) : null}
     </Tooltip.Content>
   )

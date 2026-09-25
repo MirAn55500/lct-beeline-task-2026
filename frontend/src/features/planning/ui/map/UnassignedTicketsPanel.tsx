@@ -37,7 +37,7 @@ export function UnassignedTicketsPanel({
     <AppPanel className="flex h-[226px] shrink-0 flex-col overflow-hidden">
       <div className="flex shrink-0 items-center gap-4 px-5 py-4">
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <h2 className="truncate py-0.5 text-xl leading-7 font-semibold text-[#18181b]">
+          <h2 className="truncate py-0.5 text-xl leading-7 font-semibold text-foreground">
             {tickets.length}{' '}
             {pluralRu(tickets.length, [
               'неназначенная заявка',
@@ -52,7 +52,7 @@ export function UnassignedTicketsPanel({
       </div>
 
       {tickets.length === 0 ? (
-        <p className="flex flex-1 items-center justify-center px-5 pb-5 text-sm leading-5 text-[#71717a]">
+        <p className="flex flex-1 items-center justify-center px-5 pb-5 text-sm leading-5 text-muted">
           Все заявки распределены
         </p>
       ) : (
@@ -65,7 +65,7 @@ export function UnassignedTicketsPanel({
               <div
                 key={ticket.id}
                 aria-hidden
-                className="h-[142px] w-[calc((100%-18px)/4)] min-w-[220px] shrink-0 snap-start border border-dashed border-[#dedee0] bg-[#efeff0]"
+                className="h-[142px] w-[calc((100%-18px)/4)] min-w-[220px] shrink-0 snap-start border border-dashed border-border bg-surface-tertiary"
                 style={{ borderRadius: 8 }}
               />
             ) : (
@@ -99,21 +99,21 @@ export function TicketCard({
     <article
       onPointerDown={onPointerDown}
       className={cn(
-        'relative flex h-[142px] touch-none flex-col gap-2 bg-white p-3 select-none',
+        'relative flex h-[142px] touch-none flex-col gap-2 bg-surface p-3 select-none',
         floating
           ? 'shadow-[0_20px_25px_-5px_rgb(0_0_0/0.1),0_8px_10px_-6px_rgb(0_0_0/0.1)]'
-          : 'cursor-grab border border-[#dedee0] active:cursor-grabbing',
+          : 'cursor-grab border border-border active:cursor-grabbing',
         className,
       )}
       style={{ borderRadius: 8 }}
     >
       <div className="flex min-w-0 flex-col gap-1 pr-5">
         <p className="flex items-center gap-1 truncate text-sm leading-5 font-medium">
-          <span className="text-[#18181b]">№{ticket.id}</span>
-          <span className="text-[#71717a]">•</span>
-          <span className="truncate text-[#71717a]">{ticket.typeLabel}</span>
+          <span className="text-foreground">№{ticket.id}</span>
+          <span className="text-muted">•</span>
+          <span className="truncate text-muted">{ticket.typeLabel}</span>
         </p>
-        <p className="line-clamp-2 h-10 text-sm leading-5 text-[#18181b]">{ticket.address}</p>
+        <p className="line-clamp-2 h-10 text-sm leading-5 text-foreground">{ticket.address}</p>
       </div>
       <div className="flex min-w-0 flex-col items-start gap-1.5">
         <ReasonTag label={UNASSIGNED_REASON_LABEL[ticket.reason]} explanation={ticket.explanation} />
@@ -122,7 +122,7 @@ export function TicketCard({
       <RiDraggable
         size={16}
         aria-hidden
-        className="absolute top-1/2 right-1.5 -translate-y-1/2 text-[#71717a]"
+        className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted"
       />
     </article>
   )

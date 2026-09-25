@@ -32,15 +32,15 @@ function formatTime(value: Time): string {
 
 function FieldLabel({ children, required }: { children: ReactNode; required?: boolean }) {
   return (
-    <span className="text-sm font-medium leading-6 text-[#18181b]">
+    <span className="text-sm font-medium leading-6 text-foreground">
       {children}
-      {required ? <span className="ms-1 text-[#ef2c56]">*</span> : null}
+      {required ? <span className="ms-1 text-danger">*</span> : null}
     </span>
   )
 }
 
 function Hint({ children }: { children: ReactNode }) {
-  return <p className="text-xs leading-5 text-[#71717a]">{children}</p>
+  return <p className="text-xs leading-5 text-muted">{children}</p>
 }
 
 function ToggleChip({
@@ -62,8 +62,8 @@ function ToggleChip({
       className={cn(
         'inline-flex h-7 cursor-pointer items-center gap-1 px-3 text-sm font-medium leading-5 transition-colors',
         active
-          ? 'bg-[#0485f7] text-[#fcfcfc] hover:bg-[#0374d9]'
-          : 'bg-[#ebebec] text-[#18181b] hover:bg-[#e0e0e2]',
+          ? 'bg-accent text-accent-foreground hover:bg-accent-hover'
+          : 'bg-surface-tertiary text-foreground hover:bg-default-hover',
         className,
       )}
       style={{ borderRadius: 8 }}
@@ -91,7 +91,7 @@ function TextInput({
       value={value}
       onChange={(event) => onChange(event.target.value)}
       placeholder={placeholder}
-      className="h-9 w-full border border-[#dedee0] bg-white px-3 text-sm leading-5 text-[#18181b] outline-none placeholder:text-[#71717a] focus-visible:border-[#0485f7]"
+      className="h-9 w-full border border-border bg-surface px-3 text-sm leading-5 text-foreground outline-none placeholder:text-muted focus-visible:border-focus"
       style={{ borderRadius: 8 }}
     />
   )
@@ -122,18 +122,18 @@ function SingleSelect<K extends string | number>({
     >
       <Select.Trigger
         className={cn(
-          'flex h-9 w-full items-center justify-between gap-2 border border-[#dedee0] bg-white text-left shadow-none outline-none',
-          'data-[focus-visible]:outline data-[focus-visible]:outline-2 data-[focus-visible]:outline-offset-2 data-[focus-visible]:outline-[#0485f7]',
+          'flex h-9 w-full items-center justify-between gap-2 border border-border bg-surface text-left shadow-none outline-none',
+          'data-[focus-visible]:outline data-[focus-visible]:outline-2 data-[focus-visible]:outline-offset-2 data-[focus-visible]:outline-focus',
         )}
         style={{ borderRadius: 8, padding: '8px 12px' }}
       >
-        <Select.Value className="min-w-0 flex-1 truncate text-sm leading-5 text-[#18181b] data-[placeholder]:text-[#71717a]" />
-        <Select.Indicator className="shrink-0 text-[#18181b]">
+        <Select.Value className="min-w-0 flex-1 truncate text-sm leading-5 text-foreground data-[placeholder]:text-muted" />
+        <Select.Indicator className="shrink-0 text-foreground">
           <RiArrowDownSLine size={16} />
         </Select.Indicator>
       </Select.Trigger>
       <Select.Popover
-        className="min-w-[240px] border border-[#dedee0] bg-white p-1 shadow-lg outline-none"
+        className="min-w-[240px] border border-border bg-surface p-1 shadow-lg outline-none"
         style={{ borderRadius: 16 }}
       >
         <ListBox className="outline-none">
@@ -142,7 +142,7 @@ function SingleSelect<K extends string | number>({
               key={option.id}
               id={option.id}
               textValue={option.label}
-              className="cursor-pointer px-3 py-2 text-sm text-[#18181b] outline-none data-[focused]:bg-[#f5f5f5] data-[selected]:bg-[#0485f7]/[0.08]"
+              className="cursor-pointer px-3 py-2 text-sm text-foreground outline-none data-[focused]:bg-surface-hover data-[selected]:bg-surface-hover"
               style={{ borderRadius: 8 }}
             >
               {option.label}
@@ -173,14 +173,14 @@ function WorkTimeField({
       className="min-w-0 flex-1"
     >
       <TimeField.Group
-        className="flex h-9 w-full items-center border border-[#dedee0] bg-white shadow-none"
+        className="flex h-9 w-full items-center border border-border bg-surface shadow-none"
         style={{ borderRadius: 8, paddingLeft: 12, paddingRight: 12 }}
       >
-        <TimeField.Input className="min-w-0 flex-1 text-sm leading-5 text-[#18181b]">
+        <TimeField.Input className="min-w-0 flex-1 text-sm leading-5 text-foreground">
           {(segment) => <TimeField.Segment segment={segment} />}
         </TimeField.Input>
         <TimeField.Suffix className="ms-2">
-          <RiTimeLine size={16} className="text-[#71717a]" />
+          <RiTimeLine size={16} className="text-muted" />
         </TimeField.Suffix>
       </TimeField.Group>
     </TimeField>
@@ -277,8 +277,8 @@ export function AddEngineerPanel({
   return (
     <AppPanel className="flex min-h-0 w-[346px] shrink-0 flex-col">
       <div className="flex shrink-0 flex-col gap-1 px-5 pt-5">
-        <h2 className="text-xl font-semibold leading-7 text-[#18181b]">Добавить инженера</h2>
-        <p className="text-sm leading-6 text-[#71717a]">Заполните информацию о сотруднике</p>
+        <h2 className="text-xl font-semibold leading-7 text-foreground">Добавить инженера</h2>
+        <p className="text-sm leading-6 text-muted">Заполните информацию о сотруднике</p>
       </div>
 
       <ScrollShadow
@@ -332,7 +332,7 @@ export function AddEngineerPanel({
             </div>
           </div>
 
-          <div className="h-px w-full bg-[#dedee0]" />
+          <div className="h-px w-full bg-border" />
 
           <div className="flex flex-col gap-1">
             <FieldLabel required>Бригада</FieldLabel>
@@ -355,7 +355,7 @@ export function AddEngineerPanel({
                 onChange={(timeFrom) => patch({ timeFrom })}
               />
               <span
-                className="shrink-0 text-sm leading-5 text-[#71717a]"
+                className="shrink-0 text-sm leading-5 text-muted"
                 style={{ width: 12, textAlign: 'center' }}
               >
                 -
@@ -374,7 +374,7 @@ export function AddEngineerPanel({
         <button
           type="button"
           onClick={onClose}
-          className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center border border-[#dedee0] bg-white text-sm font-medium leading-5 text-[#18181b] transition-colors hover:bg-[#f5f5f5]"
+          className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center border border-border bg-surface text-sm font-medium leading-5 text-foreground transition-colors hover:bg-surface-hover"
           style={{ borderRadius: 8, padding: '8px 16px' }}
         >
           Отмена
@@ -383,7 +383,7 @@ export function AddEngineerPanel({
           type="button"
           disabled={!isValid || submitting}
           onClick={() => void submitManual(draft)}
-          className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center bg-[#0485f7] text-sm font-medium leading-5 text-[#fcfcfc] transition-colors hover:bg-[#0374d9] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[#0485f7]"
+          className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center bg-accent text-sm font-medium leading-5 text-accent-foreground transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent"
           style={{ borderRadius: 8, padding: '8px 16px' }}
         >
           {submitting ? 'Добавляем…' : 'Добавить'}

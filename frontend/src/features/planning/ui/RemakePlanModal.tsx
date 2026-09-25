@@ -62,7 +62,7 @@ function SegmentedControl<T extends string>({
     <div
       role="radiogroup"
       aria-label={ariaLabel}
-      className="flex w-full gap-0.5 bg-[#ebebec] p-0.5"
+      className="flex w-full gap-0.5 bg-surface-tertiary p-0.5"
       style={{ borderRadius: 10 }}
     >
       {options.map((option) => {
@@ -78,8 +78,8 @@ function SegmentedControl<T extends string>({
             className={cn(
               'flex h-8 min-w-0 flex-1 cursor-pointer items-center justify-center px-2 text-sm font-medium leading-5 transition-colors',
               selected
-                ? 'bg-white text-[#18181b] shadow-sm'
-                : 'bg-transparent text-[#71717a] hover:text-[#18181b]',
+                ? 'bg-surface text-foreground shadow-sm'
+                : 'bg-transparent text-muted hover:text-foreground',
               'disabled:cursor-not-allowed disabled:opacity-40',
             )}
             style={{ borderRadius: 8 }}
@@ -149,26 +149,26 @@ export function RemakePlanModal({
     <Modal state={state}>
       <Modal.Backdrop
         isDismissable={!busy}
-        className="bg-black/40"
+        className="bg-backdrop"
         style={{ backdropFilter: 'blur(4px)' }}
       >
         <Modal.Container placement="center" className="p-4">
           <Modal.Dialog
-            className="flex w-full max-w-[450px] flex-col overflow-hidden bg-white outline-none"
+            className="flex w-full max-w-[450px] flex-col overflow-hidden bg-surface outline-none"
             style={{ borderRadius: 16 }}
           >
             <Modal.Header className="relative flex flex-col gap-1 px-5 pt-5 pb-0">
-              <Modal.Heading className="pr-10 text-xl font-semibold leading-7 text-[#18181b]">
+              <Modal.Heading className="pr-10 text-xl font-semibold leading-7 text-foreground">
                 Обновить план
               </Modal.Heading>
-              <p className="pr-10 text-sm leading-6 text-[#71717a]">
+              <p className="pr-10 text-sm leading-6 text-muted">
                 Выберите вариант расчета и степень изменения уже сформированных
                 планов
               </p>
               <Modal.CloseTrigger
                 aria-label="Закрыть"
                 isDisabled={busy}
-                className="absolute top-4 right-4 flex size-8 cursor-pointer items-center justify-center text-[#71717a] transition-colors hover:bg-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-40"
+                className="absolute top-4 right-4 flex size-8 cursor-pointer items-center justify-center text-muted transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
                 style={{ borderRadius: 8 }}
               >
                 <RiCloseLine size={16} />
@@ -178,10 +178,10 @@ export function RemakePlanModal({
             <Modal.Body className="flex flex-col gap-4 px-5 py-4">
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-1">
-                  <span className="text-sm font-medium leading-6 text-[#18181b]">
+                  <span className="text-sm font-medium leading-6 text-foreground">
                     Уровень перестроения плана
                   </span>
-                  <span className="text-sm font-medium text-[#ef2c56]">*</span>
+                  <span className="text-sm font-medium text-danger">*</span>
                 </div>
                 <SegmentedControl
                   aria-label="Уровень перестроения плана"
@@ -190,15 +190,15 @@ export function RemakePlanModal({
                   onChange={setRemakeLevel}
                   disabled={busy}
                 />
-                <p className="text-xs leading-5 text-[#71717a]">{remakeHint}</p>
+                <p className="text-xs leading-5 text-muted">{remakeHint}</p>
               </div>
 
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-1">
-                  <span className="text-sm font-medium leading-6 text-[#18181b]">
+                  <span className="text-sm font-medium leading-6 text-foreground">
                     Распределение заявок
                   </span>
-                  <span className="text-sm font-medium text-[#ef2c56]">*</span>
+                  <span className="text-sm font-medium text-danger">*</span>
                 </div>
                 <SegmentedControl
                   aria-label="Распределение заявок"
@@ -207,7 +207,7 @@ export function RemakePlanModal({
                   onChange={setDistribution}
                   disabled={busy}
                 />
-                <p className="text-xs leading-5 text-[#71717a]">
+                <p className="text-xs leading-5 text-muted">
                   {distributionHint}
                 </p>
               </div>
@@ -218,7 +218,7 @@ export function RemakePlanModal({
                 type="button"
                 disabled={busy}
                 onClick={() => onOpenChange(false)}
-                className="inline-flex h-9 cursor-pointer items-center justify-center border border-[#dedee0] bg-white px-4 text-sm font-medium leading-5 text-[#18181b] transition-colors hover:bg-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex h-9 cursor-pointer items-center justify-center border border-border bg-surface px-4 text-sm font-medium leading-5 text-foreground transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
                 style={{ borderRadius: 8 }}
               >
                 Отмена
@@ -227,7 +227,7 @@ export function RemakePlanModal({
                 type="button"
                 disabled={busy}
                 onClick={() => void submit()}
-                className="inline-flex h-9 cursor-pointer items-center justify-center bg-[#0485f7] px-4 text-sm font-medium leading-5 text-[#fcfcfc] transition-colors hover:bg-[#0374d9] disabled:cursor-not-allowed disabled:bg-[#0485f7]/40"
+                className="inline-flex h-9 cursor-pointer items-center justify-center bg-accent px-4 text-sm font-medium leading-5 text-accent-foreground transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-accent/40"
                 style={{ borderRadius: 8 }}
               >
                 {busy ? 'Обновляем…' : 'Обновить план'}

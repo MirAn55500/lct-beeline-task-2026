@@ -190,7 +190,7 @@ function PersonnelPage() {
           />
         ) : (
           <AppPanel className="flex min-h-0 flex-1 items-center justify-center">
-            <p className="text-sm leading-6 text-[#71717a]">
+            <p className="text-sm leading-6 text-muted">
               {brigadesLoading ? 'Загружаем бригады…' : 'Выберите бригаду'}
             </p>
           </AppPanel>

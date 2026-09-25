@@ -22,11 +22,11 @@ function MenuItem({
       to={to}
       onClick={onNavigate}
       className={cn(
-        'flex h-9 cursor-pointer items-center gap-3 rounded-lg px-3 text-sm font-medium text-foreground transition-colors hover:bg-[#f5f5f5]',
-        active && 'bg-[#f5f5f5]',
+        'flex h-9 cursor-pointer items-center gap-3 rounded-lg px-3 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover',
+        active && 'bg-surface-hover',
       )}
     >
-      <Icon size={16} className="shrink-0 text-[#71717a]" />
+      <Icon size={16} className="shrink-0 text-muted" />
       <span>{item.label}</span>
     </NavLink>
   )
@@ -48,14 +48,14 @@ export function AppNavMenu({ onNavigate, className }: AppNavMenuProps) {
   return (
     <div
       className={cn(
-        'w-[322px] rounded-[var(--border-radius-panel)] bg-white p-3 shadow-lg',
+        'w-[322px] rounded-[var(--border-radius-panel)] bg-surface p-3 shadow-lg',
         className,
       )}
     >
       <nav className="flex flex-col gap-2">
         {navMenuGroups.map((group, groupIndex) => (
           <div key={groupIndex} className="flex flex-col gap-2">
-            {groupIndex > 0 ? <div className="mx-2 h-px bg-[#e4e4e7]" /> : null}
+            {groupIndex > 0 ? <div className="mx-2 h-px bg-separator" /> : null}
             <div className="flex flex-col gap-2">
               {group.map((item) => (
                 <MenuItem

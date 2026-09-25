@@ -14,7 +14,7 @@ export type PersonnelTab = 'engineers'
 export type EngineersExportFormat = 'csv' | 'json'
 
 const MENU_ITEM =
-  'flex h-9 cursor-pointer items-center gap-2 px-3 text-sm font-medium leading-5 text-[#18181b] outline-none data-[focused]:bg-[#f5f5f5]'
+  'flex h-9 cursor-pointer items-center gap-2 px-3 text-sm font-medium leading-5 text-foreground outline-none data-[focused]:bg-surface-hover'
 
 type PersonnelHeaderProps = {
   /** Название выбранной бригады. */
@@ -30,34 +30,34 @@ export function PersonnelHeader({
 }: PersonnelHeaderProps) {
   return (
     <AppPanel className="flex h-[60px] shrink-0 items-center justify-between gap-4 p-3">
-      <h1 className="min-w-0 truncate px-1 text-xl font-semibold leading-7 text-[#18181b]">
+      <h1 className="min-w-0 truncate px-1 text-xl font-semibold leading-7 text-foreground">
         {title}
       </h1>
 
       <div className="flex shrink-0 justify-end">
         <div
-          className="inline-flex h-9 items-center overflow-hidden bg-[#0485f7] text-[#fcfcfc]"
+          className="inline-flex h-9 items-center overflow-hidden bg-accent text-accent-foreground"
           style={{ borderRadius: 8 }}
         >
           <button
             type="button"
             onClick={onAddEngineer}
-            className="h-full cursor-pointer px-4 text-sm font-medium leading-5 transition-colors hover:bg-[#0374d9]"
+            className="h-full cursor-pointer px-4 text-sm font-medium leading-5 transition-colors hover:bg-accent-hover"
           >
             Инженеры
           </button>
-          <span aria-hidden className="h-5 w-px bg-[#fcfcfc]/40" />
+          <span aria-hidden className="h-5 w-px bg-surface/40" />
           <Dropdown>
             <Dropdown.Trigger
               aria-label="Действия с инженерами"
-              className="flex size-9 cursor-pointer items-center justify-center bg-transparent text-[#fcfcfc] outline-none transition-colors hover:bg-[#0374d9] data-[pressed]:bg-[#0374d9]"
+              className="flex size-9 cursor-pointer items-center justify-center bg-transparent text-accent-foreground outline-none transition-colors hover:bg-accent-hover data-[pressed]:bg-accent-hover"
             >
               <RiArrowDownSLine size={16} />
             </Dropdown.Trigger>
             <Dropdown.Popover
               placement="bottom end"
               offset={8}
-              className="w-[193px] border-0 bg-white p-1 outline-none"
+              className="w-[193px] border-0 bg-surface p-1 outline-none"
               style={{
                 borderRadius: 12,
                 boxShadow:
@@ -78,7 +78,7 @@ export function PersonnelHeader({
                   className={MENU_ITEM}
                   style={{ borderRadius: 8 }}
                 >
-                  <RiFileTextLine size={16} className="shrink-0 text-[#71717a]" />
+                  <RiFileTextLine size={16} className="shrink-0 text-muted" />
                   Экспорт csv
                 </Dropdown.Item>
                 <Dropdown.Item
@@ -87,10 +87,10 @@ export function PersonnelHeader({
                   className={MENU_ITEM}
                   style={{ borderRadius: 8 }}
                 >
-                  <RiDownload2Line size={16} className="shrink-0 text-[#71717a]" />
+                  <RiDownload2Line size={16} className="shrink-0 text-muted" />
                   Экспорт json
                 </Dropdown.Item>
-                <Separator className="mx-2 my-1 h-px border-0 bg-[#e4e4e7]" />
+                <Separator className="mx-2 my-1 h-px border-0 bg-separator" />
                 <Dropdown.Item
                   id="add"
                   textValue="Добавить"

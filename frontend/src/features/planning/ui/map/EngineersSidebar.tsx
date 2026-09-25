@@ -21,7 +21,7 @@ import { TRANSPORT_LABEL } from './transport'
 const TRANSPORT_ORDER: MapTransport[] = ['car', 'public', 'bike', 'walking']
 
 const MENU_ITEM =
-  'flex h-9 cursor-pointer items-center gap-2 px-3 text-sm font-medium leading-5 text-[#18181b] outline-none data-[focused]:bg-[#f5f5f5]'
+  'flex h-9 cursor-pointer items-center gap-2 px-3 text-sm font-medium leading-5 text-foreground outline-none data-[focused]:bg-surface-hover'
 
 type HoverCard = { engineer: MapEngineer; top: number; left: number }
 
@@ -63,16 +63,16 @@ export function EngineersSidebar({
     <AppPanel className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex shrink-0 items-center gap-2 p-3">
         <label
-          className="flex h-9 min-w-0 flex-1 items-center gap-1.5 border border-[#dedee0] bg-white px-3 focus-within:border-[#0485f7]"
+          className="flex h-9 min-w-0 flex-1 items-center gap-1.5 border border-border bg-surface px-3 focus-within:border-focus"
           style={{ borderRadius: 8 }}
         >
-          <RiSearchLine size={16} className="shrink-0 text-[#71717a]" />
+          <RiSearchLine size={16} className="shrink-0 text-muted" />
           <input
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Поиск по инженерам"
-            className="min-w-0 flex-1 bg-transparent text-sm leading-5 text-[#18181b] outline-none placeholder:text-[#71717a]"
+            className="min-w-0 flex-1 bg-transparent text-sm leading-5 text-foreground outline-none placeholder:text-muted"
           />
         </label>
 
@@ -80,19 +80,19 @@ export function EngineersSidebar({
           <Dropdown.Trigger
             aria-label="Фильтры"
             className={cn(
-              'relative flex size-9 shrink-0 cursor-pointer items-center justify-center border border-[#dedee0] bg-white text-[#18181b] outline-none transition-colors hover:bg-[#f5f5f5] data-[pressed]:bg-[#f5f5f5]',
+              'relative flex size-9 shrink-0 cursor-pointer items-center justify-center border border-border bg-surface text-foreground outline-none transition-colors hover:bg-surface-hover data-[pressed]:bg-surface-hover',
             )}
             style={{ borderRadius: 8 }}
           >
             <RiEqualizer2Line size={16} />
             {transports.size > 0 ? (
-              <span className="absolute -top-1 -right-1 size-2.5 rounded-full border-2 border-white bg-[#0485f7]" />
+              <span className="absolute -top-1 -right-1 size-2.5 rounded-full border-2 border-surface bg-accent" />
             ) : null}
           </Dropdown.Trigger>
           <Dropdown.Popover
             placement="bottom end"
             offset={8}
-            className="w-[240px] border-0 bg-white p-1 outline-none"
+            className="w-[240px] border-0 bg-surface p-1 outline-none"
             style={{
               borderRadius: 12,
               boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
@@ -114,7 +114,7 @@ export function EngineersSidebar({
                   key={code}
                   id={code}
                   textValue={TRANSPORT_LABEL[code]}
-                  className={cn(MENU_ITEM, 'data-[selected]:bg-[#f5f5f5]')}
+                  className={cn(MENU_ITEM, 'data-[selected]:bg-surface-hover')}
                   style={{ borderRadius: 8 }}
                 >
                   {TRANSPORT_LABEL[code]}
@@ -127,7 +127,7 @@ export function EngineersSidebar({
 
       <ScrollShadow hideScrollBar className="min-h-0 flex-1 overflow-y-auto" onScroll={leave}>
         {visible.length === 0 ? (
-          <p className="px-4 py-6 text-center text-sm leading-5 text-[#71717a]">
+          <p className="px-4 py-6 text-center text-sm leading-5 text-muted">
             Никого не нашли
           </p>
         ) : (
@@ -152,19 +152,22 @@ export function EngineersSidebar({
                     }}
                     onMouseLeave={leave}
                     className={cn(
-                      'flex w-full cursor-pointer items-center gap-3 border-b border-[#dedee0] p-3 text-left outline-none transition-colors focus-visible:bg-[#f8fafc]',
-                      selected ? 'bg-[#efeff0]' : hovered ? 'bg-[#f8fafc]' : 'bg-white',
+                      'flex w-full cursor-pointer items-center gap-3 border-b border-border p-3 text-left outline-none transition-colors focus-visible:bg-surface-hover',
+                      selected ? 'bg-surface-tertiary' : hovered ? 'bg-surface-hover' : 'bg-surface',
                     )}
                   >
                     <EngineerAvatar engineer={engineer} muted={selected} />
                     <span className="flex min-w-0 flex-1 flex-col gap-1">
                       <span className="flex items-center gap-1">
-                        <span className="min-w-0 flex-1 truncate text-base leading-6 font-semibold text-[#18181b]">
+                        <span className="min-w-0 flex-1 truncate text-base leading-6 font-semibold text-foreground">
                           {engineer.name}
                         </span>
-                        <LoadRing value={engineer.load} trackColor={selected ? '#ffffff' : '#ebebec'} />
+                        <LoadRing
+                          value={engineer.load}
+                          trackColor={selected ? 'var(--surface)' : 'var(--surface-tertiary)'}
+                        />
                       </span>
-                      <span className="flex items-center gap-2 text-sm leading-5 font-medium text-[#71717a]">
+                      <span className="flex items-center gap-2 text-sm leading-5 font-medium text-muted">
                         <span className="flex items-center gap-0.5">
                           <RiToolsFill size={14} />
                           {engineer.qualification}
@@ -194,13 +197,13 @@ function EngineerHoverCard({ engineer, top, left }: HoverCard) {
   return (
     <div
       role="tooltip"
-      className="pointer-events-none fixed z-50 flex h-[72px] w-[350px] flex-col justify-center gap-1 border border-[#e2e8f0] bg-[#f8fafc] py-3 pr-3 pl-4"
+      className="pointer-events-none fixed z-50 flex h-[72px] w-[350px] flex-col justify-center gap-1 border border-border bg-surface-hover py-3 pr-3 pl-4"
       style={{ top, left, borderRadius: '0 8px 8px 0' }}
     >
-      <p className="truncate text-base leading-6 font-medium text-[#18181b]">
+      <p className="truncate text-base leading-6 font-medium text-foreground">
         Рабочая смена: {engineer.shift}
       </p>
-      <p className="flex items-center gap-2 text-sm leading-5 font-medium text-[#71717a]">
+      <p className="flex items-center gap-2 text-sm leading-5 font-medium text-muted">
         <span className="flex items-center gap-0.5">
           <RiRouterLine size={16} />
           {engineer.routers} {pluralRu(engineer.routers, ['роутер', 'роутера', 'роутеров'])}

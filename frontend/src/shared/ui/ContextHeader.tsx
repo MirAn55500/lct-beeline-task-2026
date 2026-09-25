@@ -32,7 +32,7 @@ function ContextSelect({
         onClick={onToggle}
         className={cn(
           'flex cursor-pointer items-center gap-1 text-left text-xl font-semibold leading-7 transition-colors hover:opacity-80',
-          muted || open ? 'text-[#71717a]' : 'text-foreground',
+          muted ? 'text-muted' : 'text-foreground',
         )}
       >
         <span>{label}</span>
@@ -186,9 +186,9 @@ export function ContextHeader({
           }}
         >
           {regionOpen ? (
-            <div className="absolute top-[calc(100%+12px)] left-0 z-50 w-max min-w-[193px] rounded-[var(--border-radius-panel)] bg-white p-1 shadow-lg">
+            <div className="absolute top-[calc(100%+12px)] left-0 z-50 w-max min-w-[193px] rounded-[var(--border-radius-panel)] bg-surface p-1 shadow-lg">
               {regions.length === 0 ? (
-                <p className="px-3 py-2 text-sm leading-6 text-[#71717a]">
+                <p className="px-3 py-2 text-sm leading-6 text-muted">
                   {isRegionsError
                     ? 'Не удалось загрузить регионы'
                     : 'Регионов пока нет'}
@@ -204,8 +204,8 @@ export function ContextHeader({
                         setRegionOpen(false)
                       }}
                       className={cn(
-                        'flex h-9 w-full cursor-pointer items-center rounded-lg px-3 text-sm font-medium leading-6 text-foreground transition-colors hover:bg-[#f5f5f5]',
-                        item.id === region?.id && 'bg-[#f5f5f5]',
+                        'flex h-9 w-full cursor-pointer items-center rounded-lg px-3 text-sm font-medium leading-6 text-foreground transition-colors hover:bg-surface-hover',
+                        item.id === region?.id && 'bg-surface-hover',
                       )}
                     >
                       {item.name}
@@ -217,7 +217,7 @@ export function ContextHeader({
           ) : null}
         </ContextSelect>
 
-        <div className="h-7 w-px bg-[#e4e4e7]" />
+        <div className="h-7 w-px bg-separator" />
 
         <ContextSelect
           label={formatDayLabel(date, { weekday: showWeekday })}
@@ -231,7 +231,7 @@ export function ContextHeader({
         >
           {dateOpen ? (
             <div
-              className="absolute top-[calc(100%+12px)] left-0 z-50 w-[288px] overflow-hidden bg-white p-4 pt-0 shadow-lg"
+              className="absolute top-[calc(100%+12px)] left-0 z-50 w-[288px] overflow-hidden bg-surface p-4 pt-0 shadow-lg"
               style={{ borderRadius: 24 }}
             >
               <Calendar
@@ -248,23 +248,23 @@ export function ContextHeader({
                 <Calendar.Header className="px-0 pb-2 pt-4">
                   <Calendar.YearPickerTrigger className="gap-1">
                     <Calendar.YearPickerTriggerHeading className="text-sm font-medium text-foreground" />
-                    <Calendar.YearPickerTriggerIndicator className="text-[#1d63ae]" />
+                    <Calendar.YearPickerTriggerIndicator className="text-link" />
                   </Calendar.YearPickerTrigger>
                   <Calendar.NavButton
                     slot="previous"
-                    className="size-6 text-[#1d63ae] hover:bg-[#f5f5f5]"
+                    className="size-6 text-link hover:bg-surface-hover"
                     style={{ borderRadius: 6 }}
                   />
                   <Calendar.NavButton
                     slot="next"
-                    className="size-6 text-[#1d63ae] hover:bg-[#f5f5f5]"
+                    className="size-6 text-link hover:bg-surface-hover"
                     style={{ borderRadius: 6 }}
                   />
                 </Calendar.Header>
                 <Calendar.Grid className="w-full">
                   <Calendar.GridHeader>
                     {(day) => (
-                      <Calendar.HeaderCell className="h-10 w-9 text-sm font-medium text-[#71717a]">
+                      <Calendar.HeaderCell className="h-10 w-9 text-sm font-medium text-muted">
                         {day}
                       </Calendar.HeaderCell>
                     )}
@@ -273,7 +273,7 @@ export function ContextHeader({
                     {(cellDate) => (
                       <Calendar.Cell
                         date={cellDate}
-                        className="size-9 text-sm font-medium text-foreground hover:bg-[#f5f5f5] data-[outside-month=true]:text-[#71717a] data-[selected=true]:bg-[#0485f7] data-[selected=true]:text-[#fcfcfc] data-[selected=true]:hover:bg-[#0374d9]"
+                        className="size-9 text-sm font-medium text-foreground hover:bg-surface-hover data-[outside-month=true]:text-muted data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[selected=true]:hover:bg-accent-hover"
                         style={{ borderRadius: 24 }}
                       >
                         {({ formattedDate, isSelected }) => (
@@ -282,7 +282,7 @@ export function ContextHeader({
                             {plannedDateSet.has(cellDate.toString()) ? (
                               <Calendar.CellIndicator
                                 className={
-                                  isSelected ? 'bg-[#fcfcfc]' : 'bg-[#71717a]'
+                                  isSelected ? 'bg-surface' : 'bg-muted'
                                 }
                               />
                             ) : null}
@@ -317,7 +317,7 @@ export function ContextHeader({
                 setTicketsOpen(false)
                 setVersionOpen((value) => !value)
               }}
-              className="flex h-9 cursor-pointer items-center gap-5 border border-[#dedee0] bg-white px-3 text-sm leading-5 text-foreground transition-colors hover:bg-[#f5f5f5]"
+              className="flex h-9 cursor-pointer items-center gap-5 border border-border bg-surface px-3 text-sm leading-5 text-foreground transition-colors hover:bg-surface-hover"
               style={{ borderRadius: 8 }}
             >
               План №{selectedPlan.version}
@@ -328,7 +328,7 @@ export function ContextHeader({
             </button>
             {versionOpen ? (
               <div
-                className="absolute top-[calc(100%+8px)] right-0 z-50 w-[193px] bg-white p-1 shadow-lg"
+                className="absolute top-[calc(100%+8px)] right-0 z-50 w-[193px] bg-surface p-1 shadow-lg"
                 style={{ borderRadius: 16 }}
               >
                 <div className="flex flex-col">
@@ -341,19 +341,19 @@ export function ContextHeader({
                         setVersionOpen(false)
                       }}
                       className={cn(
-                        'flex w-full cursor-pointer flex-col items-start rounded-lg px-3 py-2 text-left transition-colors hover:bg-[#f5f5f5]',
-                        item.id === selectedPlan.id && 'bg-[#f5f5f5]',
+                        'flex w-full cursor-pointer flex-col items-start rounded-lg px-3 py-2 text-left transition-colors hover:bg-surface-hover',
+                        item.id === selectedPlan.id && 'bg-surface-hover',
                       )}
                     >
                       <span className="text-sm font-medium leading-5 text-foreground">
                         План №{item.version}
                       </span>
-                      <span className="text-xs leading-5 text-[#71717a]">
+                      <span className="text-xs leading-5 text-muted">
                         {formatPlanStamp(item.createdAt)}
                       </span>
                     </button>
                   ))}
-                  <div className="mx-2 my-1 h-px bg-[#e4e4e7]" />
+                  <div className="mx-2 my-1 h-px bg-separator" />
                   <button
                     type="button"
                     disabled={isRecalculating || !onRecalculate}
@@ -361,7 +361,7 @@ export function ContextHeader({
                       setVersionOpen(false)
                       onRecalculate?.()
                     }}
-                    className="flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium text-foreground transition-colors hover:bg-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <RiAddCircleLine size={16} className="shrink-0" />
                     {isRecalculating ? 'Считаем план' : 'Новый план'}
@@ -374,18 +374,18 @@ export function ContextHeader({
 
         <div className="relative">
           <div
-            className="flex h-9 items-stretch overflow-hidden bg-[#0485f7]"
+            className="flex h-9 items-stretch overflow-hidden bg-accent"
             style={{ borderRadius: 8 }}
           >
             <button
               type="button"
               disabled={isUploadDisabled}
               onClick={onUploadClick}
-              className="inline-flex cursor-pointer items-center bg-[#0485f7] px-4 text-sm leading-5 font-medium text-[#fcfcfc] transition-colors hover:bg-[#0374d9] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[#0485f7]"
+              className="inline-flex cursor-pointer items-center bg-accent px-4 text-sm leading-5 font-medium text-accent-foreground transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-accent"
             >
               Заявки
             </button>
-            <span className="my-2 w-px shrink-0 bg-[#fcfcfc]/40" aria-hidden />
+            <span className="my-2 w-px shrink-0 bg-surface/40" aria-hidden />
             <button
               type="button"
               aria-label="Действия с заявками"
@@ -397,8 +397,8 @@ export function ContextHeader({
                 setTicketsOpen((value) => !value)
               }}
               className={cn(
-                'inline-flex w-9 cursor-pointer items-center justify-center text-[#fcfcfc] transition-colors hover:bg-[#0374d9]',
-                ticketsOpen ? 'bg-[#3592f9]' : 'bg-[#0485f7]',
+                'inline-flex w-9 cursor-pointer items-center justify-center text-accent-foreground transition-colors hover:bg-accent-hover',
+                ticketsOpen ? 'bg-accent-hover' : 'bg-accent',
               )}
             >
               <RiArrowDownSLine
@@ -412,7 +412,7 @@ export function ContextHeader({
           </div>
           {ticketsOpen ? (
             <div
-              className="absolute top-[calc(100%+8px)] right-0 z-50 w-[193px] bg-white p-1 shadow-lg"
+              className="absolute top-[calc(100%+8px)] right-0 z-50 w-[193px] bg-surface p-1 shadow-lg"
               style={{ borderRadius: 16 }}
             >
               {[
@@ -423,7 +423,7 @@ export function ContextHeader({
                 { label: 'Экспорт json', icon: RiDownloadFill, disabled: !onExport, run: () => onExport?.('json') },
               ].map((item, index) =>
                 item == null ? (
-                  <div key={index} className="mx-2 my-1 h-px bg-[#e4e4e7]" />
+                  <div key={index} className="mx-2 my-1 h-px bg-separator" />
                 ) : (
                   <button
                     key={item.label}
@@ -433,9 +433,9 @@ export function ContextHeader({
                       setTicketsOpen(false)
                       item.run?.()
                     }}
-                    className="flex h-9 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-left text-sm font-medium text-[#18181b] transition-colors hover:bg-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                    className="flex h-9 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-left text-sm font-medium text-foreground transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
                   >
-                    <item.icon size={16} className="shrink-0 text-[#71717a]" />
+                    <item.icon size={16} className="shrink-0 text-muted" />
                     {item.label}
                   </button>
                 ),
