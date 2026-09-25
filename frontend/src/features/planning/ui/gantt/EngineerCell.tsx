@@ -13,14 +13,14 @@ function LoadRing({ value }: { value: number }) {
     <span className="flex shrink-0 items-center gap-1">
       <span className="text-xs leading-4 font-semibold text-foreground">{value}%</span>
       <svg width={16} height={16} viewBox="0 0 16 16" aria-hidden className="-rotate-90">
-        <circle cx={8} cy={8} r={radius} fill="none" stroke="#e2e8f0" strokeWidth={3} />
+        <circle cx={8} cy={8} r={radius} fill="none" stroke="var(--surface-tertiary)" strokeWidth={3} />
         {value > 0 ? (
           <circle
             cx={8}
             cy={8}
             r={radius}
             fill="none"
-            stroke="#1e293b"
+            stroke="var(--foreground)"
             strokeWidth={3}
             strokeDasharray={`${(Math.min(100, value) / 100) * length} ${length}`}
           />
@@ -95,7 +95,7 @@ export function EngineerCell({
       <Summary engineer={engineer} />
       {hovered ? (
         <div
-          className="pointer-events-none absolute top-0 left-0 z-10 flex h-[60px] items-center gap-3 border-2 border-[#cbd5e1] bg-surface-hover px-3 py-2 shadow-[0_8px_16px_rgb(15_23_42/0.08)]"
+          className="pointer-events-none absolute top-0 left-0 z-10 flex h-[60px] items-center gap-3 border-2 border-border bg-surface-hover px-3 py-2 shadow-[0_8px_16px_rgb(15_23_42/0.08)]"
           style={{ borderRadius: 12 }}
         >
           <Summary engineer={engineer} badgeClassName="bg-surface-hover" />

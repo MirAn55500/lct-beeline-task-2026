@@ -197,7 +197,7 @@ function EngineerRow({
         GRID,
         'h-14 cursor-pointer border-b border-separator outline-none transition-colors duration-700 focus-visible:bg-surface-hover',
         active && 'bg-surface-hover',
-        highlighted && !active && 'bg-[#34c759]/[0.08]',
+        highlighted && !active && 'bg-success-soft',
         !active && !highlighted && 'hover:bg-surface-hover',
       )}
     >

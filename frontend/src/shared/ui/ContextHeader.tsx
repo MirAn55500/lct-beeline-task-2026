@@ -248,16 +248,16 @@ export function ContextHeader({
                 <Calendar.Header className="px-0 pb-2 pt-4">
                   <Calendar.YearPickerTrigger className="gap-1">
                     <Calendar.YearPickerTriggerHeading className="text-sm font-medium text-foreground" />
-                    <Calendar.YearPickerTriggerIndicator className="text-[#1d63ae]" />
+                    <Calendar.YearPickerTriggerIndicator className="text-link" />
                   </Calendar.YearPickerTrigger>
                   <Calendar.NavButton
                     slot="previous"
-                    className="size-6 text-[#1d63ae] hover:bg-surface-hover"
+                    className="size-6 text-link hover:bg-surface-hover"
                     style={{ borderRadius: 6 }}
                   />
                   <Calendar.NavButton
                     slot="next"
-                    className="size-6 text-[#1d63ae] hover:bg-surface-hover"
+                    className="size-6 text-link hover:bg-surface-hover"
                     style={{ borderRadius: 6 }}
                   />
                 </Calendar.Header>
