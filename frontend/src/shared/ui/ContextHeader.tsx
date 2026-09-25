@@ -398,7 +398,7 @@ export function ContextHeader({
               }}
               className={cn(
                 'inline-flex w-9 cursor-pointer items-center justify-center text-accent-foreground transition-colors hover:bg-accent-hover',
-                ticketsOpen ? 'bg-[#3592f9]' : 'bg-accent',
+                ticketsOpen ? 'bg-accent-hover' : 'bg-accent',
               )}
             >
               <RiArrowDownSLine
