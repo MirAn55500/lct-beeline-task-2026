@@ -6,6 +6,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from core.exceptions import AppError
 from modules.algorithm.service import AlgorithmService
+from modules.planning import background
 from modules.planning import board as boards
 from modules.planning import transit
 from modules.planning.models.plan import Plan
@@ -78,6 +79,7 @@ class PlanningService:
     async def get_day_overview(
         self, region_id: int, day: date, plan_id: int | None = None
     ) -> DayOverviewResponse:
+        planning, planning_error = background.status(region_id, day)
         tickets_total = await self._repo.count_requests(region_id, day)
         engineers_total = await self._repo.count_engineers(region_id)
         planned_dates = await self._repo.list_planned_dates(region_id)
@@ -107,6 +109,8 @@ class PlanningService:
                 engineers=EngineersCounter(engaged=None, total=engineers_total),
                 planned_dates=planned_dates,
                 plans=versions,
+                planning=planning,
+                planning_error=planning_error,
             )
 
         assigned = await self._repo.count_assigned_requests(plan.plan_id, region_id)
@@ -120,6 +124,8 @@ class PlanningService:
             engineers=EngineersCounter(engaged=engaged, total=engineers_total),
             planned_dates=planned_dates,
             plans=versions,
+            planning=planning,
+            planning_error=planning_error,
         )
 
     async def _scenario(self, region_id: int, day: date):

@@ -26,6 +26,16 @@ export const planningApi = baseApi.injectEndpoints({
         },
       }),
       providesTags: ['Plan'],
+      // Фоновый расчёт после загрузки закончился — обновить план, карту, Гант и заявки
+      async onQueryStarted(_args, { dispatch, getCacheEntry, queryFulfilled }) {
+        const wasPlanning = getCacheEntry().data?.planning ?? false
+        try {
+          const { data } = await queryFulfilled
+          if (wasPlanning && !data.planning) dispatch(planningApi.util.invalidateTags(['Plan', 'Ticket']))
+        } catch {
+          // ошибку запроса покажет сам компонент
+        }
+      },
     }),
     recalculatePlan: build.mutation<
       RecalculateResult,

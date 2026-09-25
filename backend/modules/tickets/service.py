@@ -13,7 +13,7 @@ from modules.catalogs.seed_values import reason_code, reason_hint, reason_label
 from modules.geocoding.anchors import district_anchors
 from modules.geocoding.geocoder import DISTRICT, SETTLED, AddressGeocoder
 from modules.planning.models.assignment import Assignment
-from modules.planning.service import PlanningService
+from modules.planning import background
 from modules.tickets.importer import ParsedTicket, parse_upload
 from modules.tickets.models.request import Request
 from modules.tickets.repository import TicketsRepository
@@ -237,26 +237,15 @@ class TicketsService:
 
         counts = Counter(ticket.window_start.date() for ticket in tickets)
         primary = counts.most_common(1)[0][0] if counts else None
-        plan_id = None
-        plan_version = None
-        if counts:
-            planner = PlanningService(self._session)
-            for ticket_day in sorted(counts):
-                try:
-                    planned = await planner.recalculate(region_id, ticket_day)
-                except AppError:
-                    continue
-                if ticket_day == primary:
-                    plan_id = planned.plan_id
-                    plan_version = planned.version
+        # План считается в фоне: с сотней новых адресов это минуты, см. planning.background
+        background.schedule(region_id, sorted(counts))
 
         return UploadTicketsResult(
             created=created,
             updated=updated,
             skipped=skipped,
             date=primary,
-            plan_id=plan_id,
-            plan_version=plan_version,
+            planning=bool(counts),
         )
 
     async def _geocode(self, region_id: int, tickets: list[ParsedTicket]) -> list[ParsedTicket]:

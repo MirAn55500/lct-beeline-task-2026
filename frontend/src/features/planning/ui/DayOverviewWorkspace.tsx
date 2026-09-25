@@ -1,4 +1,6 @@
+import { useEffect, useRef } from 'react'
 import { Link } from 'react-router'
+import { toast } from '@heroui/react'
 import { RiArrowRightUpLine } from '@remixicon/react'
 
 import beesPromo from '@/shared/assets/day-overview-bees-promo.png'
@@ -9,7 +11,7 @@ import { routes } from '@/shared/config/routes'
 import { cn } from '@/shared/lib/cn'
 import { AppPanel } from '@/shared/ui'
 
-import { useGetDayOverviewQuery } from '../api'
+import { useDayOverview } from '../lib/useDayOverview'
 import { DayPlanPreview, type PlanRow } from './DayPlanPreview'
 
 function PanelHeading({
@@ -95,11 +97,22 @@ export function DayOverviewWorkspace({
   isUploading = false,
   onFiles,
 }: DayOverviewWorkspaceProps) {
-  const { data: overview, isFetching: overviewLoading } = useGetDayOverviewQuery(
+  const { data: overview, isFetching: overviewLoading } = useDayOverview(
     { regionId: regionId ?? 0, date, planId },
     { skip: regionId == null || date === '' },
   )
   const hasTickets = (overview?.tickets.total ?? 0) > 0
+  const planning = overview?.planning ?? false
+  const planningError = overview?.planning_error ?? null
+  // Фоновый расчёт после загрузки закончился — тост, как у пересчёта
+  const wasPlanning = useRef(false)
+  useEffect(() => {
+    if (wasPlanning.current && !planning) {
+      if (planningError) toast.danger('План работ не составлен', { description: planningError })
+      else toast.success('План работ составлен')
+    }
+    wasPlanning.current = planning
+  }, [planning, planningError])
   const { data: chartTickets = [] } = useGetTicketsQuery(
     { regionId: regionId ?? 0, date, planId },
     { skip: !hasTickets || regionId == null },
@@ -121,9 +134,21 @@ export function DayOverviewWorkspace({
       <AppPanel className="flex h-24 shrink-0 items-center gap-12 px-5">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <h2 className="text-xl font-semibold leading-7 text-foreground">
-            {hasTickets ? 'План работ составлен' : 'Создайте план работ'}
+            {planning
+              ? 'Составляем план работ'
+              : planningError
+                ? 'План работ не составлен'
+                : hasTickets
+                  ? 'План работ составлен'
+                  : 'Создайте план работ'}
           </h2>
-          {hasTickets ? (
+          {planning ? (
+            <p className="truncate text-sm leading-6 text-muted">
+              Заявки загружены, распределяем их по инженерам — с новыми адресами это пара минут
+            </p>
+          ) : planningError ? (
+            <p className="truncate text-sm leading-6 text-muted">{planningError}</p>
+          ) : hasTickets ? (
             <p className="flex min-w-0 items-center text-sm leading-6 text-muted">
               <span className="truncate">Расписание и маршруты инженеров доступны в</span>
               <Link

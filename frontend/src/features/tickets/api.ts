@@ -37,8 +37,8 @@ export type UploadTicketsResult = {
   updated: number
   skipped: number
   date: string | null
-  plan_id: number | null
-  plan_version: number | null
+  /** План на даты из файла считается в фоне — готовность в `planning` обзора дня. */
+  planning: boolean
 }
 
 export const ticketsApi = baseApi.injectEndpoints({

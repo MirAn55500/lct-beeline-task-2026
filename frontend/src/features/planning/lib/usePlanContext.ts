@@ -6,7 +6,7 @@ import { toast } from '@heroui/react'
 
 import { useGetRegionsQuery } from '@/features/catalogs'
 
-import { useGetDayOverviewQuery, useRecalculatePlanMutation } from '../api'
+import { useRecalculatePlanMutation } from '../api'
 import {
   MOCK_MAP_DATE,
   MOCK_MAP_PLANNED_DATES,
@@ -16,6 +16,7 @@ import {
 } from '../mocks'
 import type { PlanDistribution, PlanRebuildLevel } from '../types'
 import { isOfflineError } from './offline'
+import { useDayOverview } from './useDayOverview'
 
 // Без backend версии плана «пересчитываются» на моках — общие для Ганта и карты до перезагрузки страницы.
 let mockPlans: MapPlan[] = MOCK_MAP_PLANS
@@ -63,7 +64,7 @@ export function usePlanContext() {
   // Без даты в адресе — сегодня, как на «Обзоре дня»; на моках — день из выгрузки.
   const date = readDate(params.get('date'), offline ? parseDate(MOCK_MAP_DATE) : today(getLocalTimeZone()))
 
-  const overviewQuery = useGetDayOverviewQuery(
+  const overviewQuery = useDayOverview(
     !offline && regionId != null ? { regionId, date: date.toString() } : skipToken,
   )
   // Версии — только этого дня; дни с планом в календаре можно показывать и от прошлого ответа.

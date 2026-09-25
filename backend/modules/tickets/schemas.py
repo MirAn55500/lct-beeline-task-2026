@@ -14,8 +14,8 @@ class UploadTicketsResult(BaseModel):
     updated: int
     skipped: int
     date: date_type | None = None
-    plan_id: int | None = None
-    plan_version: int | None = None
+    planning: bool = False
+    """План на даты из файла поставлен в расчёт; готовность — `planning` в обзоре дня."""
 
 
 class TicketAssignmentFilter(StrEnum):

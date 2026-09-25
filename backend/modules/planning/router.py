@@ -3,6 +3,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
+from core.exceptions import ConflictError
+from modules.planning import background
 from modules.planning.dependencies import get_planning_service
 from modules.planning.schemas import (
     DayOverviewResponse,
@@ -56,6 +58,9 @@ async def recalculate(
     `distribution` — алгоритм (even = baseline, efficient = optimized).
     Пример: `POST /api/planning/recalculate?region_id=1&date=2026-10-10&remake_level=free&distribution=efficient`
     """
+    if background.status(region_id, date)[0]:
+        # Иначе два расчёта одного дня разом: лишняя нагрузка и две версии с одним номером
+        raise ConflictError("План уже считается после загрузки заявок — дождитесь окончания")
     return await service.recalculate(
         region_id,
         date,

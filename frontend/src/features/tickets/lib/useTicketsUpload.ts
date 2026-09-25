@@ -40,7 +40,9 @@ export function useTicketsUpload(onUploaded?: (result: UploadTicketsResult) => v
     try {
       const result = await uploadTickets(body).unwrap()
       toast.success('Загрузка заявок завершена', {
-        description: `Добавлено ${result.created} ${pluralRu(result.created, ['заявка', 'заявки', 'заявок'])}, обновлено: ${result.updated}`,
+        description:
+          `Добавлено ${result.created} ${pluralRu(result.created, ['заявка', 'заявки', 'заявок'])}, обновлено: ${result.updated}` +
+          (result.planning ? '. План работ составляется' : ''),
       })
       onUploaded?.(result)
       return true

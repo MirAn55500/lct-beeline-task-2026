@@ -37,4 +37,8 @@ export type DayOverview = {
   }
   planned_dates: string[]
   plans: PlanVersion[]
+  /** План этого дня считается в фоне после загрузки заявок. */
+  planning?: boolean
+  /** Почему последний фоновый расчёт не удался. */
+  planning_error?: string | null
 }

@@ -55,6 +55,10 @@ class DayOverviewResponse(BaseModel):
     engineers: EngineersCounter
     planned_dates: list[date] = Field(default_factory=list)
     plans: list[PlanVersionResponse] = Field(default_factory=list)
+    planning: bool = False
+    """План на этот день считается в фоне после загрузки заявок."""
+    planning_error: str | None = None
+    """Почему последний фоновый расчёт не удался."""
 
 
 # --- План дня для карты и Ганта: та же форма, что у выгрузки планировщика в моках
