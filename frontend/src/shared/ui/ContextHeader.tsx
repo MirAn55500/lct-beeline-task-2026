@@ -32,7 +32,7 @@ function ContextSelect({
         onClick={onToggle}
         className={cn(
           'flex cursor-pointer items-center gap-1 text-left text-xl font-semibold leading-7 transition-colors hover:opacity-80',
-          muted || open ? 'text-muted' : 'text-foreground',
+          muted ? 'text-muted' : 'text-foreground',
         )}
       >
         <span>{label}</span>

@@ -6,8 +6,8 @@
     --border-radius-button-lg: 12px;
     --border-radius-panel: 16px;
 
-    /* HeroUI's native base radius drives the remaining component scale. */
-    --radius: var(--border-radius);
+    /* Controls use the compact radius scale; panels keep their own 16px token. */
+    --radius: var(--border-radius-button-md);
   }
 }
 
@@ -29,5 +29,9 @@
 
   .button--lg {
     --border-radius-button: var(--border-radius-button-lg);
+  }
+
+  .switch {
+    --switch-control-bg: var(--surface-tertiary);
   }
 }
