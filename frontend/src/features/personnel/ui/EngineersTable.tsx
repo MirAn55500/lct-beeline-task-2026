@@ -195,10 +195,10 @@ function EngineerRow({
       }}
       className={cn(
         GRID,
-        'h-14 cursor-pointer border-b border-separator transition-colors duration-700',
+        'h-14 cursor-pointer border-b border-separator outline-none transition-colors duration-700 focus-visible:bg-surface-hover',
         active && 'bg-surface-hover',
         highlighted && !active && 'bg-[#34c759]/[0.08]',
-        !active && !highlighted && 'hover:bg-surface-tertiary',
+        !active && !highlighted && 'hover:bg-surface-hover',
       )}
     >
       <div className="flex min-w-0 items-center gap-3">
@@ -382,7 +382,7 @@ export function EngineersTable({
         </span>
       </div>
 
-      <div className={cn(GRID, 'mt-4 h-10 shrink-0 bg-surface-hover')}>
+      <div className={cn(GRID, 'mt-4 h-10 shrink-0 bg-default/50')}>
         <div className="flex min-w-0 items-center gap-3">
           <RowCheckbox
             label="Выбрать всех"
