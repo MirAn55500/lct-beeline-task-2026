@@ -140,7 +140,7 @@ export function PlanMapBoard({ board }: PlanMapBoardProps) {
         <div
           className={cn(
             'rounded-[var(--border-radius-panel)] ring-2 ring-transparent transition-shadow duration-300',
-            hint && 'ring-[#0485f7]',
+            hint && 'ring-focus',
           )}
         >
           <UnassignedTicketsPanel

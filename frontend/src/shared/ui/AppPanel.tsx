@@ -9,7 +9,7 @@ export const AppPanel = forwardRef<HTMLDivElement, AppPanelProps>(
     return (
       <div
         ref={ref}
-        className={cn('rounded-[var(--border-radius-panel)] bg-white', className)}
+        className={cn('rounded-[var(--border-radius-panel)] bg-surface', className)}
         {...props}
       />
     )

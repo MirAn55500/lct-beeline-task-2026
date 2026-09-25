@@ -17,7 +17,7 @@ export function WorkAreaMapLayout({
   children,
 }: WorkAreaMapLayoutProps) {
   return (
-    <div className="flex h-svh gap-4 bg-[#f5f5f5] p-4">
+    <div className="flex h-svh gap-4 bg-background p-4">
       <aside className={cn('flex shrink-0 flex-col gap-4', ASIDE_WIDTH_CLASS)}>
         <BrandBar className="w-full" showMenu />
         {sidebar ?? <AppPanel className="min-h-0 flex-1" />}

@@ -80,17 +80,17 @@ export function GanttTimeline({
       >
         <div className="relative flex min-h-full flex-col" style={{ width: column + width }}>
           {/* Шкала часов прилипает сверху, угол с «План работ» — ещё и слева. */}
-          <div className="sticky top-0 z-40 flex shrink-0 bg-white" style={{ height: GANTT_HEADER }}>
+          <div className="sticky top-0 z-40 flex shrink-0 bg-surface" style={{ height: GANTT_HEADER }}>
             <div
-              className="sticky left-0 z-10 flex shrink-0 items-center border-r-[3px] border-b border-[#e4e4e7] bg-white px-1.5"
+              className="sticky left-0 z-10 flex shrink-0 items-center border-r-[3px] border-b border-separator bg-surface px-1.5"
               style={{ width: column }}
             >
               <Link
                 to={routes.overview}
-                className="flex h-9 flex-1 items-center gap-1.5 px-1.5 text-sm leading-6 font-medium text-[#18181b] transition-colors hover:bg-[#f5f5f5]"
+                className="flex h-9 flex-1 items-center gap-1.5 px-1.5 text-sm leading-6 font-medium text-foreground transition-colors hover:bg-surface-hover"
                 style={{ borderRadius: 8 }}
               >
-                <RiArrowLeftSLine size={16} className="shrink-0 text-[#71717a]" />
+                <RiArrowLeftSLine size={16} className="shrink-0 text-muted" />
                 План работ
               </Link>
             </div>
@@ -98,7 +98,7 @@ export function GanttTimeline({
               {hours.map((hour) => (
                 <div
                   key={hour}
-                  className="flex shrink-0 items-center justify-center border-r border-b border-[#e4e4e7] text-xs leading-4 font-medium text-black"
+                  className="flex shrink-0 items-center justify-center border-r border-b border-separator text-xs leading-4 font-medium text-foreground"
                   style={{ width: GANTT_HOUR }}
                 >
                   {hour}:00
@@ -123,7 +123,7 @@ export function GanttTimeline({
 
           <div className="flex flex-1">
             <div
-              className="sticky left-0 z-30 shrink-0 border-r-[3px] border-[#e4e4e7] bg-white"
+              className="sticky left-0 z-30 shrink-0 border-r-[3px] border-separator bg-surface"
               style={{ width: column }}
             >
               {engineers.map((engineer) => (
@@ -145,10 +145,11 @@ export function GanttTimeline({
                 return (
                   <div
                     key={engineer.id}
-                    className="relative border-b border-[#e4e4e7]"
+                    className="relative border-b border-separator"
                     style={{
                       height: GANTT_ROW,
-                      backgroundImage: 'linear-gradient(to right, transparent calc(100% - 1px), #e4e4e7 0)',
+                      backgroundImage:
+                        'linear-gradient(to right, transparent calc(100% - 1px), var(--separator) 0)',
                       backgroundSize: `${GANTT_HOUR}px 100%`,
                     }}
                   >
@@ -179,7 +180,7 @@ export function GanttTimeline({
                           'pointer-events-none absolute top-0 h-full',
                           target.tone === 'target'
                             ? 'border border-[#8b5cf6] bg-[#ede9fe]'
-                            : 'border-2 border-[#ff383c] bg-[#ff383c]/15',
+                            : 'border-2 border-danger bg-danger-soft',
                         )}
                         style={{
                           left: x(target.fromHour * 60),

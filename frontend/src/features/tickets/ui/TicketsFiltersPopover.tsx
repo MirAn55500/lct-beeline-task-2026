@@ -105,14 +105,14 @@ function FilterTimeField({
       className="min-w-0 flex-1"
     >
       <TimeField.Group
-        className="flex h-9 w-full items-center border border-[#dedee0] bg-white shadow-none"
+        className="flex h-9 w-full items-center border border-border bg-surface shadow-none"
         style={{ borderRadius: 8, paddingLeft: 12, paddingRight: 12 }}
       >
-        <TimeField.Input className="min-w-0 flex-1 text-sm leading-5 text-[#18181b]">
+        <TimeField.Input className="min-w-0 flex-1 text-sm leading-5 text-foreground">
           {(segment) => <TimeField.Segment segment={segment} />}
         </TimeField.Input>
         <TimeField.Suffix className="ms-2">
-          <RiTimeLine size={16} className="text-[#71717a]" />
+          <RiTimeLine size={16} className="text-muted" />
         </TimeField.Suffix>
       </TimeField.Group>
     </TimeField>
@@ -142,13 +142,13 @@ export function TicketsFiltersPopover({
       <Popover.Trigger
         aria-label={filtersActive ? 'Фильтры, есть выбранные' : 'Фильтры'}
         className={cn(
-          'inline-flex h-9 shrink-0 cursor-pointer items-center gap-2 border border-[#dedee0] text-sm font-medium leading-5 text-[#18181b] transition-colors outline-none',
-          open ? 'bg-[#ebebec]' : 'bg-white hover:bg-[#f5f5f5]',
+          'inline-flex h-9 shrink-0 cursor-pointer items-center gap-2 border border-border text-sm font-medium leading-5 text-foreground transition-colors outline-none',
+          open ? 'bg-surface-tertiary' : 'bg-surface hover:bg-surface-hover',
         )}
         style={{ borderRadius: 8, padding: '8px 16px' }}
       >
         <span className="relative inline-flex size-4 shrink-0">
-          <RiEqualizer2Line size={16} className="text-[#18181b]" />
+          <RiEqualizer2Line size={16} className="text-foreground" />
           {filtersActive ? (
             <span
               aria-hidden
@@ -159,8 +159,8 @@ export function TicketsFiltersPopover({
                 width: 4,
                 height: 4,
                 borderRadius: 999,
-                backgroundColor: '#ef2c56',
-                boxShadow: '0 0 0 1px #ffffff',
+                backgroundColor: 'var(--danger)',
+                boxShadow: '0 0 0 1px var(--surface)',
               }}
             />
           ) : null}
@@ -171,7 +171,7 @@ export function TicketsFiltersPopover({
       <Popover.Content
         placement="bottom end"
         offset={8}
-        className="w-[369px] border-0 bg-white p-0 text-[#18181b] outline-none"
+        className="w-[369px] border-0 bg-surface p-0 text-foreground outline-none"
         style={{
           borderRadius: 16,
           boxShadow:
@@ -183,12 +183,12 @@ export function TicketsFiltersPopover({
             className="flex flex-col"
             style={{ padding: '12px 20px 20px' }}
           >
-            <Popover.Heading className="text-base font-semibold leading-6 text-[#18181b]">
+            <Popover.Heading className="text-base font-semibold leading-6 text-foreground">
               Фильтрация
             </Popover.Heading>
 
             <p
-              className="text-sm leading-6 text-[#71717a]"
+              className="text-sm leading-6 text-muted"
               style={{ marginTop: 4 }}
             >
               Найдите заявки в рабочем плане
@@ -197,7 +197,7 @@ export function TicketsFiltersPopover({
             <div className="flex flex-col" style={{ marginTop: 16, gap: 16 }}>
               <Switch
                 className="w-full gap-0"
-                style={{ ['--switch-control-bg-checked' as string]: '#0485f7' }}
+                style={{ ['--switch-control-bg-checked' as string]: 'var(--accent)' }}
                 isSelected={draft.assignment === 'unassigned'}
                 onChange={(isSelected) =>
                   setDraft((prev) => ({
@@ -207,16 +207,16 @@ export function TicketsFiltersPopover({
                 }
               >
                 <Switch.Content className="flex h-6 w-full items-center justify-between">
-                  <span className="text-sm font-medium leading-6 text-[#18181b]">
+                  <span className="text-sm font-medium leading-6 text-foreground">
                     Только нераспределенные
                   </span>
                   <Switch.Control>
-                    <Switch.Thumb style={{ backgroundColor: '#ffffff' }} />
+                    <Switch.Thumb style={{ backgroundColor: 'var(--accent-foreground)' }} />
                   </Switch.Control>
                 </Switch.Content>
               </Switch>
 
-              <div className="h-px w-full bg-[#dedee0]" />
+              <div className="h-px w-full bg-border" />
 
               <MultiSelectField
                 label="Вид работы"
@@ -239,7 +239,7 @@ export function TicketsFiltersPopover({
               />
 
               <div className="flex flex-col" style={{ gap: 4 }}>
-                <span className="text-sm font-medium leading-6 text-[#18181b]">
+                <span className="text-sm font-medium leading-6 text-foreground">
                   Рабочий день
                 </span>
                 <div className="flex items-center" style={{ gap: 0 }}>
@@ -254,7 +254,7 @@ export function TicketsFiltersPopover({
                     }
                   />
                   <span
-                    className="shrink-0 text-sm leading-5 text-[#71717a]"
+                    className="shrink-0 text-sm leading-5 text-muted"
                     style={{ width: 12, textAlign: 'center' }}
                   >
                     -
@@ -276,7 +276,7 @@ export function TicketsFiltersPopover({
             <div className="flex" style={{ marginTop: 16, gap: 12 }}>
               <button
                 type="button"
-                className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center border border-[#dedee0] bg-white text-sm font-medium leading-5 text-[#18181b] transition-colors hover:bg-[#f5f5f5]"
+                className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center border border-border bg-surface text-sm font-medium leading-5 text-foreground transition-colors hover:bg-surface-hover"
                 style={{ borderRadius: 8, padding: '8px 16px' }}
                 onClick={() => setDraft(EMPTY_TICKETS_FILTERS)}
               >
@@ -284,7 +284,7 @@ export function TicketsFiltersPopover({
               </button>
               <button
                 type="button"
-                className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center bg-[#0485f7] text-sm font-medium leading-5 text-[#fcfcfc] transition-colors hover:bg-[#0374d9]"
+                className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center bg-accent text-sm font-medium leading-5 text-accent-foreground transition-colors hover:bg-accent-hover"
                 style={{ borderRadius: 8, padding: '8px 16px' }}
                 onClick={() => {
                   onChange(draft)

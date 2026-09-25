@@ -37,7 +37,7 @@ function DropzoneSurface({
   return (
     <div
       className={cn(
-        'flex min-h-0 w-full flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-[#dedee0] bg-[#f5f5f5] px-5 py-5 text-center',
+        'flex min-h-0 w-full flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-border bg-surface-hover px-5 py-5 text-center',
         className,
       )}
     >
@@ -57,15 +57,15 @@ function UploadingState() {
           className="size-9"
         >
           <ProgressCircle.Track>
-            <ProgressCircle.TrackCircle className="stroke-[#ebebec]" />
-            <ProgressCircle.FillCircle className="stroke-[#0485f7]" />
+            <ProgressCircle.TrackCircle className="stroke-surface-tertiary" />
+            <ProgressCircle.FillCircle className="stroke-accent" />
           </ProgressCircle.Track>
         </ProgressCircle>
         <div className="flex flex-col items-center">
           <p className="text-base font-medium leading-7 text-foreground">
             Загружаем заявки
           </p>
-          <p className="text-xs leading-5 text-[#71717a]">
+          <p className="text-xs leading-5 text-muted">
             Это не займет больше 5 секунд
           </p>
         </div>
@@ -112,9 +112,9 @@ export function TicketsDropzone({
             await handleFiles(files)
           }}
           className={cn(
-            'flex min-h-0 w-full flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-[#dedee0] bg-[#f5f5f5] px-5 py-5 text-center outline-none transition-colors',
-            'data-[drop-target]:border-[#0485f7] data-[drop-target]:bg-[#0485f7]/[0.06]',
-            'data-[focus-visible]:outline data-[focus-visible]:outline-2 data-[focus-visible]:-outline-offset-1 data-[focus-visible]:outline-[#0485f7]',
+            'flex min-h-0 w-full flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-border bg-surface-hover px-5 py-5 text-center outline-none transition-colors',
+            'data-[drop-target]:border-focus data-[drop-target]:bg-accent/[0.06]',
+            'data-[focus-visible]:outline data-[focus-visible]:outline-2 data-[focus-visible]:-outline-offset-1 data-[focus-visible]:outline-focus',
           )}
         >
           <FileTrigger
@@ -127,7 +127,7 @@ export function TicketsDropzone({
             <Button className="flex cursor-pointer flex-col items-center gap-2 bg-transparent outline-none">
               <RiUploadCloud2Line
                 size={24}
-                className="shrink-0 text-[#71717a]"
+                className="shrink-0 text-muted"
               />
               <div className="flex max-w-[435px] flex-col items-center">
                 <Text
@@ -136,7 +136,7 @@ export function TicketsDropzone({
                 >
                   Загрузите заявки
                 </Text>
-                <span className="text-xs leading-5 text-[#71717a]">
+                <span className="text-xs leading-5 text-muted">
                   Нажмите на это поле или перетащите
                   <br />в него json или csv файл
                 </span>

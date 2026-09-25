@@ -26,11 +26,11 @@ function NavItemLink({
     <NavLink
       to={to}
       className={cn(
-        'flex h-9 cursor-pointer items-center gap-3 rounded-lg px-3 text-sm font-medium text-foreground transition-colors hover:bg-[#f5f5f5]',
-        active && 'bg-[#f5f5f5]',
+        'flex h-9 cursor-pointer items-center gap-3 rounded-lg px-3 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover',
+        active && 'bg-surface-hover',
       )}
     >
-      <Icon size={16} className="shrink-0 text-[#71717a]" />
+      <Icon size={16} className="shrink-0 text-muted" />
       <span>{item.label}</span>
     </NavLink>
   )

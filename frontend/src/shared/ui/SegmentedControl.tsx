@@ -41,14 +41,14 @@ export function SegmentedControl<T extends string>({
     <div
       role={renderOption ? undefined : 'tablist'}
       aria-label={ariaLabel}
-      className={cn('flex h-9 items-center gap-0.5 rounded-[8px] bg-[#ebebec] px-1.5 py-0.5', className)}
+      className={cn('flex h-9 items-center gap-0.5 rounded-[8px] bg-surface-tertiary px-1.5 py-0.5', className)}
     >
       {options.map((option, index) => {
         const active = option.id === value
         // Черта между двумя невыбранными сегментами; рядом с выбранным её не видно.
         const divider =
           index > 0 && index !== activeIndex && index - 1 !== activeIndex ? (
-            <span aria-hidden className="h-5 w-px shrink-0 bg-[#18181b]/[0.06]" />
+            <span aria-hidden className="h-5 w-px shrink-0 bg-separator" />
           ) : index > 0 ? (
             <span aria-hidden className="h-5 w-px shrink-0" />
           ) : null

@@ -23,15 +23,15 @@ function BrigadeCard({
       aria-pressed={selected}
       onClick={onSelect}
       className={cn(
-        'flex w-full cursor-pointer flex-col gap-1 border border-[#dedee0] text-left transition-colors',
-        selected ? 'bg-[#f5f5f5]' : 'bg-white hover:bg-[#fafafa]',
+        'flex w-full cursor-pointer flex-col gap-1 border border-border text-left transition-colors',
+        selected ? 'bg-surface-hover' : 'bg-surface hover:bg-surface-hover',
       )}
       style={{ borderRadius: 8, padding: '12px 16px' }}
     >
-      <span className="truncate text-base font-semibold leading-6 text-[#18181b]">
+      <span className="truncate text-base font-semibold leading-6 text-foreground">
         {brigade.name}
       </span>
-      <span className="flex shrink-0 items-center gap-1 text-sm font-medium leading-6 text-[#71717a]">
+      <span className="flex shrink-0 items-center gap-1 text-sm font-medium leading-6 text-muted">
         <RiUser3Line size={16} className="shrink-0" />
         {count} {pluralRu(count, ['человек', 'человека', 'человек'])}
       </span>
@@ -64,7 +64,7 @@ export function BrigadesPanel({
       >
         <div className="flex flex-col gap-3 px-3 py-3">
           {brigades.length === 0 ? (
-            <p className="px-2 py-3 text-sm leading-6 text-[#71717a]">
+            <p className="px-2 py-3 text-sm leading-6 text-muted">
               {isLoading ? 'Загружаем бригады…' : 'Бригад пока нет'}
             </p>
           ) : (

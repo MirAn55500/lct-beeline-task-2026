@@ -22,7 +22,7 @@ const METRO_LINES: [RegExp, string, string][] = [
   [/Таганско-Краснопресненская/i, '7', '#a855f7'],
   [/Калининская/i, '8', '#eab308'],
   [/Солнцевская/i, '8А', '#eab308'],
-  [/Серпуховско-Тимирязевская/i, '9', '#71717a'],
+  [/Серпуховско-Тимирязевская/i, '9', '#77849D'],
   [/Люблинско-Дмитровская/i, '10', '#84cc16'],
   [/Бутовская/i, '12', '#94a3b8'],
   [/Некрасовская/i, '15', '#ec4899'],
@@ -43,14 +43,14 @@ export function parseTransitStep(title: string): RouteStep {
   const metro = /^метро\s+(.+?)\s+от\s/i.exec(title)
   if (metro) {
     const line = METRO_LINES.find(([pattern]) => pattern.test(metro[1]!))
-    return { kind: 'metro', label: line?.[1] ?? 'М', color: line?.[2] ?? '#71717a', minutes }
+    return { kind: 'metro', label: line?.[1] ?? 'М', color: line?.[2] ?? 'var(--muted)', minutes }
   }
 
   const ride = /^(автобус|троллейбус|трамвай|электричка|МЦД|МЦК)\s+(\S+)/i.exec(title)
   const kind: RouteStep['kind'] =
     ride?.[1] === 'трамвай' ? 'tram' : ride?.[1] === 'электричка' ? 'train' : ride ? 'bus' : 'public'
   const label = ride?.[2]?.replace(/[«»]/g, '')
-  return { kind, label, color: RIDE_COLOR[kind] ?? '#71717a', minutes }
+  return { kind, label, color: RIDE_COLOR[kind] ?? 'var(--muted)', minutes }
 }
 
 const TRANSPORT_STEP: Record<MapTransport, RouteStep['kind']> = {

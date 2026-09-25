@@ -62,7 +62,7 @@ export function PlanRebuildDialog({ isOpen, onClose, onConfirm }: PlanRebuildDia
         <div className="flex flex-col gap-2">
           <FieldLabel>Уровень перестроения плана</FieldLabel>
           <SegmentedControl aria-label="Уровень перестроения плана" options={LEVELS} value={level} onChange={setLevel} />
-          <p className="text-xs leading-5 text-[#71717a]">{LEVELS.find((item) => item.id === level)?.hint}</p>
+          <p className="text-xs leading-5 text-muted">{LEVELS.find((item) => item.id === level)?.hint}</p>
         </div>
         <div className="flex flex-col gap-1">
           <FieldLabel>Распределение заявок</FieldLabel>
@@ -72,7 +72,7 @@ export function PlanRebuildDialog({ isOpen, onClose, onConfirm }: PlanRebuildDia
             value={distribution}
             onChange={setDistribution}
           />
-          <p className="text-xs leading-5 text-[#71717a]">
+          <p className="text-xs leading-5 text-muted">
             {DISTRIBUTIONS.find((item) => item.id === distribution)?.hint}
           </p>
         </div>

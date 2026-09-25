@@ -26,8 +26,8 @@ function Field({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-xs font-medium leading-5 text-[#71717a]">{label}</span>
-      <div className="text-sm leading-6 text-[#18181b]">{children}</div>
+      <span className="text-xs font-medium leading-5 text-muted">{label}</span>
+      <div className="text-sm leading-6 text-foreground">{children}</div>
     </div>
   )
 }
@@ -35,7 +35,7 @@ function Field({
 function Chip({ children }: { children: ReactNode }) {
   return (
     <span
-      className="inline-flex h-7 items-center bg-[#ebebec] px-2.5 text-sm font-medium leading-5 text-[#18181b]"
+      className="inline-flex h-7 items-center bg-surface-tertiary px-2.5 text-sm font-medium leading-5 text-foreground"
       style={{ borderRadius: 8 }}
     >
       {children}
@@ -65,14 +65,14 @@ export function EngineerCardPanel({
   return (
     <AppPanel className="flex min-h-0 w-[346px] shrink-0 flex-col">
       <div className="relative flex shrink-0 flex-col gap-1 px-5 pt-5 pr-12">
-        <h2 className="text-xl font-semibold leading-7 text-[#18181b]">
+        <h2 className="text-xl font-semibold leading-7 text-foreground">
           Карточка Инженера
         </h2>
         <button
           type="button"
           aria-label="Закрыть"
           onClick={onClose}
-          className="absolute top-4 right-4 flex size-8 cursor-pointer items-center justify-center text-[#71717a] transition-colors hover:bg-[#f5f5f5]"
+          className="absolute top-4 right-4 flex size-8 cursor-pointer items-center justify-center text-muted transition-colors hover:bg-surface-hover"
           style={{ borderRadius: 8 }}
         >
           <RiCloseLine size={16} />
@@ -82,17 +82,17 @@ export function EngineerCardPanel({
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-4">
         <div className="flex flex-col items-center gap-3 pt-1">
           <span
-            className="flex size-16 items-center justify-center bg-[#ebebec] text-lg font-semibold leading-7 text-[#18181b]"
+            className="flex size-16 items-center justify-center bg-surface-tertiary text-lg font-semibold leading-7 text-foreground"
             style={{ borderRadius: 999 }}
           >
             {getInitials(engineer.name)}
           </span>
           <div className="flex flex-col items-center gap-0.5 text-center">
-            <span className="text-base font-semibold leading-6 text-[#18181b]">
+            <span className="text-base font-semibold leading-6 text-foreground">
               {engineer.name}
             </span>
             {engineer.position ? (
-              <span className="text-sm leading-6 text-[#71717a]">
+              <span className="text-sm leading-6 text-muted">
                 {engineer.position}
               </span>
             ) : null}
@@ -104,7 +104,7 @@ export function EngineerCardPanel({
             <Chip>
               <span className="inline-flex items-center gap-1">
                 {TransportIcon ? (
-                  <TransportIcon size={14} className="shrink-0 text-[#71717a]" />
+                  <TransportIcon size={14} className="shrink-0 text-muted" />
                 ) : null}
                 {TRANSPORT_LABEL[engineer.transport] ?? engineer.transport}
               </span>
@@ -117,7 +117,7 @@ export function EngineerCardPanel({
             <div className="flex flex-col gap-0.5">
               <span>{engineer.position}</span>
               {engineer.qualificationHint ? (
-                <span className="text-xs leading-5 text-[#71717a]">
+                <span className="text-xs leading-5 text-muted">
                   {engineer.qualificationHint}
                 </span>
               ) : null}
@@ -147,7 +147,7 @@ export function EngineerCardPanel({
           <button
             type="button"
             onClick={onEdit}
-            className="inline-flex h-9 w-full cursor-pointer items-center justify-center bg-[#0485f7] text-sm font-medium leading-5 text-[#fcfcfc] transition-colors hover:bg-[#0374d9]"
+            className="inline-flex h-9 w-full cursor-pointer items-center justify-center bg-accent text-sm font-medium leading-5 text-accent-foreground transition-colors hover:bg-accent-hover"
             style={{ borderRadius: 8 }}
           >
             Редактировать

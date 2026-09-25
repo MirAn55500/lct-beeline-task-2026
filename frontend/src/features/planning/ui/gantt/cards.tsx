@@ -85,7 +85,7 @@ function StatusTag({ status }: { status: GanttStatus }) {
   const StatusIcon = style.icon
   return (
     <span
-      className="inline-flex h-5 shrink-0 items-center gap-1 px-1 text-xs leading-4 whitespace-nowrap text-[#18181b]"
+      className="inline-flex h-5 shrink-0 items-center gap-1 px-1 text-xs leading-4 whitespace-nowrap text-foreground"
       style={{ borderRadius: 4, background: style.tag }}
     >
       <StatusIcon size={12} className="shrink-0" style={{ color: style.iconColor }} />
@@ -98,7 +98,7 @@ function EquipmentLine({ ticket }: { ticket: Pick<GanttTask, 'needsRouter' | 'ne
   const label = equipmentLabel(ticket)
   if (!label) return null
   return (
-    <p className="flex h-4 min-w-0 items-center gap-1 px-1 text-xs leading-4 text-[#18181b]">
+    <p className="flex h-4 min-w-0 items-center gap-1 px-1 text-xs leading-4 text-foreground">
       <RiRouterFill size={12} className="shrink-0" />
       <span className="truncate">{label}</span>
     </p>
@@ -137,7 +137,7 @@ export function GanttRoadPart({ task, transport, width, full = false, className 
       aria-label={label}
       title={label}
       className={cn(
-        'flex min-h-[52px] shrink-0 flex-col justify-center gap-0.5 overflow-hidden text-xs leading-4 whitespace-nowrap text-[#18181b]/70 select-none',
+        'flex min-h-[52px] shrink-0 flex-col justify-center gap-0.5 overflow-hidden text-xs leading-4 whitespace-nowrap text-foreground/70 select-none',
         full ? 'border-2 border-r-0' : 'border-r border-dashed',
         width >= 64 ? 'px-1.5' : 'items-center',
         className,
@@ -203,7 +203,7 @@ export function GanttTaskCard({
         )}
         style={{ borderRadius, background: palette.card, ...style }}
       >
-        <p className="truncate text-xs leading-4 font-semibold whitespace-nowrap text-[#18181b] [text-overflow:clip]">
+        <p className="truncate text-xs leading-4 font-semibold whitespace-nowrap text-foreground [text-overflow:clip]">
           {task.typeLabel}
         </p>
         <div className="flex">
@@ -225,14 +225,14 @@ export function GanttTaskCard({
     >
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex min-w-0 flex-col">
-          <p className="flex min-w-0 items-center gap-1 text-xs leading-4 font-semibold whitespace-nowrap text-[#18181b]">
+          <p className="flex min-w-0 items-center gap-1 text-xs leading-4 font-semibold whitespace-nowrap text-foreground">
             <span className="truncate">{task.typeLabel}</span>
             <span>•</span>
             <span>{formatRange(task.start, task.end)}</span>
           </p>
-          <p className="truncate text-xs leading-4 text-[#18181b]/70">{task.address}</p>
+          <p className="truncate text-xs leading-4 text-foreground/70">{task.address}</p>
           {task.travel > 0 ? (
-            <p className="truncate text-xs leading-4 text-[#18181b]/70">Дорога {task.travel} мин</p>
+            <p className="truncate text-xs leading-4 text-foreground/70">Дорога {task.travel} мин</p>
           ) : null}
         </div>
         <EquipmentLine ticket={task} />
@@ -241,7 +241,7 @@ export function GanttTaskCard({
         </div>
       </div>
       {task.status === 'assigned' || task.status === 'draft' ? (
-        <RiDraggable size={16} aria-hidden className="shrink-0 self-center text-[#18181b]" />
+        <RiDraggable size={16} aria-hidden className="shrink-0 self-center text-foreground" />
       ) : null}
     </article>
   )
@@ -264,7 +264,7 @@ export function GanttTicketCard({ ticket, selected = false, className, onPointer
       onPointerDown={onPointerDown}
       className={cn(
         'relative flex h-24 w-[288px] shrink-0 touch-none gap-1.5 p-1.5 select-none',
-        approval ? 'bg-[#ff383c]/15' : 'bg-white',
+        approval ? 'bg-danger-soft' : 'bg-surface',
         selected ? 'border-2 border-[#475569] p-[4px]' : approval ? '' : 'border border-[#94a3b8] p-[5px]',
         onPointerDown && 'cursor-grab active:cursor-grabbing',
         className,
@@ -273,14 +273,14 @@ export function GanttTicketCard({ ticket, selected = false, className, onPointer
     >
       <div className="flex min-w-0 flex-1 flex-col justify-between">
         <div className="flex min-w-0 flex-col px-1">
-          <p className="flex min-w-0 items-center gap-1 text-sm leading-5 font-semibold whitespace-nowrap text-[#18181b]">
-            <span className="truncate text-black">{ticket.typeLabel}</span>
+          <p className="flex min-w-0 items-center gap-1 text-sm leading-5 font-semibold whitespace-nowrap text-foreground">
+            <span className="truncate text-foreground">{ticket.typeLabel}</span>
             <span>•</span>
             <span className={cn(approval && 'line-through')}>
               {formatRange(ticket.windowFrom, ticket.windowTo)}
             </span>
           </p>
-          <p className="truncate text-xs leading-4 text-[#18181b]">{ticket.address}</p>
+          <p className="truncate text-xs leading-4 text-foreground">{ticket.address}</p>
         </div>
         <EquipmentLine ticket={ticket} />
         <div className="flex min-w-0">
@@ -289,7 +289,7 @@ export function GanttTicketCard({ ticket, selected = false, className, onPointer
               type="button"
               onPointerDown={(event) => event.stopPropagation()}
               onClick={onApprove}
-              className="inline-flex h-5 max-w-full cursor-pointer items-center gap-1 bg-[#ff383c]/15 pr-0.5 pl-1 text-xs leading-4 text-[#18181b] transition-colors hover:bg-[#ff383c]/25"
+              className="inline-flex h-5 max-w-full cursor-pointer items-center gap-1 bg-danger-soft pr-0.5 pl-1 text-xs leading-4 text-danger-soft-foreground transition-colors hover:bg-danger-soft-hover"
               style={{ borderRadius: 4 }}
             >
               <span className="truncate">Согласовать с клиентом</span>
@@ -299,7 +299,7 @@ export function GanttTicketCard({ ticket, selected = false, className, onPointer
             <Tooltip delay={300}>
               <Tooltip.Trigger className="inline-flex max-w-full cursor-help outline-none">
                 <span
-                  className="truncate bg-[#ff383c]/15 px-1 text-xs leading-5 text-[#18181b]"
+                  className="truncate bg-danger-soft px-1 text-xs leading-5 text-danger-soft-foreground"
                   style={{ borderRadius: 4 }}
                 >
                   {UNASSIGNED_REASON_LABEL[ticket.reason]}
@@ -312,7 +312,7 @@ export function GanttTicketCard({ ticket, selected = false, className, onPointer
           )}
         </div>
       </div>
-      <RiDraggable size={16} aria-hidden className="shrink-0 self-center text-black" />
+      <RiDraggable size={16} aria-hidden className="shrink-0 self-center text-foreground" />
     </article>
   )
 }

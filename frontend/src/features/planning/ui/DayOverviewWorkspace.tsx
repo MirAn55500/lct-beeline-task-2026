@@ -24,7 +24,7 @@ function PanelHeading({
   return (
     <div className={cn('flex shrink-0 flex-col gap-1 px-5 pt-5', className)}>
       <h2 className="text-xl font-semibold leading-7 text-foreground">{title}</h2>
-      <p className="text-sm leading-6 text-[#71717a]">{description}</p>
+      <p className="text-sm leading-6 text-muted">{description}</p>
     </div>
   )
 }
@@ -42,9 +42,9 @@ function SummaryCounter({
     <div className="flex min-w-0 flex-1 flex-col gap-1">
       <div className="flex items-baseline gap-1 text-xl font-semibold leading-7">
         <span className="text-foreground">{value}</span>
-        <span className="text-[#71717a]">из {total}</span>
+        <span className="text-muted">из {total}</span>
       </div>
-      <p className="text-sm leading-6 text-[#71717a]">{label}</p>
+      <p className="text-sm leading-6 text-muted">{label}</p>
     </div>
   )
 }
@@ -124,18 +124,18 @@ export function DayOverviewWorkspace({
             {hasTickets ? 'План работ составлен' : 'Создайте план работ'}
           </h2>
           {hasTickets ? (
-            <p className="flex min-w-0 items-center text-sm leading-6 text-[#71717a]">
+            <p className="flex min-w-0 items-center text-sm leading-6 text-muted">
               <span className="truncate">Расписание и маршруты инженеров доступны в</span>
               <Link
                 to={planLink}
-                className="ms-1 inline-flex shrink-0 items-start font-medium text-[#18181b] transition-colors hover:text-[#0485f7]"
+                className="ms-1 inline-flex shrink-0 items-start font-medium text-foreground transition-colors hover:text-link"
               >
                 плане работ
                 <RiArrowRightUpLine size={12} className="mt-0.5" />
               </Link>
             </p>
           ) : (
-            <p className="truncate text-sm leading-6 text-[#71717a]">
+            <p className="truncate text-sm leading-6 text-muted">
               Загрузите заявки для региона «{regionLabel}»
             </p>
           )}

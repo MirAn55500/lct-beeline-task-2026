@@ -41,10 +41,10 @@ const OSM_STYLE: MapOptions['style'] = {
 
 const LINE_ROUND = { 'line-join': 'round', 'line-cap': 'round' } as const
 const LINE_DASHED = { 'line-join': 'round', 'line-cap': 'butt' } as const
-/** Участок, который сервис маршрутов не построил, — серый пунктир по прямой. */
-const STRAIGHT_COLOR = '#71717a'
+/** MapLibre paint не понимает CSS variables, поэтому здесь литералы Beeline primitives. */
+const STRAIGHT_COLOR = '#77849D'
 const STRAIGHT_END = '#64748b'
-const ACTIVE_STOP = '#ff383c'
+const ACTIVE_STOP = '#F84A00'
 const OVERVIEW_LAYERS = ['overview-road', 'overview-straight']
 
 type LineFeature = Feature<LineString | MultiLineString>
@@ -81,7 +81,7 @@ function addLayers(map: MapLibreMap) {
     type: 'line',
     source: 'selected',
     layout: LINE_ROUND,
-    paint: { 'line-color': '#dedee0', 'line-width': ['case', ['get', 'straight'], 10, 12] },
+    paint: { 'line-color': '#C3C9D5', 'line-width': ['case', ['get', 'straight'], 10, 12] },
   })
   map.addLayer({
     id: 'selected-underlay',
@@ -145,12 +145,12 @@ function pointElement(options: {
   const root = document.createElement(options.onClick ? 'button' : 'div')
   if (root instanceof HTMLButtonElement) root.type = 'button'
   if (options.title) root.title = options.title
-  root.style.cssText = `width:20px;height:20px;border-radius:9999px;background:#fff;border:1px solid #dedee0;display:flex;align-items:center;justify-content:center;padding:0;cursor:${options.onClick ? 'pointer' : 'default'};opacity:${options.dim ? 0.5 : 1};transition:opacity .15s`
+  root.style.cssText = `width:20px;height:20px;border-radius:9999px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;padding:0;cursor:${options.onClick ? 'pointer' : 'default'};opacity:${options.dim ? 0.5 : 1};transition:opacity .15s`
   const inner = document.createElement('span')
   const size = options.variant === 'count' ? 14 : 8
-  const background = options.variant === 'ring' ? '#fff' : options.color
+  const background = options.variant === 'ring' ? 'var(--surface)' : options.color
   const border = options.variant === 'count' ? 0 : 3
-  inner.style.cssText = `box-sizing:border-box;width:${size}px;height:${size}px;border-radius:9999px;background:${background};border:${border}px solid ${options.color};display:flex;align-items:center;justify-content:center;color:#fff;font:600 10px/1 Inter,system-ui,sans-serif`
+  inner.style.cssText = `box-sizing:border-box;width:${size}px;height:${size}px;border-radius:9999px;background:${background};border:${border}px solid ${options.color};display:flex;align-items:center;justify-content:center;color:#FFFFFF;font:600 10px/1 Inter,system-ui,sans-serif`
   if (options.label) inner.textContent = options.label
   root.append(inner)
   if (options.onClick) {
@@ -166,9 +166,9 @@ function pointElement(options: {
 function activeStopElement(label: string) {
   const root = document.createElement('div')
   root.style.cssText =
-    'width:24px;height:24px;border-radius:8px;background:#fff;border:1px solid #dedee0;display:flex;align-items:center;justify-content:center;box-shadow:0 10px 15px -3px rgb(0 0 0/.1),0 4px 6px -4px rgb(0 0 0/.1)'
+    'width:24px;height:24px;border-radius:8px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;box-shadow:0 10px 15px -3px rgb(0 0 0/.1),0 4px 6px -4px rgb(0 0 0/.1)'
   const inner = document.createElement('span')
-  inner.style.cssText = `width:18px;height:18px;border-radius:5px;background:${ACTIVE_STOP};color:#fff;display:flex;align-items:center;justify-content:center;font:600 14px/20px Inter,system-ui,sans-serif`
+  inner.style.cssText = `width:18px;height:18px;border-radius:5px;background:${ACTIVE_STOP};color:#FFFFFF;display:flex;align-items:center;justify-content:center;font:600 14px/20px Inter,system-ui,sans-serif`
   inner.textContent = label
   root.append(inner)
   return root
@@ -177,7 +177,7 @@ function activeStopElement(label: string) {
 // ── Компонент ──────────────────────────────────────────────────────────────
 
 const ZOOM_BUTTON =
-  'flex size-9 cursor-pointer items-center justify-center text-[#18181b] transition-colors hover:bg-[#f5f5f5] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent'
+  'flex size-9 cursor-pointer items-center justify-center text-foreground transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent'
 
 type PlanMapProps = {
   className?: string
@@ -335,7 +335,7 @@ export function PlanMap({
       // Старт у бригад общий — одна точка «A» поверх остальных.
       const starts = new Map(engineers.map((engineer) => [engineer.start.coord.join(','), engineer]))
       for (const engineer of starts.values()) {
-        add(pointElement({ color: '#18181b', label: 'A', variant: 'count', title: engineer.start.address }), engineer.start.coord)
+        add(pointElement({ color: '#28303F', label: 'A', variant: 'count', title: engineer.start.address }), engineer.start.coord)
       }
     } else {
       const engineer = engineers.find((item) => item.id === selectedId)
@@ -401,7 +401,7 @@ export function PlanMap({
       {children}
 
       <div
-        className="absolute top-1/2 right-[10px] z-10 flex w-9 -translate-y-1/2 flex-col overflow-hidden bg-white shadow-lg"
+        className="absolute top-1/2 right-[10px] z-10 flex w-9 -translate-y-1/2 flex-col overflow-hidden bg-surface shadow-lg"
         style={{ borderRadius: 8 }}
       >
         <button
@@ -413,7 +413,7 @@ export function PlanMap({
         >
           <RiZoomInLine size={16} />
         </button>
-        <span aria-hidden className="mx-2 h-px bg-[#e4e4e7]" />
+        <span aria-hidden className="mx-2 h-px bg-separator" />
         <button
           type="button"
           aria-label="Отдалить"

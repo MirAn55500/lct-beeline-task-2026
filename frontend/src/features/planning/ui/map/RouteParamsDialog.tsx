@@ -78,8 +78,8 @@ export function RouteParamsDialog({ isOpen, engineer, route, onClose, onApply }:
                   aria-pressed={active}
                   onClick={() => toggle(transport)}
                   className={cn(
-                    'inline-flex h-7 cursor-pointer items-center gap-1 px-3 text-sm leading-6 font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-[#0485f7]/40',
-                    active ? 'bg-[#0485f7] text-[#fcfcfc] hover:bg-[#0374d9]' : 'bg-[#ebebec] text-[#18181b] hover:bg-[#e0e0e2]',
+                    'inline-flex h-7 cursor-pointer items-center gap-1 px-3 text-sm leading-6 font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-focus/40',
+                    active ? 'bg-accent text-accent-foreground hover:bg-accent-hover' : 'bg-surface-tertiary text-foreground hover:bg-default-hover',
                   )}
                   style={{ borderRadius: 8 }}
                 >
@@ -96,16 +96,16 @@ export function RouteParamsDialog({ isOpen, engineer, route, onClose, onApply }:
                 key={variant.transport}
                 type="button"
                 onClick={() => (variant.current ? onClose() : setPending(variant))}
-                className="flex w-full cursor-pointer flex-col gap-2 border-b border-[#dedee0] py-3 text-left outline-none last:border-b-0 hover:bg-[#fafafa] focus-visible:bg-[#fafafa]"
+                className="flex w-full cursor-pointer flex-col gap-2 border-b border-border py-3 text-left outline-none last:border-b-0 hover:bg-surface-hover focus-visible:bg-surface-hover"
               >
                 <span className="flex w-full items-center gap-2 text-sm leading-5">
-                  <span className="min-w-0 flex-1 truncate font-semibold text-[#18181b]">
+                  <span className="min-w-0 flex-1 truncate font-semibold text-foreground">
                     {variant.current ? '' : '≈ '}
                     {formatDuration(variant.totalMinutes)}
-                    {variant.current ? <span className="font-normal text-[#71717a]"> · текущий</span> : null}
+                    {variant.current ? <span className="font-normal text-muted"> · текущий</span> : null}
                   </span>
                   {variant.endsAt ? (
-                    <span className="shrink-0 text-[#71717a]">Завершение в {variant.endsAt}</span>
+                    <span className="shrink-0 text-muted">Завершение в {variant.endsAt}</span>
                   ) : null}
                 </span>
                 <RouteStepsChain startAddress={engineer.start.address} addresses={addresses} legs={variant.legs} />

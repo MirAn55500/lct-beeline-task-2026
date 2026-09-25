@@ -70,7 +70,7 @@ export function BrandBar({
             aria-expanded={open}
             aria-haspopup="menu"
             onClick={() => setOpen((value) => !value)}
-            className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-[var(--border-radius-button-md)] border border-[#dedee0] text-foreground transition-colors hover:bg-[#f5f5f5]"
+            className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-[var(--border-radius-button-md)] border border-border text-foreground transition-colors hover:bg-surface-hover"
           >
             <RiFunctionLine size={16} />
           </button>

@@ -29,12 +29,12 @@ function fromInput(value: string) {
 
 function FieldLabel({ children, required, hint }: { children: ReactNode; required?: boolean; hint?: string }) {
   return (
-    <div className="flex items-center gap-1 text-sm leading-6 font-medium text-[#18181b]">
+    <div className="flex items-center gap-1 text-sm leading-6 font-medium text-foreground">
       {children}
-      {required ? <span className="text-[#ff383c]">*</span> : null}
+      {required ? <span className="text-danger">*</span> : null}
       {hint ? (
         <Tooltip delay={200}>
-          <Tooltip.Trigger className="inline-flex cursor-help text-[#71717a] outline-none">
+          <Tooltip.Trigger className="inline-flex cursor-help text-muted outline-none">
             <RiInformationLine size={12} />
           </Tooltip.Trigger>
           <AppTooltipContent className="max-w-[280px] text-left">{hint}</AppTooltipContent>
@@ -45,7 +45,7 @@ function FieldLabel({ children, required, hint }: { children: ReactNode; require
 }
 
 const INPUT =
-  'flex h-9 w-full items-center border border-[#dedee0] bg-white px-3 text-sm leading-5 text-[#18181b] outline-none focus-within:border-[#0485f7]'
+  'flex h-9 w-full items-center border border-border bg-surface px-3 text-sm leading-5 text-foreground outline-none focus-within:border-focus'
 
 /**
  * «Управление заявкой» — правка снятой заявки перед повторной постановкой.
@@ -69,8 +69,8 @@ export function TicketManagePanel({ ticket, ticketTypes, qualifications, onSave,
   return (
     <AppPanel className="flex w-[346px] shrink-0 flex-col overflow-hidden">
       <div className="flex flex-col gap-1 px-5 pt-5 pb-2">
-        <h2 className="text-xl leading-7 font-semibold text-[#18181b]">Управление заявкой</h2>
-        <p className="text-sm leading-6 text-[#71717a]">
+        <h2 className="text-xl leading-7 font-semibold text-foreground">Управление заявкой</h2>
+        <p className="text-sm leading-6 text-muted">
           Заявка №{ticket.id} · {ticket.address}
         </p>
       </div>
@@ -80,7 +80,7 @@ export function TicketManagePanel({ ticket, ticketTypes, qualifications, onSave,
           <FieldLabel required>Тип заявки</FieldLabel>
           <Dropdown>
             <Dropdown.Trigger
-              className={cn(INPUT, 'cursor-pointer justify-between pr-3 transition-colors hover:bg-[#fafafa]')}
+              className={cn(INPUT, 'cursor-pointer justify-between pr-3 transition-colors hover:bg-surface-hover')}
               style={{ borderRadius: 8 }}
             >
               {typeLabel}
@@ -89,7 +89,7 @@ export function TicketManagePanel({ ticket, ticketTypes, qualifications, onSave,
             <Dropdown.Popover
               placement="bottom start"
               offset={4}
-              className="w-[306px] border-0 bg-white p-1 outline-none"
+              className="w-[306px] border-0 bg-surface p-1 outline-none"
               style={{ borderRadius: 12, boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)' }}
             >
               <Dropdown.Menu
@@ -104,7 +104,7 @@ export function TicketManagePanel({ ticket, ticketTypes, qualifications, onSave,
                     key={item.label}
                     id={item.label}
                     textValue={item.label}
-                    className="flex h-9 cursor-pointer items-center px-3 text-sm leading-5 font-medium text-[#18181b] outline-none data-[focused]:bg-[#f5f5f5] data-[selected]:bg-[#f5f5f5]"
+                    className="flex h-9 cursor-pointer items-center px-3 text-sm leading-5 font-medium text-foreground outline-none data-[focused]:bg-surface-hover data-[selected]:bg-surface-hover"
                     style={{ borderRadius: 8 }}
                   >
                     {item.label}
@@ -113,7 +113,7 @@ export function TicketManagePanel({ ticket, ticketTypes, qualifications, onSave,
               </Dropdown.Menu>
             </Dropdown.Popover>
           </Dropdown>
-          <p className="text-sm leading-5 text-[#71717a]">
+          <p className="text-sm leading-5 text-muted">
             Допустимая квалификация: {levels.length > 0 ? levels.join(', ') : 'нет инженеров с навыком'}
           </p>
         </div>
@@ -132,7 +132,7 @@ export function TicketManagePanel({ ticket, ticketTypes, qualifications, onSave,
                 onClick={toggle}
                 className={cn(
                   'flex h-7 cursor-pointer items-center gap-1 px-3 text-sm leading-6 font-medium transition-colors',
-                  active ? 'bg-[#0485f7] text-[#fcfcfc] hover:bg-[#0374d9]' : 'bg-[#ebebec] text-[#18181b] hover:bg-[#e0e0e2]',
+                  active ? 'bg-accent text-accent-foreground hover:bg-accent-hover' : 'bg-surface-tertiary text-foreground hover:bg-default-hover',
                 )}
                 style={{ borderRadius: 8 }}
               >
@@ -143,7 +143,7 @@ export function TicketManagePanel({ ticket, ticketTypes, qualifications, onSave,
           </div>
         </div>
 
-        <span aria-hidden className="h-px shrink-0 bg-[#e4e4e7]" />
+        <span aria-hidden className="h-px shrink-0 bg-separator" />
 
         <label className="flex flex-col gap-1">
           <FieldLabel required>Адрес точки</FieldLabel>
@@ -161,7 +161,7 @@ export function TicketManagePanel({ ticket, ticketTypes, qualifications, onSave,
           </FieldLabel>
           <div className="flex items-center">
             <label
-              className={cn(INPUT, 'gap-2', timeError && 'border-[#ff383c] focus-within:border-[#ff383c]')}
+              className={cn(INPUT, 'gap-2', timeError && 'border-danger focus-within:border-danger')}
               style={{ borderRadius: 8 }}
             >
               <input
@@ -178,9 +178,9 @@ export function TicketManagePanel({ ticket, ticketTypes, qualifications, onSave,
               />
               <RiTimeLine size={16} className="shrink-0" />
             </label>
-            <span className="w-3 shrink-0 text-center text-sm leading-5 text-[#71717a]">-</span>
+            <span className="w-3 shrink-0 text-center text-sm leading-5 text-muted">-</span>
             <span
-              className="flex h-9 w-full items-center justify-between bg-[#ebebec] px-3 text-sm leading-5 text-[#71717a]"
+              className="flex h-9 w-full items-center justify-between bg-surface-tertiary px-3 text-sm leading-5 text-muted"
               style={{ borderRadius: 8 }}
               aria-label="Конец окна"
             >
@@ -188,7 +188,7 @@ export function TicketManagePanel({ ticket, ticketTypes, qualifications, onSave,
               <RiTimeLine size={16} className="shrink-0" />
             </span>
           </div>
-          <p className="text-sm leading-5 text-[#71717a]">
+          <p className="text-sm leading-5 text-muted">
             Измените и согласуйте новое время заявки с клиентом, или найдите свободного инженера
           </p>
         </div>
@@ -198,7 +198,7 @@ export function TicketManagePanel({ ticket, ticketTypes, qualifications, onSave,
         <button
           type="button"
           onClick={onClose}
-          className="h-9 flex-1 cursor-pointer border border-[#dedee0] bg-white px-4 text-sm leading-5 font-medium text-[#18181b] transition-colors hover:bg-[#f5f5f5]"
+          className="h-9 flex-1 cursor-pointer border border-border bg-surface px-4 text-sm leading-5 font-medium text-foreground transition-colors hover:bg-surface-hover"
           style={{ borderRadius: 8 }}
         >
           Отменить
@@ -219,8 +219,8 @@ export function TicketManagePanel({ ticket, ticketTypes, qualifications, onSave,
             })
           }
           className={cn(
-            'h-9 flex-1 bg-[#0485f7] px-4 text-sm leading-5 font-medium text-[#fcfcfc] transition-colors',
-            canSave ? 'cursor-pointer hover:bg-[#0374d9]' : 'cursor-not-allowed opacity-50',
+            'h-9 flex-1 bg-accent px-4 text-sm leading-5 font-medium text-accent-foreground transition-colors',
+            canSave ? 'cursor-pointer hover:bg-accent-hover' : 'cursor-not-allowed opacity-50',
           )}
           style={{ borderRadius: 8 }}
         >

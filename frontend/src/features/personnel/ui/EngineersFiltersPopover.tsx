@@ -57,13 +57,13 @@ export function EngineersFiltersPopover({
       <Popover.Trigger
         aria-label={filtersActive ? 'Фильтры, есть выбранные' : 'Фильтры'}
         className={cn(
-          'inline-flex h-9 shrink-0 cursor-pointer items-center gap-2 border border-[#dedee0] text-sm font-medium leading-5 text-[#18181b] transition-colors outline-none',
-          open ? 'bg-[#ebebec]' : 'bg-white hover:bg-[#f5f5f5]',
+          'inline-flex h-9 shrink-0 cursor-pointer items-center gap-2 border border-border text-sm font-medium leading-5 text-foreground transition-colors outline-none',
+          open ? 'bg-surface-tertiary' : 'bg-surface hover:bg-surface-hover',
         )}
         style={{ borderRadius: 8, padding: '8px 16px' }}
       >
         <span className="relative inline-flex size-4 shrink-0">
-          <RiEqualizer2Line size={16} className="text-[#18181b]" />
+          <RiEqualizer2Line size={16} className="text-foreground" />
           {filtersActive ? (
             <span
               aria-hidden
@@ -74,8 +74,8 @@ export function EngineersFiltersPopover({
                 width: 4,
                 height: 4,
                 borderRadius: 999,
-                backgroundColor: '#ef2c56',
-                boxShadow: '0 0 0 1px #ffffff',
+                backgroundColor: 'var(--danger)',
+                boxShadow: '0 0 0 1px var(--surface)',
               }}
             />
           ) : null}
@@ -86,7 +86,7 @@ export function EngineersFiltersPopover({
       <Popover.Content
         placement="bottom start"
         offset={8}
-        className="w-[369px] border-0 bg-white p-0 text-[#18181b] outline-none"
+        className="w-[369px] border-0 bg-surface p-0 text-foreground outline-none"
         style={{
           borderRadius: 16,
           boxShadow:
@@ -96,16 +96,16 @@ export function EngineersFiltersPopover({
         <Popover.Dialog className="p-0 outline-none" style={{ borderRadius: 16 }}>
           {/* padding body по Figma: 8 / 12 / 12 */}
           <div className="flex flex-col" style={{ padding: '8px 12px 12px' }}>
-            <Popover.Heading className="text-base font-semibold leading-6 text-[#18181b]">
+            <Popover.Heading className="text-base font-semibold leading-6 text-foreground">
               Фильтрация
             </Popover.Heading>
-            <p className="text-sm leading-6 text-[#71717a]" style={{ marginTop: 4 }}>
+            <p className="text-sm leading-6 text-muted" style={{ marginTop: 4 }}>
               Найдите подходящего инженера
             </p>
 
             <div className="flex flex-col" style={{ marginTop: 16, gap: 16 }}>
               <div className="flex flex-col gap-1">
-                <span className="text-sm font-medium leading-6 text-[#18181b]">
+                <span className="text-sm font-medium leading-6 text-foreground">
                   Квалификация
                 </span>
                 <div className="flex flex-col gap-2">
@@ -124,17 +124,17 @@ export function EngineersFiltersPopover({
                             borderStyle: 'solid',
                             borderColor: draft.qualifications.includes(label)
                               ? 'var(--accent)'
-                              : '#dedee0',
+                              : 'var(--field-border)',
                             ['--field-background' as string]:
                               draft.qualifications.includes(label)
                                 ? 'var(--accent)'
-                                : '#ffffff',
+                                : 'var(--field-background)',
                             ['--field-shadow' as string]: '0 0 #0000',
                           }}
                         >
                           <Checkbox.Indicator />
                         </Checkbox.Control>
-                        <span className="text-sm leading-6 text-[#18181b]">
+                        <span className="text-sm leading-6 text-foreground">
                           {label}
                         </span>
                       </Checkbox.Content>
@@ -165,7 +165,7 @@ export function EngineersFiltersPopover({
             <div className="flex" style={{ marginTop: 16, gap: 12 }}>
               <button
                 type="button"
-                className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center border border-[#dedee0] bg-white text-sm font-medium leading-5 text-[#18181b] transition-colors hover:bg-[#f5f5f5]"
+                className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center border border-border bg-surface text-sm font-medium leading-5 text-foreground transition-colors hover:bg-surface-hover"
                 style={{ borderRadius: 8, padding: '8px 16px' }}
                 onClick={() => setDraft(EMPTY_ENGINEERS_FILTERS)}
               >
@@ -173,7 +173,7 @@ export function EngineersFiltersPopover({
               </button>
               <button
                 type="button"
-                className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center bg-[#0485f7] text-sm font-medium leading-5 text-[#fcfcfc] transition-colors hover:bg-[#0374d9]"
+                className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center bg-accent text-sm font-medium leading-5 text-accent-foreground transition-colors hover:bg-accent-hover"
                 style={{ borderRadius: 8, padding: '8px 16px' }}
                 onClick={() => {
                   onChange(draft)

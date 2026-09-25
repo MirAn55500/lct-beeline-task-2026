@@ -60,9 +60,9 @@ function RowCheckbox({
             borderRadius: 4,
             borderWidth: 1,
             borderStyle: 'solid',
-            borderColor: isSelected || isIndeterminate ? 'var(--accent)' : '#dedee0',
+            borderColor: isSelected || isIndeterminate ? 'var(--accent)' : 'var(--field-border)',
             ['--field-background' as string]:
-              isSelected || isIndeterminate ? 'var(--accent)' : '#ffffff',
+              isSelected || isIndeterminate ? 'var(--accent)' : 'var(--field-background)',
             ['--field-shadow' as string]: '0 0 #0000',
           }}
         >
@@ -110,8 +110,8 @@ function IconButton({
       className={cn(
         'flex size-8 shrink-0 cursor-pointer items-center justify-center transition-colors disabled:cursor-not-allowed disabled:opacity-40',
         tone === 'outline'
-          ? 'border border-[#dedee0] bg-white text-[#18181b] hover:bg-[#f5f5f5]'
-          : 'bg-[#ff383c]/15 text-[#ff383c] hover:bg-[#ff383c]/25',
+          ? 'border border-border bg-surface text-foreground hover:bg-surface-hover'
+          : 'bg-danger-soft text-danger hover:bg-danger-soft-hover',
       )}
       style={{ borderRadius: 8 }}
     >
@@ -123,26 +123,26 @@ function IconButton({
 function SkillsCell({ skills }: { skills: SkillCode[] }) {
   const known = skills.filter((code): code is SkillCode => code in SKILL_LABEL)
   if (known.length === 0) {
-    return <span className="text-sm leading-6 text-[#71717a]">—</span>
+    return <span className="text-sm leading-6 text-muted">—</span>
   }
   if (known.length === SKILLS_TOTAL) {
-    return <span className="truncate text-sm leading-6 text-[#18181b]">Все типы работ</span>
+    return <span className="truncate text-sm leading-6 text-foreground">Все типы работ</span>
   }
   if (known.length === 1) {
     return (
-      <span className="truncate text-sm leading-6 text-[#18181b]">
+      <span className="truncate text-sm leading-6 text-foreground">
         {SKILL_LABEL[known[0]!]}
       </span>
     )
   }
 
   return (
-    <span className="flex min-w-0 items-center gap-1 text-sm leading-6 text-[#18181b]">
+    <span className="flex min-w-0 items-center gap-1 text-sm leading-6 text-foreground">
       {known.length} {pluralRu(known.length, ['навык', 'навыка', 'навыков'])}
       <Tooltip delay={200}>
         <Tooltip.Trigger
           aria-label="Список навыков"
-          className="inline-flex cursor-help text-[#71717a] outline-none"
+          className="inline-flex cursor-help text-muted outline-none"
           onClick={(event) => event.stopPropagation()}
         >
           <RiInformationLine size={16} />
@@ -195,10 +195,10 @@ function EngineerRow({
       }}
       className={cn(
         GRID,
-        'h-14 cursor-pointer border-b border-[#e4e4e7] transition-colors duration-700',
-        active && 'bg-[#f5f5f5]',
+        'h-14 cursor-pointer border-b border-separator transition-colors duration-700',
+        active && 'bg-surface-hover',
         highlighted && !active && 'bg-[#34c759]/[0.08]',
-        !active && !highlighted && 'hover:bg-[#fafafa]',
+        !active && !highlighted && 'hover:bg-surface-hover',
       )}
     >
       <div className="flex min-w-0 items-center gap-3">
@@ -210,17 +210,17 @@ function EngineerRow({
           />
         </span>
         <span
-          className="flex size-8 shrink-0 items-center justify-center bg-[#ebebec] text-xs font-medium leading-5 text-[#18181b]"
+          className="flex size-8 shrink-0 items-center justify-center bg-surface-tertiary text-xs font-medium leading-5 text-foreground"
           style={{ borderRadius: 999 }}
         >
           {getInitials(engineer.name)}
         </span>
         <span className="flex min-w-0 flex-col">
-          <span className="truncate text-sm font-medium leading-5 text-[#18181b]">
+          <span className="truncate text-sm font-medium leading-5 text-foreground">
             {engineer.name}
           </span>
           {engineer.position ? (
-            <span className="truncate text-xs leading-4 text-[#71717a]">
+            <span className="truncate text-xs leading-4 text-muted">
               {engineer.position}
             </span>
           ) : null}
@@ -229,9 +229,9 @@ function EngineerRow({
 
       <SkillsCell skills={engineer.skills} />
 
-      <span className="flex min-w-0 items-center gap-1 text-sm leading-6 text-[#18181b]">
+      <span className="flex min-w-0 items-center gap-1 text-sm leading-6 text-foreground">
         {TransportIcon ? (
-          <TransportIcon size={16} className="shrink-0 text-[#71717a]" />
+          <TransportIcon size={16} className="shrink-0 text-muted" />
         ) : null}
         <span className="truncate">
           {TRANSPORT_LABEL[engineer.transport] ?? engineer.transport}
@@ -349,10 +349,10 @@ export function EngineersTable({
   return (
     <AppPanel className="flex min-h-0 flex-1 flex-col overflow-hidden py-3">
       <div className="flex shrink-0 items-center gap-2 px-3">
-        <label className="relative flex h-9 w-[312px] min-w-0 items-center rounded-[8px] border border-[#dedee0] bg-white px-3">
+        <label className="relative flex h-9 w-[312px] min-w-0 items-center rounded-[8px] border border-border bg-surface px-3">
           <RiSearchLine
             size={16}
-            className="pointer-events-none shrink-0 text-[#71717a]"
+            className="pointer-events-none shrink-0 text-muted"
             aria-hidden
           />
           <input
@@ -360,7 +360,7 @@ export function EngineersTable({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Поиск по инженерам"
-            className="min-w-0 flex-1 border-0 bg-transparent py-2 ps-2 text-sm leading-5 text-[#18181b] outline-none placeholder:text-[#71717a]"
+            className="min-w-0 flex-1 border-0 bg-transparent py-2 ps-2 text-sm leading-5 text-foreground outline-none placeholder:text-muted"
           />
         </label>
 
@@ -375,14 +375,14 @@ export function EngineersTable({
         <span
           className={cn(
             'ms-auto truncate px-4 text-sm font-medium leading-5',
-            selected.size === 0 ? 'text-[#71717a]' : 'text-[#18181b]',
+            selected.size === 0 ? 'text-muted' : 'text-foreground',
           )}
         >
           {selectionLabel}
         </span>
       </div>
 
-      <div className={cn(GRID, 'mt-4 h-10 shrink-0 bg-[#f5f5f5]')}>
+      <div className={cn(GRID, 'mt-4 h-10 shrink-0 bg-surface-hover')}>
         <div className="flex min-w-0 items-center gap-3">
           <RowCheckbox
             label="Выбрать всех"
@@ -390,10 +390,10 @@ export function EngineersTable({
             isIndeterminate={selectedVisible > 0 && !allSelected}
             onChange={toggleAll}
           />
-          <span className="text-xs font-medium leading-5 text-[#71717a]">Инженер</span>
+          <span className="text-xs font-medium leading-5 text-muted">Инженер</span>
         </div>
-        <span className="text-xs font-medium leading-5 text-[#71717a]">Навыки</span>
-        <span className="text-xs font-medium leading-5 text-[#71717a]">Транспорт</span>
+        <span className="text-xs font-medium leading-5 text-muted">Навыки</span>
+        <span className="text-xs font-medium leading-5 text-muted">Транспорт</span>
         <span />
       </div>
 
@@ -418,7 +418,7 @@ export function EngineersTable({
             />
           ))
         ) : (
-          <p className="px-5 py-8 text-center text-sm text-[#71717a]">
+          <p className="px-5 py-8 text-center text-sm text-muted">
             {isLoading
               ? 'Загружаем инженеров…'
               : engineers.length === 0

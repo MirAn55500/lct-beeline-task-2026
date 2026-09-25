@@ -34,8 +34,8 @@ function TicketTag({
       className="inline-flex h-6 max-w-full items-center gap-1 px-1.5 py-1 text-xs font-medium leading-5"
       style={{
         borderRadius: 4,
-        backgroundColor: tone === 'danger' ? 'rgba(255, 56, 60, 0.15)' : '#ebebec',
-        color: tone === 'danger' ? '#a43532' : '#18181b',
+        backgroundColor: tone === 'danger' ? 'var(--danger-soft)' : 'var(--surface-tertiary)',
+        color: tone === 'danger' ? 'var(--danger-soft-foreground)' : 'var(--foreground)',
       }}
     >
       <span className="inline-flex size-3 shrink-0 items-center justify-center">
@@ -71,25 +71,25 @@ function reasonHint(reason: string) {
 
 function TicketCard({ ticket }: { ticket: Ticket }) {
   return (
-    <article className="flex flex-col gap-2 border-b border-[#dedee0] px-5 py-3">
+    <article className="flex flex-col gap-2 border-b border-border px-5 py-3">
       <div className="flex min-w-0 items-center gap-1.5 text-base font-semibold leading-6">
-        <span className="shrink-0 text-[#18181b]">№{ticket.number}</span>
-        <span className="shrink-0 text-[#71717a]">•</span>
-        <span className="truncate text-[#71717a]">{ticket.category}</span>
+        <span className="shrink-0 text-foreground">№{ticket.number}</span>
+        <span className="shrink-0 text-muted">•</span>
+        <span className="truncate text-muted">{ticket.category}</span>
       </div>
 
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         {ticket.assigned && ticket.engineer ? (
           <TicketTag
             tone="neutral"
-            icon={<RiUserLine size={12} className="text-[#71717a]" />}
+            icon={<RiUserLine size={12} className="text-muted" />}
           >
             {ticket.engineer}
           </TicketTag>
         ) : ticket.reason ? (
           <TicketTag
             tone="danger"
-            icon={<RiErrorWarningLine size={12} className="text-[#a43532]" />}
+            icon={<RiErrorWarningLine size={12} className="text-danger-soft-foreground" />}
             hint={ticket.reason_hint ?? reasonHint(ticket.reason)}
           >
             {ticket.reason}
@@ -97,13 +97,13 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
         ) : null}
         <TicketTag
           tone="neutral"
-          icon={<RiTimeLine size={12} className="text-[#71717a]" />}
+          icon={<RiTimeLine size={12} className="text-muted" />}
         >
           {ticket.window}
         </TicketTag>
       </div>
 
-      <p className="truncate text-sm leading-6 text-[#71717a]">{ticket.address}</p>
+      <p className="truncate text-sm leading-6 text-muted">{ticket.address}</p>
     </article>
   )
 }
@@ -145,19 +145,19 @@ export function TicketsPanel({
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col', className)}>
       <div className="flex shrink-0 flex-col gap-1 px-5 pb-5 pt-5">
-        <h2 className="text-xl font-semibold leading-7 text-[#18181b]">
+        <h2 className="text-xl font-semibold leading-7 text-foreground">
           Загруженные заявки
         </h2>
-        <p className="text-sm leading-6 text-[#71717a]">
+        <p className="text-sm leading-6 text-muted">
           Расписание и маршруты инженеров содержатся в плане
         </p>
       </div>
 
       <div className="flex shrink-0 items-center gap-3 px-5 pb-3">
-        <label className="relative flex h-9 min-w-0 flex-1 items-center rounded-[8px] border border-[#dedee0] bg-white px-3">
+        <label className="relative flex h-9 min-w-0 flex-1 items-center rounded-[8px] border border-border bg-surface px-3">
           <RiSearchLine
             size={16}
-            className="pointer-events-none shrink-0 text-[#71717a]"
+            className="pointer-events-none shrink-0 text-muted"
             aria-hidden
           />
           <input
@@ -165,7 +165,7 @@ export function TicketsPanel({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Поиск по адресу или номеру заявки"
-            className="min-w-0 flex-1 border-0 bg-transparent py-2 ps-2 text-sm leading-5 text-[#18181b] outline-none placeholder:text-[#71717a]"
+            className="min-w-0 flex-1 border-0 bg-transparent py-2 ps-2 text-sm leading-5 text-foreground outline-none placeholder:text-muted"
           />
         </label>
 
@@ -180,13 +180,13 @@ export function TicketsPanel({
       >
         <div>
           {isError ? (
-            <p className="px-5 py-8 text-center text-sm text-[#71717a]">
+            <p className="px-5 py-8 text-center text-sm text-muted">
               Не удалось загрузить заявки
             </p>
           ) : tickets.length > 0 ? (
             tickets.map((ticket) => <TicketCard key={ticket.id} ticket={ticket} />)
           ) : (
-            <p className="px-5 py-8 text-center text-sm text-[#71717a]">
+            <p className="px-5 py-8 text-center text-sm text-muted">
               {isFetching ? 'Загрузка заявок' : 'Нет заявок по выбранным фильтрам'}
             </p>
           )}

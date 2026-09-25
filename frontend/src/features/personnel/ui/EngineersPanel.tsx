@@ -30,9 +30,9 @@ function EngineerCard({ engineer }: { engineer: Engineer }) {
   const TransportIcon = TRANSPORT_ICON[engineer.transport]
 
   return (
-    <div className="flex items-center gap-4 border-b border-[#dedee0] px-5 py-3">
+    <div className="flex items-center gap-4 border-b border-border px-5 py-3">
       <Avatar className="size-[52px] shrink-0 !rounded-[4px]">
-        <Avatar.Fallback className="!rounded-[4px] bg-[#ebebec] text-xs font-medium text-foreground">
+        <Avatar.Fallback className="!rounded-[4px] bg-surface-tertiary text-xs font-medium text-foreground">
           {getInitials(engineer.name)}
         </Avatar.Fallback>
       </Avatar>
@@ -41,14 +41,14 @@ function EngineerCard({ engineer }: { engineer: Engineer }) {
         <p className="truncate text-base font-semibold leading-6 text-foreground">
           {engineer.name}
         </p>
-        <div className="flex min-w-0 items-center gap-2 text-sm font-medium leading-6 text-[#71717a]">
+        <div className="flex min-w-0 items-center gap-2 text-sm font-medium leading-6 text-muted">
           <span className="flex min-w-0 items-center gap-1">
             {TransportIcon ? <TransportIcon size={16} className="shrink-0" /> : null}
             <span className="truncate">{engineer.transport_label}</span>
           </span>
           {engineer.skill ? (
             <>
-              <span className="h-2.5 w-px shrink-0 bg-[#e4e4e7]" />
+              <span className="h-2.5 w-px shrink-0 bg-separator" />
               <span className="flex min-w-0 items-center gap-1">
                 <RiToolsFill size={16} className="shrink-0" />
                 <span className="truncate">{engineer.skill}</span>
@@ -78,7 +78,7 @@ export function EngineersPanel({ className, regionId }: EngineersPanelProps) {
     <div className={cn('flex min-h-0 flex-1 flex-col', className)}>
       <div className="flex shrink-0 flex-col gap-1 px-5 pb-2 pt-5">
         <h2 className="text-xl font-semibold leading-7 text-foreground">{title}</h2>
-        <p className="text-sm leading-6 text-[#71717a]">
+        <p className="text-sm leading-6 text-muted">
           Работает сегодня в рамках выбранного региона
         </p>
       </div>
@@ -90,7 +90,7 @@ export function EngineersPanel({ className, regionId }: EngineersPanelProps) {
         orientation="vertical"
       >
         {engineers.length === 0 && !isLoading ? (
-          <p className="px-5 py-3 text-sm leading-6 text-[#71717a]">
+          <p className="px-5 py-3 text-sm leading-6 text-muted">
             {isError ? 'Не удалось загрузить инженеров' : 'Инженеров пока нет'}
           </p>
         ) : (
@@ -105,7 +105,7 @@ export function EngineersPanel({ className, regionId }: EngineersPanelProps) {
       <div className="flex shrink-0 justify-end px-5 pt-2 pb-5">
         <Link
           to={routes.personnel}
-          className="inline-flex h-9 cursor-pointer items-center gap-2 border border-[#dedee0] px-4 text-sm font-medium text-foreground transition-colors hover:bg-[#f5f5f5]"
+          className="inline-flex h-9 cursor-pointer items-center gap-2 border border-border px-4 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover"
           style={{ borderRadius: 8 }}
         >
           Перейти к инженерам

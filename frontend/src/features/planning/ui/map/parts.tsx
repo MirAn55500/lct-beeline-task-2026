@@ -13,7 +13,7 @@ type Icon = ComponentType<{ size?: number | string; className?: string }>
 
 /** Вертикальный разделитель между пунктами строки, как Separator в макете. */
 export function MetaSeparator() {
-  return <span aria-hidden className="h-3.5 w-px shrink-0 bg-[#e4e4e7]" />
+  return <span aria-hidden className="h-3.5 w-px shrink-0 bg-separator" />
 }
 
 /** Фото или инициалы с кружком транспорта в цвете маршрута. */
@@ -37,7 +37,7 @@ export function EngineerAvatar({
         />
       ) : (
         <span
-          className="absolute top-0.5 left-0 flex size-11 items-center justify-center bg-[#ebebec] text-xs leading-5 font-medium text-[#18181b]"
+          className="absolute top-0.5 left-0 flex size-11 items-center justify-center bg-surface-tertiary text-xs leading-5 font-medium text-foreground"
           style={{ borderRadius: 8 }}
         >
           {getInitials(engineer.name.replace(/^Бригада\s+/, ''))}
@@ -45,10 +45,10 @@ export function EngineerAvatar({
       )}
       <span
         title={TRANSPORT_LABEL[engineer.transport]}
-        className="absolute bottom-[-3px] left-[-3px] flex size-5 items-center justify-center rounded-full border-2 border-white"
+        className="absolute bottom-[-3px] left-[-3px] flex size-5 items-center justify-center rounded-full border-2 border-surface"
         style={{ background: muted ? '#ffffff' : engineer.color }}
       >
-        <TransportIcon size={14} className={muted ? 'text-[#71717a]' : 'text-[#fcfcfc]'} />
+        <TransportIcon size={14} className={muted ? 'text-muted' : 'text-[var(--beeline-white)]'} />
       </span>
     </div>
   )
@@ -56,17 +56,17 @@ export function EngineerAvatar({
 
 /** Цвет кольца загрузки — accent / warning / danger, как _ProgressCircleColors в макете. */
 function loadColor(load: number) {
-  if (load >= 25) return '#0485f7'
+  if (load >= 25) return 'var(--link)'
   if (load >= 10) return '#f5a524'
-  return '#ff383c'
+  return 'var(--danger)'
 }
 
-export function LoadRing({ value, trackColor = '#ebebec' }: { value: number; trackColor?: string }) {
+export function LoadRing({ value, trackColor = 'var(--surface-tertiary)' }: { value: number; trackColor?: string }) {
   const radius = 7
   const length = 2 * Math.PI * radius
   return (
     <span className="flex items-center gap-1">
-      <span className="text-sm leading-6 font-medium text-[#18181b]">{value}%</span>
+      <span className="text-sm leading-6 font-medium text-foreground">{value}%</span>
       <svg width={20} height={20} viewBox="0 0 20 20" aria-hidden className="-rotate-90">
         <circle cx={10} cy={10} r={radius} fill="none" stroke={trackColor} strokeWidth={2} />
         <circle
@@ -100,7 +100,7 @@ export function Tag({
       title={title}
       className={cn(
         'inline-flex h-5 shrink-0 items-center gap-1 px-1 text-xs leading-5 font-medium',
-        tone === 'danger' ? 'bg-[#ff383c]/15 text-[#a43532]' : 'bg-[#ebebec] text-[#18181b]',
+        tone === 'danger' ? 'bg-danger-soft text-danger-soft-foreground' : 'bg-surface-tertiary text-foreground',
       )}
       style={{ borderRadius: 4 }}
     >

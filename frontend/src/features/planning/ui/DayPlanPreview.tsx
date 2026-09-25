@@ -77,7 +77,7 @@ function TimeLabels({
 }) {
   const span = end - start
   return (
-    <div className="relative h-5 min-w-0 flex-1 text-sm font-medium leading-5 text-[#71717a]">
+    <div className="relative h-5 min-w-0 flex-1 text-sm font-medium leading-5 text-muted">
       {labels.map((hour) => {
         const atStart = hour === start
         const atEnd = hour === end
@@ -112,7 +112,7 @@ function TimeGrid({ start, end }: { start: number; end: number }) {
       {hours.map((hour) => (
         <span
           key={hour}
-          className="absolute top-0 bottom-0 border-l border-dashed border-[#dedee0]"
+          className="absolute top-0 bottom-0 border-l border-dashed border-border"
           style={{ left: `${hourToPercent(hour, start, span)}%` }}
         />
       ))}
@@ -187,7 +187,7 @@ export function DayPlanPreview({
           </div>
 
           {rows.length === 0 ? (
-            <p className="px-5 py-6 text-sm leading-6 text-[#71717a]">
+            <p className="px-5 py-6 text-sm leading-6 text-muted">
               Назначений пока нет
             </p>
           ) : (
@@ -206,7 +206,7 @@ export function DayPlanPreview({
       <div className="flex shrink-0 justify-end px-5 pt-2 pb-5">
         <Link
           to={planLink}
-          className="inline-flex h-9 cursor-pointer items-center gap-2 bg-[#0485f7] px-4 text-sm font-medium text-[#fcfcfc] transition-colors hover:bg-[#0374d9]"
+          className="inline-flex h-9 cursor-pointer items-center gap-2 bg-accent px-4 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent-hover"
           style={{ borderRadius: 8 }}
         >
           <RiCalendarScheduleLine size={16} className="shrink-0" />

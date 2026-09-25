@@ -12,10 +12,10 @@ function FilterChip({
 }) {
   return (
     <span
-      className="inline-flex h-5 max-w-full items-center gap-1 text-xs font-medium leading-5 text-[#18181b]"
+      className="inline-flex h-5 max-w-full items-center gap-1 text-xs font-medium leading-5 text-foreground"
       style={{
         borderRadius: 4,
-        backgroundColor: '#ebebec',
+        backgroundColor: 'var(--surface-tertiary)',
         padding: '2px 4px',
       }}
       onPointerDown={(event) => event.stopPropagation()}
@@ -25,7 +25,7 @@ function FilterChip({
         role="button"
         tabIndex={-1}
         aria-label={`Убрать ${label}`}
-        className="inline-flex size-3 shrink-0 cursor-pointer items-center justify-center text-[#71717a] hover:text-[#18181b]"
+        className="inline-flex size-3 shrink-0 cursor-pointer items-center justify-center text-muted hover:text-foreground"
         onClick={(event) => {
           event.preventDefault()
           event.stopPropagation()
@@ -62,13 +62,13 @@ export function MultiSelectField({
       value={value}
       onChange={(keys) => onChange(keys as string[])}
     >
-      <Label className="mb-1 text-sm font-medium leading-6 text-[#18181b]">
+      <Label className="mb-1 text-sm font-medium leading-6 text-foreground">
         {label}
       </Label>
       <Select.Trigger
         className={cn(
-          'flex min-h-9 w-full items-center justify-between gap-2 border border-[#dedee0] bg-white !px-3 !py-2 text-left shadow-none outline-none',
-          'data-[focus-visible]:outline data-[focus-visible]:outline-2 data-[focus-visible]:outline-offset-2 data-[focus-visible]:outline-[#0485f7]',
+          'flex min-h-9 w-full items-center justify-between gap-2 border border-border bg-surface !px-3 !py-2 text-left shadow-none outline-none',
+          'data-[focus-visible]:outline data-[focus-visible]:outline-2 data-[focus-visible]:outline-offset-2 data-[focus-visible]:outline-focus',
         )}
         style={{ borderRadius: 8 }}
       >
@@ -76,7 +76,7 @@ export function MultiSelectField({
           {({ defaultChildren, isPlaceholder, state }) => {
             if (isPlaceholder || state.selectedItems.length === 0) {
               return (
-                <span className="text-sm leading-5 text-[#71717a]">
+                <span className="text-sm leading-5 text-muted">
                   {defaultChildren}
                 </span>
               )
@@ -100,12 +100,12 @@ export function MultiSelectField({
             )
           }}
         </Select.Value>
-        <Select.Indicator className="shrink-0 self-center text-[#71717a]">
+        <Select.Indicator className="shrink-0 self-center text-muted">
           <RiArrowDownSLine size={16} />
         </Select.Indicator>
       </Select.Trigger>
       <Select.Popover
-        className="min-w-[240px] border border-[#dedee0] bg-white p-1 shadow-lg outline-none"
+        className="min-w-[240px] border border-border bg-surface p-1 shadow-lg outline-none"
         style={{ borderRadius: 16 }}
       >
         <ListBox selectionMode="multiple" className="outline-none">
@@ -114,7 +114,7 @@ export function MultiSelectField({
               key={option}
               id={option}
               textValue={option}
-              className="cursor-pointer px-3 py-2 text-sm text-[#18181b] outline-none data-[focused]:bg-[#f5f5f5] data-[selected]:bg-[#0485f7]/[0.08]"
+              className="cursor-pointer px-3 py-2 text-sm text-foreground outline-none data-[focused]:bg-surface-hover data-[selected]:bg-accent/[0.08]"
               style={{ borderRadius: 8 }}
             >
               {option}

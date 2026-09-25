@@ -33,8 +33,8 @@ export function RouteStepChip({ step }: { step: RouteStep }) {
     return (
       <span
         title={`${step.minutes} мин`}
-        className="inline-flex h-5 shrink-0 items-center gap-0.5 px-1 text-sm leading-5 font-medium text-[#fcfcfc]"
-        style={{ borderRadius: 6, background: step.color ?? '#71717a' }}
+        className="inline-flex h-5 shrink-0 items-center gap-0.5 px-1 text-sm leading-5 font-medium text-[var(--beeline-white)]"
+        style={{ borderRadius: 6, background: step.color ?? 'var(--muted)' }}
       >
         <StepIcon size={14} />
         {step.label}
@@ -42,7 +42,7 @@ export function RouteStepChip({ step }: { step: RouteStep }) {
     )
   }
   return (
-    <span className="inline-flex h-5 shrink-0 items-center gap-0.5 text-sm leading-5 font-medium whitespace-nowrap text-[#71717a]">
+    <span className="inline-flex h-5 shrink-0 items-center gap-0.5 text-sm leading-5 font-medium whitespace-nowrap text-muted">
       <StepIcon size={14} />
       {step.minutes} мин
     </span>
@@ -54,7 +54,7 @@ function AddressChip({ children, start = false }: { children: string; start?: bo
     <span
       title={children}
       className={cn(
-        'inline-block h-5 max-w-[181px] truncate px-1.5 text-sm leading-5 font-medium text-white',
+        'inline-block h-5 max-w-[181px] truncate px-1.5 text-sm leading-5 font-medium text-[var(--beeline-white)]',
         start ? 'bg-[#ef4444]' : 'bg-[#64748b]',
       )}
       style={{ borderRadius: 6 }}
@@ -65,7 +65,7 @@ function AddressChip({ children, start = false }: { children: string; start?: bo
 }
 
 function Arrow() {
-  return <RiArrowRightSFill size={14} aria-hidden className="shrink-0 text-[#71717a]" />
+  return <RiArrowRightSFill size={14} aria-hidden className="shrink-0 text-muted" />
 }
 
 /** Цепочка «старт › шаги › заявка › шаги › заявка…» — как список в «Параметрах маршрута». */

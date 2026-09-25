@@ -7,7 +7,7 @@ import { cn } from '@/shared/lib/cn'
 import { TICKET_SORT_LABEL as SORT_LABEL, type TicketSortKey } from '../lib/ticketSort'
 
 const MENU_ITEM =
-  'flex h-9 cursor-pointer items-center gap-2 px-3 text-sm font-medium leading-5 text-[#18181b] outline-none data-[focused]:bg-[#f5f5f5] data-[selected]:bg-[#f5f5f5]'
+  'flex h-9 cursor-pointer items-center gap-2 px-3 text-sm font-medium leading-5 text-foreground outline-none data-[focused]:bg-surface-hover data-[selected]:bg-surface-hover'
 
 export function TicketSortMenu({
   value,
@@ -19,7 +19,7 @@ export function TicketSortMenu({
   return (
     <Dropdown>
       <Dropdown.Trigger
-        className="flex h-8 shrink-0 cursor-pointer items-center gap-1 px-3 text-sm leading-5 font-medium text-[#18181b] outline-none transition-colors hover:bg-[#f5f5f5] data-[pressed]:bg-[#f5f5f5]"
+        className="flex h-8 shrink-0 cursor-pointer items-center gap-1 px-3 text-sm leading-5 font-medium text-foreground outline-none transition-colors hover:bg-surface-hover data-[pressed]:bg-surface-hover"
         style={{ borderRadius: 8 }}
       >
         Сортировать по
@@ -28,7 +28,7 @@ export function TicketSortMenu({
       <Dropdown.Popover
         placement="bottom start"
         offset={8}
-        className="w-[220px] border-0 bg-white p-1 outline-none"
+        className="w-[220px] border-0 bg-surface p-1 outline-none"
         style={{
           borderRadius: 12,
           boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
@@ -59,7 +59,7 @@ export function TicketSortMenu({
 }
 
 const ARROW =
-  'flex size-8 items-center justify-center text-[#18181b] transition-colors enabled:cursor-pointer enabled:border enabled:border-[#dedee0] enabled:hover:bg-[#f5f5f5] disabled:cursor-default'
+  'flex size-8 items-center justify-center text-foreground transition-colors enabled:cursor-pointer enabled:border enabled:border-border enabled:hover:bg-surface-hover disabled:cursor-default'
 
 /** Стрелки листания ленты карточек: активна та, в сторону которой ещё есть что показать. */
 export function PagingArrows({

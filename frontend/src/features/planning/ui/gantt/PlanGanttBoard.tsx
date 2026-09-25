@@ -85,9 +85,9 @@ function hintFor(placement: Placement, ticket: GanttTicket, preview: PlanMoveRes
 }
 
 const HINT_TONE = {
-  muted: 'bg-[#18181b] text-[#fcfcfc]',
-  warning: 'bg-[#f59e0b] text-[#18181b]',
-  danger: 'bg-[#ff383c] text-[#fcfcfc]',
+  muted: 'bg-background-inverse text-[var(--beeline-white)]',
+  warning: 'bg-[#f59e0b] text-foreground',
+  danger: 'bg-danger text-danger-foreground',
 }
 
 /** Рабочая область Ганта: лента визитов, неназначенные заявки и подтверждения ручных правок. */
