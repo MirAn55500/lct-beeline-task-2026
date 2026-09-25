@@ -13,7 +13,7 @@ class QualificationCode(StrEnum):
 
 QUALIFICATION_LABELS: dict[str, str] = {
     QualificationCode.MASTER: "Мастер",
-    QualificationCode.WORKER: "Работник",
+    QualificationCode.WORKER: "Бывалый",
     QualificationCode.NOVICE: "Новичок",
 }
 
@@ -23,7 +23,7 @@ _BY_LABEL: dict[str, str] = {
 _BY_LABEL.update({code: code for code in QUALIFICATION_LABELS})
 # Старые имена из ранних макетов / сидов.
 _BY_LABEL["работяга"] = QualificationCode.WORKER
-_BY_LABEL["бывалый"] = QualificationCode.WORKER
+_BY_LABEL["работник"] = QualificationCode.WORKER
 _BY_LABEL["новичек"] = QualificationCode.NOVICE
 
 QUALIFICATION_HINTS: dict[str, str] = {

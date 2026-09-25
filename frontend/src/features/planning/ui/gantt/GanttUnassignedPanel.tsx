@@ -11,6 +11,8 @@ type GanttUnassignedPanelProps = {
   tickets: GanttUnassigned[]
   /** Нет плана на день — панель пустая, без счётчика. */
   empty: boolean
+  /** Текст, когда неназначенных нет; по умолчанию — «Все заявки распределены». */
+  emptyText?: string
   selectedId: string | null
   draggingId: string | null
   onDragStart: (ticket: GanttUnassigned, event: PointerEvent<HTMLElement>) => void
@@ -20,6 +22,7 @@ type GanttUnassignedPanelProps = {
 export function GanttUnassignedPanel({
   tickets,
   empty,
+  emptyText = 'Все заявки распределены',
   selectedId,
   draggingId,
   onDragStart,
@@ -44,7 +47,7 @@ export function GanttUnassignedPanel({
 
       {empty ? null : tickets.length === 0 ? (
         <p className="flex flex-1 items-center justify-center text-sm leading-5 text-[#71717a]">
-          Все заявки распределены
+          {emptyText}
         </p>
       ) : (
         <div

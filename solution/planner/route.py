@@ -29,6 +29,8 @@ from .textutil import plural
 __all__ = ["RouteState"]
 
 _EPS = 1e-9
+_SECOND = 1 / 60
+"""Допуск для времени по профилю rRAPTOR: он хранит целые секунды, а расписание — минуты."""
 _NEG_INF = -math.inf
 
 
@@ -82,6 +84,61 @@ def schedule_leg(cal, timing, free_from: float, minutes: float, strict: bool):
     return departure, arrival, service_start, service_end, waiting, idle
 
 
+def schedule_leg_timed(cal, timing, free_from: float, timed, a, b, mode, strict: bool):
+    """То же, что `schedule_leg`, но время в пути зависит от момента выезда.
+
+    Возвращает ещё и минуты в пути при выбранном выезде (седьмым элементом): у
+    общественного транспорта они свои для каждого момента — выехав позже, можно
+    попасть на тот же автобус и ждать его меньше.
+
+    Отложенный выезд берётся прямо из профиля: `depart_by` — самый поздний выезд,
+    при котором успеваем к началу работ. Перерывы профиль не видит, поэтому выезд
+    проверяется календарём, и если прибытие с ним не сходится — выезжаем сразу.
+    """
+    earliest_departure = cal.first_m(free_from)
+    if earliest_departure is None:
+        return None
+    first_minutes = timed.minutes_at(a, b, mode, earliest_departure)
+    earliest_arrival = cal.add_m(earliest_departure, first_minutes)
+    if earliest_arrival is None or earliest_arrival > timing.window_end + _EPS:
+        return None
+
+    not_before = timing.service_not_before
+    target = earliest_arrival if earliest_arrival > not_before else not_before
+    service_start = cal.first_m(target)
+    if service_start is None:
+        return None
+    if strict and service_start > timing.window_end + _EPS:
+        return None
+    service_end = cal.add_m(service_start, timing.duration)
+    if service_end is None:
+        return None
+
+    aim = service_start if service_start < timing.window_end else timing.window_end
+    departure, arrival, minutes = earliest_departure, earliest_arrival, first_minutes
+    later = cal.first_m(timed.depart_by(a, b, mode, aim))
+    if later is not None and later > earliest_departure + _EPS:
+        later_minutes = timed.minutes_at(a, b, mode, later)
+        later_arrival = cal.add_m(later, later_minutes)
+        if later_arrival is not None and later_arrival <= aim + _SECOND:
+            departure, arrival, minutes = later, later_arrival, later_minutes
+
+    waiting = cal.working_between_m(arrival, service_start)
+    idle = cal.working_between_m(earliest_departure, departure)
+    return departure, arrival, service_start, service_end, waiting, idle, minutes
+
+
+def latest_departure_timed(cal, timed, a, b, mode, arrive_by: float) -> float | None:
+    """Самый поздний выезд из `a`, чтобы быть в `b` не позже `arrive_by`, с учётом календаря."""
+    depart = timed.depart_by(a, b, mode, arrive_by)
+    minutes = timed.minutes_at(a, b, mode, depart)
+    arrival = cal.add_m(depart, minutes)
+    if arrival is not None and arrival <= arrive_by + _SECOND and cal.contains_m(depart):
+        return depart
+    # Между выездом и прибытием перерыв: время по профилю — но отсчёт по календарю.
+    return cal.sub_m(arrive_by, minutes)
+
+
 class RouteState:
     """Изменяемое состояние маршрута. Все времена — минуты от `context.origin`."""
 
@@ -90,6 +147,7 @@ class RouteState:
         "engineer",
         "cal",
         "mode",
+        "timed",
         "stops",
         "locked_count",
         "floor_m",
@@ -122,6 +180,8 @@ class RouteState:
         self.engineer = engineer
         self.cal = ctx.calendar(engineer)
         self.mode = engineer.transport_mode
+        self.timed = ctx.timed_for(self.mode)
+        """Модель со временем от момента выезда (общественный транспорт) или None."""
         self.stops: list[Request] = list(stops)
         self.locked_count = locked_count
         self.floor_m: float = _NEG_INF
@@ -159,6 +219,7 @@ class RouteState:
         copy.engineer = self.engineer
         copy.cal = self.cal
         copy.mode = self.mode
+        copy.timed = self.timed
         copy.stops = list(self.stops)
         copy.locked_count = self.locked_count
         copy.floor_m = self.floor_m
@@ -270,15 +331,22 @@ class RouteState:
                 continue
 
             timing = ctx.timing(request)
-            km, minutes = travel.both(point, request.point, mode)
-
             # Выехать раньше, чем наступило «сейчас», нельзя: см. `floor_m`.
             free_from = cursor if cursor > self.floor_m else self.floor_m
-            leg = schedule_leg(cal, timing, free_from, minutes, strict)
+            if self.timed is None:
+                km, minutes = travel.both(point, request.point, mode)
+                leg = schedule_leg(cal, timing, free_from, minutes, strict)
+            else:
+                km = travel.distance_km(point, request.point, mode)
+                leg = schedule_leg_timed(
+                    cal, timing, free_from, self.timed, point, request.point, mode, strict
+                )
             if leg is None:
                 self.feasible = False
                 return False
-            departure, arrival, service_start, service_end, waiting, idle = leg
+            departure, arrival, service_start, service_end, waiting, idle = leg[:6]
+            if self.timed is not None:
+                minutes = leg[6]
 
             self._dep[i] = departure
             self._arr[i] = arrival
@@ -325,8 +393,15 @@ class RouteState:
                 bound = cal.sub_m(shift_end, timing.duration)
             else:
                 nxt = self.stops[i + 1]
-                leg = travel.travel_minutes(request.point, nxt.point, mode)
-                latest_departure = cal.sub_m(latest[i + 1], leg)
+                if self.timed is None:
+                    leg = travel.travel_minutes(request.point, nxt.point, mode)
+                    latest_departure = cal.sub_m(latest[i + 1], leg)
+                elif latest[i + 1] == _NEG_INF:
+                    latest_departure = None
+                else:
+                    latest_departure = latest_departure_timed(
+                        cal, self.timed, request.point, nxt.point, mode, latest[i + 1]
+                    )
                 bound = None if latest_departure is None else cal.sub_m(latest_departure, timing.duration)
             if bound is None:
                 latest[i] = _NEG_INF
@@ -359,12 +434,18 @@ class RouteState:
         if cursor == _NEG_INF:
             return None
 
-        in_km, in_min = travel.both(prev_point, request.point, mode)
-
-        leg = schedule_leg(cal, timing, cursor, in_min, strict)
+        timed = self.timed
+        if timed is None:
+            in_km, in_min = travel.both(prev_point, request.point, mode)
+            leg = schedule_leg(cal, timing, cursor, in_min, strict)
+        else:
+            in_km = travel.distance_km(prev_point, request.point, mode)
+            leg = schedule_leg_timed(cal, timing, cursor, timed, prev_point, request.point, mode, strict)
         if leg is None:
             return None
-        _, _, service_start, service_end, waiting, _ = leg
+        _, _, service_start, service_end, waiting, _ = leg[:6]
+        if timed is not None:
+            in_min = leg[6]
 
         if position == len(self.stops):
             out_km = out_min = 0.0
@@ -373,11 +454,18 @@ class RouteState:
         else:
             nxt = self.stops[position]
             nxt_timing = ctx.timing(nxt)
-            out_km, out_min = travel.both(request.point, nxt.point, mode)
             removed_km = self._leg_km[position]
             removed_min = self._leg_minutes[position]
-
-            nxt_leg = schedule_leg(cal, nxt_timing, service_end, out_min, strict)
+            if timed is None:
+                out_km, out_min = travel.both(request.point, nxt.point, mode)
+                nxt_leg = schedule_leg(cal, nxt_timing, service_end, out_min, strict)
+            else:
+                out_km = travel.distance_km(request.point, nxt.point, mode)
+                nxt_leg = schedule_leg_timed(
+                    cal, nxt_timing, service_end, timed, request.point, nxt.point, mode, strict
+                )
+                if nxt_leg is not None:
+                    out_min = nxt_leg[6]
             if nxt_leg is None:
                 return None
             nxt_start, new_nxt_wait = nxt_leg[2], nxt_leg[4]
@@ -521,8 +609,8 @@ class RouteState:
         if not self.stops:
             return FeasibilityResult(False, ReasonCode.TIME_CONFLICT, self._solo_detail(request))
         free_at = self._end[-1]
-        minutes = ctx.travel.travel_minutes(self.stops[-1].point, request.point, self.mode)
         departure = cal.first_m(free_at)
+        minutes = self._minutes_from(self.stops[-1].point, request.point, departure)
         arrival = cal.add_m(departure, minutes) if departure is not None else None
 
         if arrival is None:
@@ -555,7 +643,7 @@ class RouteState:
         shift_start = cal.start_m
         if shift_start is None:
             return f"у {self.engineer.name} нет рабочего времени"
-        minutes = ctx.travel.travel_minutes(self.engineer.start_point, request.point, self.mode)
+        minutes = self._minutes_from(self.engineer.start_point, request.point, shift_start)
         arrival = cal.add_m(shift_start, minutes)
         if arrival is None:
             return f"{self.engineer.name} не успевает доехать в пределах смены"
@@ -570,6 +658,12 @@ class RouteState:
             f"работа длительностью {int(timing.duration)} мин не помещается "
             f"в смену {self.engineer.name}"
         )
+
+    def _minutes_from(self, a: GeoPoint, b: GeoPoint, depart: float | None) -> float:
+        """Минуты в пути при выезде в `depart` — для текстов диагностики."""
+        if self.timed is not None and depart is not None:
+            return self.timed.minutes_at(a, b, self.mode, depart)
+        return self.ctx.travel.travel_minutes(a, b, self.mode)
 
     def _end_time_text(self) -> str:
         if not self._end:

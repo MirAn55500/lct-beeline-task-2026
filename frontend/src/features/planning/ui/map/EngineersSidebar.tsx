@@ -56,6 +56,9 @@ export function EngineersSidebar({
     onHover(null)
   }
 
+  // Плана на день нет — панель пустая, как в макете «work-area - map-layout».
+  if (engineers.length === 0) return <AppPanel className="min-h-0 flex-1" />
+
   return (
     <AppPanel className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex shrink-0 items-center gap-2 p-3">

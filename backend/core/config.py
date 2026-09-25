@@ -21,9 +21,8 @@ class Settings(BaseSettings):
     ors_api_key: str | None = None
     # Запасной ORS (на стенде, без общественного транспорта), если основной не отвечает
     ors_fallback_url: str | None = None
-    # Параллельных запросов фонового досчёта расписаний: 2 — ORS на стенде рядом с
-    # backend; на отдельной машине под ORS — 6-8
-    transit_workers: int = 2
+    # Фид GTFS для общественного транспорта (RAPTOR); не задан — solution/deploy/ors/files/gtfs.zip
+    gtfs_path: str | None = None
     # Где хранить кэш ответов ORS; не задан — solution/data/routing_cache.json
     routing_cache_path: str | None = None
     # Геокодирование: DaData (ключ с dadata.ru; секрет включает стандартизацию), резерв — OSM

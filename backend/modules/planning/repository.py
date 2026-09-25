@@ -14,12 +14,17 @@ from modules.personnel.models.engineer_equipment import EngineerEquipment
 from modules.personnel.models.engineer_skill import EngineerSkill
 from modules.planning.models.assignment import Assignment
 from modules.planning.models.plan import Plan
+from modules.planning.models.route import Route
 from modules.tickets.models.request import Request
 
 
 class PlanningRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    @property
+    def session(self) -> AsyncSession:
+        return self._session
 
     async def find_latest_plan(self, region_id: int, day: date) -> Plan | None:
         result = await self._session.exec(
@@ -158,6 +163,24 @@ class PlanningRepository:
             await self.ensure_dict(DictGroup.UNASSIGNED_REASON, code)
         return await self.list_unassigned_reasons()
 
+    async def list_route_paths(self, plan_id: int) -> dict[int, dict]:
+        """assignment_id → path участка (линия и состав поездки) для плана."""
+        result = await self._session.exec(
+            select(Route.assignment_id, Route.path)
+            .join(Assignment, Route.assignment_id == Assignment.assignment_id)
+            .where(Assignment.plan_id == plan_id)
+        )
+        return {assignment_id: path or {} for assignment_id, path in result.all()}
+
+    async def list_assignments(self, plan_id: int) -> list[Assignment]:
+        result = await self._session.exec(
+            select(Assignment)
+            .where(Assignment.plan_id == plan_id)
+            .options(selectinload(Assignment.unassigned_reason))
+            .order_by(col(Assignment.engineer_id), col(Assignment.position))
+        )
+        return list(result.all())
+
     async def save_plan(
         self,
         *,
@@ -166,6 +189,7 @@ class PlanningRepository:
         version: int,
         reference_plan_id: int | None,
         rows: list[Assignment],
+        legs: dict[int, dict] | None = None,
     ) -> Plan:
         plan = Plan(
             version=version,
@@ -179,6 +203,12 @@ class PlanningRepository:
         for row in rows:
             row.plan_id = plan.plan_id or 0
             self._session.add(row)
+        if legs:
+            await self._session.flush()
+            for row in rows:
+                leg = legs.get(row.request_id)
+                if leg is not None and row.engineer_id is not None and row.assignment_id is not None:
+                    self._session.add(Route(assignment_id=row.assignment_id, is_active=True, **leg))
         await self._session.commit()
         await self._session.refresh(plan)
         return plan

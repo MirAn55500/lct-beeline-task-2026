@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { ScrollShadow } from '@heroui/react'
 import { RiArrowRightLine, RiCalendarScheduleLine } from '@remixicon/react'
-import { Link } from 'react-router'
+import { Link, type To } from 'react-router'
 
 import { routes } from '@/shared/config/routes'
 import { cn } from '@/shared/lib/cn'
@@ -154,11 +154,14 @@ function PlanBars({
 type DayPlanPreviewProps = {
   className?: string
   rows?: PlanRow[]
+  /** Куда ведёт «Перейти к плану» — Гант с тем же регионом, днём и версией. */
+  planLink?: To
 }
 
 export function DayPlanPreview({
   className,
   rows = [],
+  planLink = routes.planGantt,
 }: DayPlanPreviewProps) {
   const { start, end } = useMemo(() => buildDayRange(rows), [rows])
   const labels = useMemo(() => buildLabels(start, end), [start, end])
@@ -202,7 +205,7 @@ export function DayPlanPreview({
 
       <div className="flex shrink-0 justify-end px-5 pt-2 pb-5">
         <Link
-          to={routes.planGantt}
+          to={planLink}
           className="inline-flex h-9 cursor-pointer items-center gap-2 bg-[#0485f7] px-4 text-sm font-medium text-[#fcfcfc] transition-colors hover:bg-[#0374d9]"
           style={{ borderRadius: 8 }}
         >

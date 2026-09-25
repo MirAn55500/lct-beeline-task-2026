@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
+from sqlalchemy import Column, Text
 from sqlmodel import Field, Relationship
 
 from core.base_model import BaseTable
@@ -32,6 +33,19 @@ class Assignment(BaseTable, table=True):
     )
     actual_start_time: Optional[datetime] = Field(default=None)
     actual_end_time: Optional[datetime] = Field(default=None)
+
+    # Расписание визита из плана (местное время региона). Пусто у неназначенных и у
+    # планов, посчитанных до миграции 0010.
+    position: Optional[int] = Field(default=None)
+    planned_departure_at: Optional[datetime] = Field(default=None)
+    planned_arrival_at: Optional[datetime] = Field(default=None)
+    planned_start_at: Optional[datetime] = Field(default=None)
+    planned_end_at: Optional[datetime] = Field(default=None)
+    travel_minutes: Optional[float] = Field(default=None)
+    distance_km: Optional[float] = Field(default=None)
+    waiting_minutes: Optional[float] = Field(default=None)
+    idle_minutes: Optional[float] = Field(default=None)
+    explanation: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 
     request: Optional["Request"] = Relationship(back_populates="assignments")
     engineer: Optional["Engineer"] = Relationship(back_populates="assignments")

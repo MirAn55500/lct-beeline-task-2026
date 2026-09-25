@@ -55,3 +55,74 @@ class DayOverviewResponse(BaseModel):
     engineers: EngineersCounter
     planned_dates: list[date] = Field(default_factory=list)
     plans: list[PlanVersionResponse] = Field(default_factory=list)
+
+
+# --- План дня для карты и Ганта: та же форма, что у выгрузки планировщика в моках
+# frontend (frontend/src/features/planning/mocks/index.ts, тип PlanExport). Координаты —
+# [lon, lat], времена — ISO в поясе региона.
+
+
+class PlanEngineerExport(BaseModel):
+    id: str
+    name: str
+    start: list[float]
+    workIntervals: list[list[str]]
+    skills: list[str]
+    skillLevels: list[list[str]] = Field(default_factory=list)
+    transport: str
+    equipment: list[str] = Field(default_factory=list)
+
+
+class PlanRequestExport(BaseModel):
+    id: str
+    point: list[float]
+    window: list[str]
+    address: str
+    type: str
+    skill: str
+    duration: int
+    priority: str
+    equipment: list[str] = Field(default_factory=list)
+
+
+class PlanVisitExport(BaseModel):
+    requestId: str
+    geometryRange: list[int] | None = None
+    departureAt: str
+    arrivalAt: str
+    serviceStartAt: str
+    serviceEndAt: str
+    travelMinutes: float
+    distanceKm: float
+    waitingMinutes: float
+    idleMinutes: float
+    transit: list[str] = Field(default_factory=list)
+
+
+class PlanRouteExport(BaseModel):
+    engineerId: str
+    startAt: str | None
+    endAt: str | None
+    utilization: float
+    geometrySource: str = "straight"
+    polyline: list[list[float]]
+    geometry: list[list[float]] = Field(default_factory=list)
+    visits: list[PlanVisitExport]
+
+
+class PlanUnassignedExport(BaseModel):
+    requestId: str
+    reason: str
+    explanation: str
+
+
+class PlanExportResponse(BaseModel):
+    planId: int
+    version: int
+    key: str
+    region: str
+    date: date
+    engineers: list[PlanEngineerExport]
+    requests: list[PlanRequestExport]
+    routes: list[PlanRouteExport]
+    unassigned: list[PlanUnassignedExport]

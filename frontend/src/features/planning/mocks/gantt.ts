@@ -11,7 +11,16 @@ import type {
   GanttTicket,
   GanttUnassigned,
 } from '../ganttTypes'
-import { LEVEL_LABEL, MOCK_MAP_REGIONS, PLANS, getMapDataset, shortAddress, type PlanExport } from './index'
+import type { MapEngineer } from '../mapTypes'
+import {
+  LEVEL_LABEL,
+  MOCK_MAP_REGIONS,
+  PLANS,
+  buildMapDataset,
+  getMapDataset,
+  shortAddress,
+  type PlanExport,
+} from './index'
 
 /** «Сейчас» для моков: 15:40 дня плана — часть визитов прошла, часть впереди. */
 export const MOCK_GANTT_NOW = 15 * 60 + 40
@@ -52,8 +61,15 @@ function statusAt(departure: number, start: number, end: number, now: number): G
   return 'assigned'
 }
 
-function buildGantt(plan: PlanExport, regionId: number): GanttDataset {
-  const map = getMapDataset(regionId)
+/**
+ * Всё для Ганта из одного плана — моковой выгрузки или ответа `/api/planning/plan`.
+ * `now` — «сейчас» в минутах от полуночи дня плана: от него статусы визитов.
+ */
+export function buildGantt(
+  plan: PlanExport,
+  now: number = MOCK_GANTT_NOW,
+  mapEngineers: MapEngineer[] = buildMapDataset(plan).engineers,
+): GanttDataset {
   const requestById = new Map(plan.requests.map((request) => [request.id, request]))
 
   const toTicket = (requestId: string): GanttTicket => {
@@ -72,7 +88,7 @@ function buildGantt(plan: PlanExport, regionId: number): GanttDataset {
   }
 
   const engineers = plan.engineers.map((engineer, index): GanttEngineer => ({
-    ...map.engineers[index]!,
+    ...mapEngineers[index]!,
     skills: engineer.skills,
     equipment: engineer.equipment,
     shifts: engineer.workIntervals.map(([from, to]) => [minutes(from), minutes(to)]),
@@ -87,7 +103,7 @@ function buildGantt(plan: PlanExport, regionId: number): GanttDataset {
         engineerId: route.engineerId,
         start,
         end,
-        status: statusAt(minutes(visit.departureAt), start, end, MOCK_GANTT_NOW),
+        status: statusAt(minutes(visit.departureAt), start, end, now),
       }
     }),
   )
@@ -128,7 +144,12 @@ function buildGantt(plan: PlanExport, regionId: number): GanttDataset {
   }
 }
 
-const DATASETS = new Map(MOCK_MAP_REGIONS.map((region, index) => [region.id, buildGantt(PLANS[index]!, region.id)]))
+const DATASETS = new Map(
+  MOCK_MAP_REGIONS.map((region, index) => [
+    region.id,
+    buildGantt(PLANS[index]!, MOCK_GANTT_NOW, getMapDataset(region.id).engineers),
+  ]),
+)
 
 /** План региона для Ганта; неизвестный регион — первый из списка. */
 export function getGanttDataset(regionId: number | null): GanttDataset {

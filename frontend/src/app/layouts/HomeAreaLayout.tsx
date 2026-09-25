@@ -14,11 +14,7 @@ import {
   useGetDayOverviewQuery,
   useRecalculatePlanMutation,
 } from '@/features/planning'
-import {
-  TicketsUploadDialog,
-  downloadTickets,
-  useLazyGetTicketsQuery,
-} from '@/features/tickets'
+import { TicketsUploadDialog, useTicketsExport } from '@/features/tickets'
 import { ASIDE_WIDTH_CLASS, cn } from '@/shared/lib'
 import { AppNav, AppPanel, BrandBar, ContextHeader } from '@/shared/ui'
 
@@ -49,9 +45,8 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
   const { data: regions = [], isLoading, isError } = useGetRegionsQuery()
   const [regionId, setRegionId] = useState<number | null>(null)
   const [planId, setPlanId] = useState<number | null>(null)
-  const [recalculatePlan, { isLoading: isRecalculating }] =
-    useRecalculatePlanMutation()
-  const [loadTickets] = useLazyGetTicketsQuery()
+  const [recalculatePlan, { isLoading: isRecalculating }] = useRecalculatePlanMutation()
+  const exportTickets = useTicketsExport()
   const [uploadOpen, setUploadOpen] = useState(false)
   const [rebuildOpen, setRebuildOpen] = useState(false)
 
@@ -141,22 +136,12 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
           onExport={
             regionId == null
               ? undefined
-              : async (format) => {
-                  try {
-                    const tickets = await loadTickets({
-                      regionId,
-                      date: date.toString(),
-                      planId: selectedPlanId,
-                    }).unwrap()
-                    downloadTickets(
-                      tickets,
-                      format,
-                      `Заявки_${regionName ?? regionId}_${date.toString()}`,
-                    )
-                  } catch {
-                    toast.danger('Не удалось выгрузить заявки')
-                  }
-                }
+              : (format) =>
+                  exportTickets(
+                    { regionId, date: date.toString(), planId: selectedPlanId },
+                    format,
+                    `Заявки_${regionName ?? regionId}_${date.toString()}`,
+                  )
           }
         />
         <div className="flex min-h-0 flex-1 flex-col gap-4">

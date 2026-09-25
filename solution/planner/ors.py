@@ -1390,6 +1390,7 @@ def attach_route_geometry(
     *,
     cache: RoutingCache | None = None,
     refresh: bool = False,
+    transit_legs: "Callable[[GeoPoint, GeoPoint, datetime], tuple[list[list[float]], list[dict]] | None] | None" = None,
 ) -> PlanResult:
     """Дописать в план настоящие линии маршрутов по улицам и состав поездок на транспорте.
 
@@ -1419,8 +1420,12 @@ def attach_route_geometry(
     `"mixed"`: одна непригодная пара точек больше не лишает линии весь маршрут. Если не
     построен ни один участок, маршрут остаётся как был — `"straight"` и пометка в
     `warnings`.
+
+    `transit_legs(a, b, выезд)` — свой источник линии и состава поездки на общественном
+    транспорте (RAPTOR по `gtfs.zip`, `raptor.transit_legs`): спрашивается первым, ORS —
+    только если он не ответил (точка вне фида).
     """
-    if client is None and cache is None:
+    if client is None and cache is None and transit_legs is None:
         raise ValueError("нужен либо клиент ORS, либо кэш с геометрией")
 
     routes: list[RouteResult] = []
@@ -1499,13 +1504,16 @@ def attach_route_geometry(
             legs: list[list[list[float]] | None] = [None] * (len(waypoints) - 1)
             transit: list[list[dict]] = [[] for _ in legs]
         else:
-            answers = [
-                leg_geometry(
+            answers = []
+            for (a, b), visit in zip(zip(waypoints, waypoints[1:]), route.visits):
+                own = (
+                    transit_legs(a, b, visit.departure_at)
+                    if transit_mode and transit_legs is not None else None
+                )
+                answers.append(own if own is not None else leg_geometry(
                     profile, a, b,
                     transit_moment(visit.departure_at) if transit_mode else None,
-                )
-                for (a, b), visit in zip(zip(waypoints, waypoints[1:]), route.visits)
-            ]
+                ))
             legs = [coordinates for coordinates, _ in answers]
             transit = [steps for _, steps in answers]
 
@@ -1585,14 +1593,19 @@ class Routing:
             return self.travel.has_matrix
         return True
 
-    def attach(self, result: PlanResult) -> PlanResult:
-        """Дописать в план геометрию маршрутов и накопленные предупреждения."""
+    def attach(self, result: PlanResult, *, transit_legs=None) -> PlanResult:
+        """Дописать в план геометрию маршрутов и накопленные предупреждения.
+
+        `transit_legs` — см. `attach_route_geometry`: состав поездок на общественном
+        транспорте из RAPTOR вместо ORS."""
         extra = tuple(self.notes)
         if isinstance(self.travel, OrsTravelModel):
             extra = extra + tuple(n for n in self.travel.report() if n not in extra)
-        if self.client is None and self.cache is None:
+        if self.client is None and self.cache is None and transit_legs is None:
             return dc_replace(result, warnings=result.warnings + extra) if extra else result
-        enriched = attach_route_geometry(result, self.client, cache=self.cache)
+        enriched = attach_route_geometry(
+            result, self.client, cache=self.cache, transit_legs=transit_legs
+        )
         merged = enriched.warnings + tuple(n for n in extra if n not in enriched.warnings)
         return dc_replace(enriched, warnings=merged)
 

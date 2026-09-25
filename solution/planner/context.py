@@ -40,6 +40,15 @@ class PlanContext:
 
     __slots__ = ("scenario", "settings", "travel", "origin", "_calendars", "_timings")
 
+    def timed_for(self, mode):
+        """Модель со временем от момента выезда для этого способа передвижения, или None.
+
+        Такая модель (`planner.timed.TimedTransitModel`) умеет `minutes_at`/`depart_by`;
+        обычная отвечает одним числом на пару, и тогда расчёт идёт прежним путём.
+        """
+        is_timed = getattr(self.travel, "is_timed", None)
+        return self.travel if is_timed is not None and is_timed(mode) else None
+
     def __init__(self, scenario: Scenario, travel: TravelModel | None = None) -> None:
         self.scenario = scenario
         self.settings = scenario.settings

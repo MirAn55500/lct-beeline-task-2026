@@ -1,18 +1,19 @@
-import type { ReactNode, Ref } from 'react'
-import { Link } from 'react-router'
+import { Fragment, type ReactNode, type Ref } from 'react'
 import {
   RiArrowDownSLine,
+  RiArrowRightSFill,
   RiArrowRightUpLine,
   RiArrowUpSLine,
   RiBuilding2Fill,
   RiMapPinAddLine,
 } from '@remixicon/react'
 
-import { routes as appRoutes } from '@/shared/config/routes'
 import { cn } from '@/shared/lib/cn'
 
+import { legSteps } from '../../lib/routeSteps'
 import type { EngineerRoute, MapEngineer } from '../../mapTypes'
 import { MetaSeparator, TicketTags } from './parts'
+import { RouteStepChip } from './RouteSteps'
 
 /** Ширина колонки панели поверх карты вместе с отступами — для fitBounds. */
 export const ROUTE_PANEL_INSET = 333
@@ -56,6 +57,8 @@ type RouteDetailsPanelProps = {
   activeStopId: string | null
   onToggleStop: (stopId: string) => void
   onAddTicket: () => void
+  /** «Изменить параметры маршрута» — окно с транспортом и вариантами маршрута. */
+  onEditParams: () => void
   /** Позиция вставки при перетаскивании заявки, null — не тащат. */
   dropIndex: number | null
   /** Список для хит-теста перетаскивания: элементы с data-stop-index. */
@@ -68,6 +71,7 @@ export function RouteDetailsPanel({
   activeStopId,
   onToggleStop,
   onAddTicket,
+  onEditParams,
   dropIndex,
   listRef,
 }: RouteDetailsPanelProps) {
@@ -89,13 +93,14 @@ export function RouteDetailsPanel({
               с {engineer.routeFrom} по {engineer.routeTo}
             </span>
           </h2>
-          <Link
-            to={appRoutes.personnel}
-            className="inline-flex w-fit items-start gap-0.5 text-sm leading-5 font-medium text-[#18181b] hover:underline"
+          <button
+            type="button"
+            onClick={onEditParams}
+            className="inline-flex w-fit cursor-pointer items-start gap-0.5 text-sm leading-5 font-medium text-[#18181b] hover:underline"
           >
             Изменить параметры маршрута
             <RiArrowRightUpLine size={10} className="mt-0.5 opacity-60" />
-          </Link>
+          </button>
         </div>
 
         <div
@@ -162,15 +167,19 @@ export function RouteDetailsPanel({
                   {expanded ? (
                     <span className="flex flex-col gap-2">
                       <TicketTags ticket={stop} />
-                      {stop.transit.length > 0 ? (
-                        <span className="flex flex-col gap-0.5 text-xs leading-5 text-[#71717a]">
-                          {stop.transit.map((step, stepIndex) => (
-                            <span key={stepIndex} className="truncate" title={step}>
-                              {step}
-                            </span>
-                          ))}
-                        </span>
-                      ) : null}
+                      <span
+                        className="flex flex-wrap items-center gap-1"
+                        title={stop.transit.join('\n') || undefined}
+                      >
+                        {legSteps(stop.transit, engineer.transport, stop.travelMinutes).map((step, stepIndex) => (
+                          <Fragment key={stepIndex}>
+                            {stepIndex > 0 ? (
+                              <RiArrowRightSFill size={14} aria-hidden className="shrink-0 text-[#71717a]" />
+                            ) : null}
+                            <RouteStepChip step={step} />
+                          </Fragment>
+                        ))}
+                      </span>
                     </span>
                   ) : null}
                 </button>

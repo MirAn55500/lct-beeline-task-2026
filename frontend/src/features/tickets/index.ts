@@ -24,3 +24,4 @@ export {
   type TicketsFiltersState,
 } from './ui/TicketsFiltersPopover'
 export { TicketsPanel } from './ui/TicketsPanel'
+export { useTicketsExport } from './lib/useTicketsExport'

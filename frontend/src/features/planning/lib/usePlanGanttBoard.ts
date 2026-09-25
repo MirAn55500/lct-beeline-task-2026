@@ -1,8 +1,11 @@
-import { useState } from 'react'
+import { skipToken } from '@reduxjs/toolkit/query/react'
+import { useMemo, useState } from 'react'
 
 import type { GanttEngineer, GanttTask, GanttTicket, GanttUnassigned } from '../ganttTypes'
-import { MOCK_GANTT_NOW, getGanttDataset } from '../mocks/gantt'
+import { MOCK_GANTT_NOW, buildGantt, getGanttDataset, type GanttDataset } from '../mocks/gantt'
+import { useGetPlanExportQuery } from '../planApi'
 import { formatRange, type Placement } from './ganttPlacement'
+import { isOfflineError } from './offline'
 
 /**
  * Ручная постановка, которая ждёт подтверждения. Пока она висит, лента показывает
@@ -82,14 +85,35 @@ function applyChange(
 const busyMinutes = (tasks: GanttTask[], engineerId: string) =>
   tasks.reduce((sum, task) => (task.engineerId === engineerId ? sum + task.duration : sum), 0)
 
+/** «Сейчас» в минутах от полуночи дня плана: прошлый день — весь прошёл, будущий — ещё не начался. */
+function nowFor(date: string) {
+  const today = new Date()
+  const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  if (date < iso) return 24 * 60
+  if (date > iso) return -1
+  return today.getHours() * 60 + today.getMinutes()
+}
+
+const EMPTY: GanttDataset = { date: '', engineers: [], tasks: [], unassigned: [], ticketTypes: [], qualifications: {} }
+
 /**
- * Состояние страницы Ганта на моках. На другой день без плана лента пустая, как «Ganta — Empty».
- * Когда появится API, визиты придут из RTK Query, а ручные постановки уйдут мутацией перепланирования.
+ * Состояние страницы Ганта. Визиты — из `/api/planning/plan`: выбранная в шапке версия плана,
+ * без неё — последняя. Без плана на этот день лента пустая, как «Ganta — Empty».
+ * Если backend недоступен — моки. Ручные постановки пока локальные: мутации перепланирования в API ещё нет.
  */
-export function usePlanGanttBoard(regionId: number | null, date: string) {
-  const dataset = getGanttDataset(regionId)
-  const hasPlan = date === dataset.date
-  const key = `${regionId}:${date}`
+export function usePlanGanttBoard(regionId: number | null, date: string, planId: number | null = null) {
+  const query = useGetPlanExportQuery(regionId != null ? { regionId, date, planId } : skipToken)
+  // 404 — плана на этот день нет; ошибка без статуса ответа — backend не поднят, остаёмся на моках.
+  const offline = isOfflineError(query.isError, query.error)
+  // Пока грузится другая версия, держим прежнюю ленту, а не мигаем пустой.
+  const plan = query.currentData ?? (query.isFetching ? query.data : undefined)
+  const now = plan ? nowFor(date) : MOCK_GANTT_NOW
+  const dataset = useMemo(
+    () => (plan ? buildGantt(plan, now) : offline ? getGanttDataset(regionId) : EMPTY),
+    [plan, now, offline, regionId],
+  )
+  const hasPlan = plan ? true : offline && date === dataset.date
+  const key = `${regionId}:${date}:${plan ? `plan-${plan.planId}` : offline ? 'mock' : 'none'}`
 
   const [loadedKey, setLoadedKey] = useState(key)
   const [tasks, setTasks] = useState<GanttTask[]>(() => (hasPlan ? dataset.tasks : []))
@@ -158,9 +182,12 @@ export function usePlanGanttBoard(regionId: number | null, date: string) {
   }
 
   return {
-    date: dataset.date,
+    date: dataset.date || date,
     hasPlan,
-    now: MOCK_GANTT_NOW,
+    isLoading: query.isFetching && !plan,
+    // Старые версии (до расписаний в БД) приходят без визитов и неназначенных.
+    noSchedule: plan != null && plan.requests.length > 0 && plan.routes.every((route) => route.visits.length === 0) && plan.unassigned.length === 0,
+    now,
     engineers,
     tasks: view.tasks,
     unassigned: view.unassigned,

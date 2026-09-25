@@ -273,6 +273,11 @@ export function PlanGanttBoard({ board, viewKey }: PlanGanttBoardProps) {
         <GanttUnassignedPanel
           tickets={board.unassigned}
           empty={!board.hasPlan}
+          emptyText={
+            board.noSchedule
+              ? 'В этой версии плана нет расписания визитов — она составлена до его появления. Обновите план'
+              : undefined
+          }
           selectedId={board.selectedTicketId}
           draggingId={drag?.source === 'unassigned' ? drag.ticket.id : null}
           onDragStart={(ticket: GanttUnassigned, event) =>

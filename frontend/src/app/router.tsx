@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useSearchParams } from 'react-router'
-import { toast } from '@heroui/react'
+import { parseDate } from '@internationalized/date'
 
 import {
   HomeAreaLayout,
@@ -22,16 +22,20 @@ import {
 import {
   DayOverviewWorkspace,
   EngineersSidebar,
-  MOCK_MAP_PLANNED_DATES,
-  MOCK_MAP_REGIONS,
   PlanGanttBoard,
   PlanMapBoard,
   PlanRebuildDialog,
   usePlanContext,
   usePlanGanttBoard,
   usePlanMapBoard,
+  type PlanContext,
 } from '@/features/planning'
-import { TicketsUploadDialog, isTicketsFile, useTicketsUpload } from '@/features/tickets'
+import {
+  TicketsUploadDialog,
+  isTicketsFile,
+  useTicketsExport,
+  useTicketsUpload,
+} from '@/features/tickets'
 import { routes } from '@/shared/config/routes'
 import { AppPanel, ContextHeader, PlanViewTabs } from '@/shared/ui'
 
@@ -210,59 +214,59 @@ function PersonnelPage() {
   )
 }
 
-type PlanContextState = ReturnType<typeof usePlanContext>
-
 /**
  * Шапка плана работ — одна на Гант и карту: те же регион, день, версия плана
  * и окна «Загрузить заявки» / «Обновить план», чтобы при переключении вида ничего не менялось.
  */
-function PlanWorkHeader({
-  context,
-  hasPlan,
-}: {
-  context: PlanContextState
-  hasPlan: boolean
-}) {
+function PlanWorkHeader({ context }: { context: PlanContext }) {
   const [uploadOpen, setUploadOpen] = useState(false)
   const [rebuildOpen, setRebuildOpen] = useState(false)
+  const exportTickets = useTicketsExport()
+  const { regionId, regions, date, planId } = context
+  const regionName = regions.find((item) => item.id === regionId)?.name ?? regionId
 
   return (
     <>
       <ContextHeader
-        regions={MOCK_MAP_REGIONS}
-        regionId={context.regionId}
+        regions={regions}
+        regionId={regionId}
         onRegionIdChange={context.setRegionId}
-        date={context.date}
+        date={date}
         onDateChange={context.setDate}
-        plannedDates={MOCK_MAP_PLANNED_DATES}
-        plans={hasPlan ? context.plans : []}
-        planId={hasPlan ? context.planId : null}
+        plannedDates={context.plannedDates}
+        plans={context.plans}
+        planId={planId}
         onPlanIdChange={context.setPlanId}
+        isRegionsLoading={context.isRegionsLoading}
+        isRegionsError={context.isRegionsError}
         onUploadClick={() => setUploadOpen(true)}
-        onRecalculate={() => setRebuildOpen(true)}
+        isRecalculating={context.isRebuilding}
+        onRecalculate={regionId == null ? undefined : () => setRebuildOpen(true)}
+        onExport={
+          context.offline || regionId == null || planId == null
+            ? undefined
+            : (format) =>
+                exportTickets({ regionId, date: date.toString(), planId }, format, `Заявки_${regionName}_${date.toString()}`)
+        }
         center={<PlanViewTabs />}
       />
       <TicketsUploadDialog
         isOpen={uploadOpen}
         onClose={() => setUploadOpen(false)}
-        date={context.date.toString()}
-      />
-      <PlanRebuildDialog
-        isOpen={rebuildOpen}
-        onClose={() => setRebuildOpen(false)}
-        onConfirm={() => {
-          // План работ пока на моках: новая версия с теми же назначениями.
-          const plan = context.addPlan()
-          toast.success(`План №${plan.version} составлен`)
+        defaultRegionId={regionId}
+        date={date.toString()}
+        onUploaded={(result) => {
+          if (result.date) context.setDate(parseDate(result.date))
         }}
       />
+      <PlanRebuildDialog isOpen={rebuildOpen} onClose={() => setRebuildOpen(false)} onConfirm={context.rebuild} />
     </>
   )
 }
 
 function PlanMapPage() {
   const context = usePlanContext()
-  const board = usePlanMapBoard(context.regionId, context.date.toString())
+  const board = usePlanMapBoard(context.regionId, context.date.toString(), context.queryPlanId)
 
   return (
     <WorkAreaMapLayout
@@ -275,7 +279,7 @@ function PlanMapPage() {
           onHover={board.hover}
         />
       }
-      header={<PlanWorkHeader context={context} hasPlan={board.hasPlan} />}
+      header={<PlanWorkHeader context={context} />}
     >
       <PlanMapBoard board={board} />
     </WorkAreaMapLayout>
@@ -284,16 +288,11 @@ function PlanMapPage() {
 
 function PlanGanttPage() {
   const context = usePlanContext()
-  const board = usePlanGanttBoard(context.regionId, context.date.toString())
+  const board = usePlanGanttBoard(context.regionId, context.date.toString(), context.queryPlanId)
 
   return (
-    <WorkAreaGanttLayout
-      header={<PlanWorkHeader context={context} hasPlan={board.hasPlan} />}
-    >
-      <PlanGanttBoard
-        board={board}
-        viewKey={`${context.regionId}:${context.date.toString()}`}
-      />
+    <WorkAreaGanttLayout header={<PlanWorkHeader context={context} />}>
+      <PlanGanttBoard board={board} viewKey={`${context.regionId}:${context.date.toString()}:${context.planId}`} />
     </WorkAreaGanttLayout>
   )
 }

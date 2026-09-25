@@ -38,7 +38,7 @@ export type PersonnelEngineer = {
   /** Бригадир — корона на аватаре и в карточке бригады. */
   isLead?: boolean
   qualification?: QualificationCode | null
-  /** Подпись квалификации: Мастер / Работник / Новичок. */
+  /** Подпись квалификации: Мастер / Бывалый / Новичок. */
   position?: string | null
   qualificationHint?: string | null
   startWork?: string | null

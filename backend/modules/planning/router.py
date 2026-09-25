@@ -8,6 +8,7 @@ from modules.planning.schemas import (
     DayOverviewResponse,
     Distribution,
     HealthResponse,
+    PlanExportResponse,
     RecalculateResponse,
     RemakeLevel,
 )
@@ -58,3 +59,19 @@ async def recalculate(
         remake_level=remake_level,
         distribution=distribution,
     )
+
+
+
+@router.get("/plan", response_model=PlanExportResponse)
+async def get_plan(
+    service: PlanningServiceDep,
+    region_id: Annotated[int, Query(ge=1)],
+    date: Annotated[date, Query()],
+    plan_id: Annotated[int | None, Query(ge=1)] = None,
+) -> PlanExportResponse:
+    """План дня с расписанием: маршруты инженеров (выезд, прибытие, работа), неназначенные.
+
+    Для карты и Ганта. `plan_id` выбирает версию, без него — последняя.
+    Пример: `/api/planning/plan?region_id=1&date=2026-08-17`
+    """
+    return await service.get_plan(region_id, date, plan_id)

@@ -7,6 +7,7 @@ import type { PlanMapBoard as PlanMapBoardState } from '../../lib/usePlanMapBoar
 import type { UnassignedTicket } from '../../mapTypes'
 import { PlanMap } from '../PlanMap'
 import { ReplanDialog } from './ReplanDialog'
+import { RouteParamsDialog } from './RouteParamsDialog'
 import { ROUTE_PANEL_INSET, RouteDetailsPanel } from './RouteDetailsPanel'
 import { TicketCard, UnassignedTicketsPanel } from './UnassignedTicketsPanel'
 
@@ -34,6 +35,7 @@ export function PlanMapBoard({ board }: PlanMapBoardProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
   const [hint, setHint] = useState(false)
+  const [paramsOpen, setParamsOpen] = useState(false)
   const { selectedEngineer, selectedRoute, pendingDrop } = board
 
   useEffect(() => {
@@ -44,13 +46,13 @@ export function PlanMapBoard({ board }: PlanMapBoardProps) {
 
   // Esc снимает выбор инженера, если не открыто окно подтверждения.
   useEffect(() => {
-    if (!selectedEngineer || pendingDrop) return
+    if (!selectedEngineer || pendingDrop || paramsOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') board.select(null)
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [board, selectedEngineer, pendingDrop])
+  }, [board, selectedEngineer, pendingDrop, paramsOpen])
 
   /** Куда встанет заявка: индекс среди заявок маршрута или null, если курсор вне списка. */
   const hitIndex = (x: number, y: number) => {
@@ -115,7 +117,7 @@ export function PlanMapBoard({ board }: PlanMapBoardProps) {
         hoveredId={board.hoveredId}
         activeStopId={board.activeStopId}
         overlayInset={selectedEngineer ? ROUTE_PANEL_INSET : 0}
-        viewKey={board.regionId}
+        viewKey={board.viewKey}
         onHoverEngineer={board.hover}
         onSelectEngineer={board.select}
         onSelectStop={board.toggleStop}
@@ -127,6 +129,7 @@ export function PlanMapBoard({ board }: PlanMapBoardProps) {
             activeStopId={board.activeStopId}
             onToggleStop={board.toggleStop}
             onAddTicket={() => setHint(true)}
+            onEditParams={() => setParamsOpen(true)}
             dropIndex={drag?.index ?? null}
             listRef={listRef}
           />
@@ -159,6 +162,16 @@ export function PlanMapBoard({ board }: PlanMapBoardProps) {
             document.body,
           )
         : null}
+
+      {paramsOpen && selectedEngineer && selectedRoute ? (
+        <RouteParamsDialog
+          isOpen
+          engineer={selectedEngineer}
+          route={selectedRoute}
+          onClose={() => setParamsOpen(false)}
+          onApply={(variant) => board.applyVariant(selectedEngineer.id, variant)}
+        />
+      ) : null}
 
       <ReplanDialog
         ticketId={pendingDrop?.ticket.id ?? null}

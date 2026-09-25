@@ -31,7 +31,7 @@ export const TRANSPORT_LABEL: Record<TransportCode, string> = {
 
 export const QUALIFICATION_LABEL = {
   master: 'Мастер',
-  worker: 'Работник',
+  worker: 'Бывалый',
   novice: 'Новичок',
 } as const
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import sys
 import threading
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
 _SOLUTION = Path(__file__).resolve().parents[3] / "solution"
@@ -29,6 +29,9 @@ from planner import (  # noqa: E402
     setup_routing,
 )
 from planner.result import PlanResult  # noqa: E402
+from planner.raptor import Profile  # noqa: E402
+from planner.timed import TimedTransitModel  # noqa: E402
+from planner.travel import HaversineTravelModel  # noqa: E402
 
 from core import ors_endpoint
 from core.config import get_settings
@@ -218,22 +221,85 @@ routing_cache_lock = threading.Lock()
 def run_plan(
     scenario: Scenario,
     algorithm: Algorithm = Algorithm.OPTIMIZED,
+    profiles: tuple[dict[tuple[str, str], Profile], int, int] | None = None,
 ) -> PlanResult:
+    """Расчёт плана. `profiles` — профили rRAPTOR пар сценария (modules/planning/transit)."""
+    from modules.planning import transit
+
+    # Общественный транспорт новых адресов — RAPTOR на 10:00 в кэш, до чтения кэша
+    transit.fill_missing(scenario)
     # Без ORS_URL берутся сохранённые ответы сервиса, без кэша — расстояния по координатам
     settings = get_settings()
     options = {"cache_path": settings.routing_cache_path} if settings.routing_cache_path else {}
     url, api_key = ors_endpoint.pick(settings)  # основной или запасной ORS
     with routing_cache_lock:
         routing = setup_routing(scenario, url=url, api_key=api_key, **options)
-    result = plan(scenario, algorithm, travel=routing.travel)
+    travel = routing.travel
+    if profiles is not None and profiles[0]:
+        # Известные пары — время на фактический момент выезда (rRAPTOR)
+        pairs, first, last = profiles
+        travel = TimedTransitModel(
+            travel or HaversineTravelModel(scenario.settings),
+            pairs, scenario.settings, first=first, last=last,
+        )
+    result = plan(scenario, algorithm, travel=travel)
+    # Линии по улицам и состав поездок: авто/пешком/велосипед — ORS или кэш, общественный
+    # транспорт — RAPTOR на фактический выезд. Сбой здесь не должен ронять готовый план.
+    try:
+        result = routing.attach(result, transit_legs=transit.legs_source(scenario))
+    except Exception:  # noqa: BLE001
+        logger.exception("Геометрия маршрутов не построена — участки будут прямыми")
     notes = list(routing.notes)
-    if isinstance(routing.travel, OrsTravelModel):
-        notes += [n for n in routing.travel.report() if n not in notes]
+    if isinstance(travel, (OrsTravelModel, TimedTransitModel)):
+        notes += [n for n in travel.report() if n not in notes]
     for note in notes:
         logger.warning(note)
     with routing_cache_lock:
         routing.save()
     return result
+
+
+def route_legs(
+    result: PlanResult,
+    *,
+    address_of: dict[int, int],
+    office_of: dict[int, int],
+    transport_of: dict[int, int],
+    offset_hours: float = 3.0,
+) -> dict[int, dict]:
+    """Участок до каждого визита — для таблицы `routes`: откуда, когда, линия, состав поездки.
+
+    Ключ — request_id. `path` — линия участка [[lon, lat], …] из общей геометрии маршрута
+    (`Visit.geometry_range`) и состав поездки на общественном транспорте (`Visit.transit`).
+    """
+    legs: dict[int, dict] = {}
+    for route in result.routes:
+        engineer_id = int(route.engineer_id)
+        previous = office_of.get(engineer_id)
+        line = [[p.lon, p.lat] for p in route.geometry]
+        for visit in route.visits:
+            request_id = int(visit.request_id)
+            here = address_of.get(request_id)
+            if visit.geometry_range is not None and line:
+                lo, hi = visit.geometry_range
+                segment = line[lo : hi + 1]
+            else:
+                segment = [[visit.from_point.lon, visit.from_point.lat], [visit.to_point.lon, visit.to_point.lat]]
+            if previous is not None and here is not None and engineer_id in transport_of:
+                legs[request_id] = {
+                    "start_point_id": previous,
+                    "end_point_id": here,
+                    "transport_id": transport_of[engineer_id],
+                    "start_time": local_time(visit.departure_at, offset_hours),
+                    "end_time": local_time(visit.arrival_at, offset_hours),
+                    "path": {
+                        "line": segment,
+                        "straight": visit.geometry_range is None or route.geometry_source == "straight",
+                        "transit": [leg.to_dict() for leg in visit.transit],
+                    },
+                }
+            previous = here
+    return legs
 
 
 def reason_index(dicts: list) -> dict[str, int]:
@@ -251,12 +317,22 @@ def reason_index(dicts: list) -> dict[str, int]:
     return indexed
 
 
+def local_time(moment: datetime | None, offset_hours: float = 3.0) -> datetime | None:
+    """Момент плана → наивное местное время региона, как хранятся времена заявок в БД."""
+    if moment is None or moment.tzinfo is None:
+        return moment
+    return moment.astimezone(timezone(timedelta(hours=offset_hours))).replace(tzinfo=None)
+
+
 def assignments_from_result(
     result: PlanResult,
     *,
     transport_by_engineer: dict[int, int],
     reason_by_code: dict[str, int],
+    offset_hours: float = 3.0,
 ) -> tuple[list[Assignment], int, int]:
+    """Строки назначений плана — вместе с расписанием визита (выезд, прибытие, работа)."""
+    visits = {v.request_id: v for route in result.routes for v in route.visits}
     rows: list[Assignment] = []
     assigned = 0
     unassigned = 0
@@ -264,12 +340,25 @@ def assignments_from_result(
         request_id = int(item.request_id)
         if item.is_assigned and item.engineer_id is not None:
             engineer_id = int(item.engineer_id)
+            visit = visits.get(item.request_id)
             rows.append(
                 Assignment(
                     request_id=request_id,
                     engineer_id=engineer_id,
                     plan_id=0,
                     transport_id=transport_by_engineer.get(engineer_id),
+                    explanation=item.explanation or None,
+                    **({} if visit is None else {
+                        "position": visit.position,
+                        "planned_departure_at": local_time(visit.departure_at, offset_hours),
+                        "planned_arrival_at": local_time(visit.arrival_at, offset_hours),
+                        "planned_start_at": local_time(visit.service_start_at, offset_hours),
+                        "planned_end_at": local_time(visit.service_end_at, offset_hours),
+                        "travel_minutes": round(visit.travel_minutes, 2),
+                        "distance_km": round(visit.distance_km, 3),
+                        "waiting_minutes": round(visit.waiting_minutes, 2),
+                        "idle_minutes": round(visit.idle_before_minutes, 2),
+                    }),
                 )
             )
             assigned += 1
@@ -284,6 +373,7 @@ def assignments_from_result(
                 plan_id=0,
                 transport_id=None,
                 unassigned_reason_id=reason_id,
+                explanation=item.explanation or None,
             )
         )
         unassigned += 1

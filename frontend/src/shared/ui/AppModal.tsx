@@ -8,6 +8,13 @@ type AppModalProps = {
   isOpen: boolean
   onClose: () => void
   title: ReactNode
+  /**
+   * Значок в плашке над заголовком — окно подтверждения («Перестроить маршрут?»):
+   * заголовок тогда 16/28, как _ModalHeader с showIcon.
+   */
+  icon?: ReactNode
+  /** Цвет плашки значка: danger — красная, как в макете. */
+  iconTone?: 'danger' | 'accent'
   description?: ReactNode
   /** Кнопки справа внизу. */
   footer?: ReactNode
@@ -16,11 +23,26 @@ type AppModalProps = {
 }
 
 /**
- * Modal из макета: 450px, скругление 24, заголовок 20/28, серое описание,
+ * Modal из макета: 450px, скругление 24, заголовок 20/28 (с значком — 16/28), серое описание,
  * круглый крестик в углу, кнопки справа внизу. Фон размывается.
  * Тело монтируется заново при каждом открытии — черновик формы не переживает закрытие.
  */
-export function AppModal({ isOpen, onClose, title, description, footer, children, className }: AppModalProps) {
+const ICON_TONE = {
+  danger: 'bg-[#ff383c]/15 text-[#ff383c]',
+  accent: 'bg-[#0485f7]/15 text-[#0485f7]',
+}
+
+export function AppModal({
+  isOpen,
+  onClose,
+  title,
+  icon,
+  iconTone = 'danger',
+  description,
+  footer,
+  children,
+  className,
+}: AppModalProps) {
   return (
     <AlertDialog.Backdrop
       isOpen={isOpen}
@@ -44,12 +66,29 @@ export function AppModal({ isOpen, onClose, title, description, footer, children
             }}
           >
             <div className="flex flex-col gap-4">
-              <div className="flex flex-col gap-1">
-                <AlertDialog.Heading className="pr-6 text-xl leading-7 font-semibold text-[#18181b]">
-                  {title}
-                </AlertDialog.Heading>
-                {description ? <p className="text-sm leading-6 text-[#71717a]">{description}</p> : null}
-              </div>
+              {icon ? (
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-col gap-3 pr-6">
+                    <span
+                      className={cn('flex size-10 items-center justify-center', ICON_TONE[iconTone])}
+                      style={{ borderRadius: 8 }}
+                    >
+                      {icon}
+                    </span>
+                    <AlertDialog.Heading className="text-base leading-7 font-medium text-[#18181b]">
+                      {title}
+                    </AlertDialog.Heading>
+                  </div>
+                  {description ? <p className="pr-4 text-sm leading-6 text-[#71717a]">{description}</p> : null}
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  <AlertDialog.Heading className="pr-6 text-xl leading-7 font-semibold text-[#18181b]">
+                    {title}
+                  </AlertDialog.Heading>
+                  {description ? <p className="text-sm leading-6 text-[#71717a]">{description}</p> : null}
+                </div>
+              )}
               {children}
             </div>
 

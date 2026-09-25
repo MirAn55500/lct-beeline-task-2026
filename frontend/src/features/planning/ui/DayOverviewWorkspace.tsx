@@ -105,6 +105,15 @@ export function DayOverviewWorkspace({
     { skip: !hasTickets || regionId == null },
   )
   const regionLabel = regionName ?? '—'
+  // Гант и карта откроются на том же регионе, дне и версии плана.
+  const planLink = {
+    pathname: routes.planGantt,
+    search: new URLSearchParams({
+      ...(regionId != null ? { region: String(regionId) } : {}),
+      ...(date ? { date } : {}),
+      ...(planId != null ? { plan: String(planId) } : {}),
+    }).toString(),
+  }
   const showUploader = !hasTickets && !(overviewLoading && overview == null)
 
   return (
@@ -118,7 +127,7 @@ export function DayOverviewWorkspace({
             <p className="flex min-w-0 items-center text-sm leading-6 text-[#71717a]">
               <span className="truncate">Расписание и маршруты инженеров доступны в</span>
               <Link
-                to={routes.planGantt}
+                to={planLink}
                 className="ms-1 inline-flex shrink-0 items-start font-medium text-[#18181b] transition-colors hover:text-[#0485f7]"
               >
                 плане работ
@@ -170,7 +179,7 @@ export function DayOverviewWorkspace({
 
           {hasTickets ? (
             <AppPanel className="flex h-[303px] min-w-0 shrink-0 flex-col overflow-hidden">
-              <DayPlanPreview rows={planRowsFromTickets(chartTickets)} />
+              <DayPlanPreview rows={planRowsFromTickets(chartTickets)} planLink={planLink} />
             </AppPanel>
           ) : (
             <AppPanel className="relative aspect-[515/208] w-full shrink-0 overflow-hidden">

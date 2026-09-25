@@ -37,7 +37,6 @@ jobs:
           CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
           ORS_URL: ${{ vars.ORS_URL }}
           ORS_API_KEY: ${{ secrets.ORS_API_KEY }}
-          TRANSIT_WORKERS: ${{ vars.TRANSIT_WORKERS }}
           ORS_XMS: ${{ vars.ORS_XMS }}
           ORS_XMX: ${{ vars.ORS_XMX }}
           ORS_GRAPHS_DATA_ACCESS: ${{ vars.ORS_GRAPHS_DATA_ACCESS }}
@@ -81,7 +80,6 @@ jobs:
           # ORS на отдельной машине — основной, свой на стенде остаётся запасным
           local_ors = "http://ors:8082/ors"
           ors_fallback = local_ors if ors_url != local_ors else ""
-          transit_workers = os.environ.get("TRANSIT_WORKERS") or "2"
           # По умолчанию — экономный режим стенда (3-4 ГБ RAM): графы с диска, heap 1 ГБ,
           # потолок контейнера 2 ГБ, без общественного транспорта. Графы заливаются
           # готовыми (solution/deploy/ors/upload-graphs.sh), собрать их тут не хватит памяти
@@ -125,7 +123,6 @@ jobs:
               q("ORS_URL", ors_url),
               q("ORS_API_KEY", ors_api_key),
               q("ORS_FALLBACK_URL", ors_fallback),
-              q("TRANSIT_WORKERS", transit_workers),
               q("ORS_XMS", ors_xms),
               q("ORS_XMX", ors_xmx),
               q("ORS_GRAPHS_DATA_ACCESS", ors_data_access),

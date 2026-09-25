@@ -50,6 +50,10 @@ export type RouteStop = MapTicket & {
   leg: RouteLeg
   /** Шаги на общественном транспорте, например «автобус с799 от «Есенинский бульв.», 5 ост., 6 мин». */
   transit: string[]
+  /** Время в пути от предыдущей точки, мин. */
+  travelMinutes: number
+  /** Путь по улицам от предыдущей точки, км; нет — оцениваем по прямой. */
+  distanceKm?: number
 }
 
 export type MapEngineer = {

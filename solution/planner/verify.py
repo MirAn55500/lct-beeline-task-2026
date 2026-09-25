@@ -154,9 +154,18 @@ def _check_route(
         if not_before is not None and cursor < not_before:
             cursor = not_before
 
-        minutes = travel.travel_minutes(point, request.point, engineer.transport_mode)
-        km = travel.distance_km(point, request.point, engineer.transport_mode)
+        mode = engineer.transport_mode
+        km = travel.distance_km(point, request.point, mode)
         earliest_departure = calendar.first_moment_at_or_after(cursor)
+        # Общественный транспорт по профилю: время в пути — своё у каждого момента выезда
+        timed = travel if getattr(travel, "is_timed", None) and travel.is_timed(mode) else None
+
+        def leg_minutes(departure: datetime | None, a=point, b=request.point) -> float:
+            if timed is None or departure is None:
+                return travel.travel_minutes(a, b, mode)
+            return timed.minutes_at(a, b, mode, calendar.to_minutes(departure))
+
+        minutes = leg_minutes(earliest_departure)
         earliest_arrival = (
             calendar.add(earliest_departure, minutes) if earliest_departure else None
         )
@@ -179,13 +188,25 @@ def _check_route(
         # Отложенный выезд (SPEC §3.3): выезжаем так, чтобы приехать к началу работ,
         # но не раньше, чем освободились, и не позже конца окна прибытия.
         aim = min(service_start, request.window_end)
-        departure = calendar.sub(aim, minutes)
-        if departure is None or departure < earliest_departure:
-            departure, arrival = earliest_departure, earliest_arrival
-        else:
-            arrival = calendar.add(departure, minutes)
-            if arrival is None or arrival > request.window_end:
+        if timed is None:
+            departure = calendar.sub(aim, minutes)
+            if departure is None or departure < earliest_departure:
                 departure, arrival = earliest_departure, earliest_arrival
+            else:
+                arrival = calendar.add(departure, minutes)
+                if arrival is None or arrival > request.window_end:
+                    departure, arrival = earliest_departure, earliest_arrival
+        else:
+            # Самый поздний выезд, с которым по расписанию успеваем к началу работ
+            departure, arrival = earliest_departure, earliest_arrival
+            later = calendar.first_moment_at_or_after(calendar.to_datetime(
+                timed.depart_by(point, request.point, mode, calendar.to_minutes(aim))
+            ))
+            if later is not None and later > earliest_departure:
+                later_arrival = calendar.add(later, leg_minutes(later))
+                if later_arrival is not None and later_arrival <= aim + timedelta(seconds=1):
+                    departure, arrival = later, later_arrival
+            minutes = leg_minutes(departure)
         if service_start < request.window_start:
             problems.append(
                 f"Инвариант 3: заявка {request.id} — работа начата до открытия окна"
