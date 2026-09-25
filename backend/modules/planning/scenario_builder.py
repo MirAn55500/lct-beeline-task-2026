@@ -31,7 +31,8 @@ from planner import (  # noqa: E402
 from planner.result import PlanResult  # noqa: E402
 from planner.raptor import Profile  # noqa: E402
 from planner.timed import TimedTransitModel  # noqa: E402
-from planner.travel import HaversineTravelModel  # noqa: E402
+from planner.ors import Routing  # noqa: E402
+from planner.travel import HaversineTravelModel, TravelModel  # noqa: E402
 
 from core import ors_endpoint
 from core.config import get_settings
@@ -218,12 +219,14 @@ logger = logging.getLogger(__name__)
 routing_cache_lock = threading.Lock()
 
 
-def run_plan(
+def build_travel(
     scenario: Scenario,
-    algorithm: Algorithm = Algorithm.OPTIMIZED,
     profiles: tuple[dict[tuple[str, str], Profile], int, int] | None = None,
-) -> PlanResult:
-    """Расчёт плана. `profiles` — профили rRAPTOR пар сценария (modules/planning/transit)."""
+) -> tuple[Routing, TravelModel | None]:
+    """Модель поездок сценария: ORS или его кэш, общественный транспорт — rRAPTOR.
+
+    `profiles` — профили rRAPTOR пар сценария (modules/planning/transit).
+    """
     from modules.planning import transit
 
     # Общественный транспорт новых адресов — RAPTOR на 10:00 в кэш, до чтения кэша
@@ -242,9 +245,17 @@ def run_plan(
             travel or HaversineTravelModel(scenario.settings),
             pairs, scenario.settings, first=first, last=last,
         )
-    result = plan(scenario, algorithm, travel=travel)
-    # Линии по улицам и состав поездок: авто/пешком/велосипед — ORS или кэш, общественный
-    # транспорт — RAPTOR на фактический выезд. Сбой здесь не должен ронять готовый план.
+    return routing, travel
+
+
+def finish_plan(scenario: Scenario, result: PlanResult, routing: Routing, travel) -> PlanResult:
+    """Линии по улицам и состав поездок в готовый план, кэш маршрутов — на диск.
+
+    Авто/пешком/велосипед — ORS или кэш, общественный транспорт — RAPTOR на фактический
+    выезд. Сбой здесь не должен ронять готовый план.
+    """
+    from modules.planning import transit
+
     try:
         result = routing.attach(result, transit_legs=transit.legs_source(scenario))
     except Exception:  # noqa: BLE001
@@ -257,6 +268,17 @@ def run_plan(
     with routing_cache_lock:
         routing.save()
     return result
+
+
+def run_plan(
+    scenario: Scenario,
+    algorithm: Algorithm = Algorithm.OPTIMIZED,
+    profiles: tuple[dict[tuple[str, str], Profile], int, int] | None = None,
+) -> PlanResult:
+    """Расчёт плана. `profiles` — профили rRAPTOR пар сценария (modules/planning/transit)."""
+    routing, travel = build_travel(scenario, profiles)
+    result = plan(scenario, algorithm, travel=travel)
+    return finish_plan(scenario, result, routing, travel)
 
 
 def route_legs(

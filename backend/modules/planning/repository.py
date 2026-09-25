@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import selectinload
 from sqlmodel import col, func, select
@@ -171,6 +171,47 @@ class PlanningRepository:
             .where(Assignment.plan_id == plan_id)
         )
         return {assignment_id: path or {} for assignment_id, path in result.all()}
+
+    async def list_route_legs(self, plan_id: int) -> dict[int, tuple[int | None, dict]]:
+        """request_id → (engineer_id, участок до визита) — поля `routes` для копии в новую версию."""
+        result = await self._session.exec(
+            select(
+                Assignment.request_id,
+                Assignment.engineer_id,
+                Route.start_point_id,
+                Route.end_point_id,
+                Route.transport_id,
+                Route.start_time,
+                Route.end_time,
+                Route.path,
+            )
+            .join(Assignment, Route.assignment_id == Assignment.assignment_id)
+            .where(Assignment.plan_id == plan_id)
+        )
+        return {
+            request_id: (
+                engineer_id,
+                {
+                    "start_point_id": start_point_id,
+                    "end_point_id": end_point_id,
+                    "transport_id": transport_id,
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "path": path,
+                },
+            )
+            for request_id, engineer_id, start_point_id, end_point_id, transport_id, start_time, end_time, path in result.all()
+        }
+
+    async def shift_request_window(self, request_id: int, minutes: float) -> None:
+        """Сдвигает окно клиента заявки — без commit: сохраняется вместе с версией плана."""
+        request = await self._session.get(Request, request_id)
+        if request is None:
+            return
+        shift = timedelta(minutes=minutes)
+        request.plan_start_time = request.plan_start_time + shift
+        request.plan_end_time = request.plan_end_time + shift
+        self._session.add(request)
 
     async def list_assignments(self, plan_id: int) -> list[Assignment]:
         result = await self._session.exec(

@@ -3,10 +3,11 @@ import type { GanttEngineer, GanttTask, GanttTicket } from '../ganttTypes'
 /** Шаг, к которому прилипает время при перетаскивании. */
 export const SNAP_MINUTES = 10
 
-/** 545 → «9:05». */
+/** 545 → «9:05». Дробные минуты (время от планировщика) округляются. */
 export function formatClock(value: number) {
-  const hours = Math.floor(value / 60)
-  const mins = value % 60
+  const rounded = Math.round(value)
+  const hours = Math.floor(rounded / 60)
+  const mins = rounded % 60
   return `${hours}:${String(mins).padStart(2, '0')}`
 }
 
@@ -44,6 +45,10 @@ export type Placement = {
   /** Назначенные заявки, которые освободят место. */
   displaced: GanttTask[]
   outsideWindow: boolean
+  /** Место в маршруте по окнам планировщика; без него backend встанет по времени. */
+  position?: number
+  /** Дорога к заявке, минуты, — по окну планировщика. */
+  travel?: number
 }
 
 const SKILL_LABEL: Record<string, string> = {
@@ -149,4 +154,153 @@ export function equipmentLabel(ticket: Pick<GanttTicket, 'needsRouter' | 'needsB
   if (ticket.needsBox) parts.push('1 приставка')
   if (ticket.needsRouter) parts.push('1 роутер')
   return parts.join(', ')
+}
+
+/** Окно постановки у инженера: начать работу можно с `earliest` по `latest` (минуты дня). */
+export type EngineerSlot = {
+  position: number
+  earliest: number
+  latest: number
+  departure: number
+  travel: number
+}
+
+/**
+ * Куда можно поставить заявку — посчитано планировщиком по реальной дороге между адресами
+ * (`GET /planning/plan/{id}/slots`). Во время перетаскивания проверка идёт только по ним.
+ */
+export type TicketSlots = {
+  movable: boolean
+  reason: string
+  byEngineer: Map<string, EngineerSlot[]>
+  refusals: Map<string, string>
+}
+
+const SLOT_EPS = 0.01
+
+/** Визиты инженера, которые остаются на ленте, по времени. */
+function laneOf(tasks: GanttTask[], engineerId: string, movingId?: string) {
+  return tasks
+    .filter((task) => task.engineerId === engineerId && task.id !== movingId && task.status !== 'cancelled')
+    .sort((a, b) => a.start - b.start)
+}
+
+/**
+ * Время прилипает к окну постановки: отпустили в 10 минутах от него — встаёт на ближайший край.
+ * Узкое окно (меньше шага сетки) иначе не поймать.
+ */
+export function magnetStart(start: number, raw: number, slots: EngineerSlot[] | undefined) {
+  if (!slots) return start
+  if (slots.some((slot) => start >= slot.earliest - SLOT_EPS && start <= slot.latest + SLOT_EPS)) return start
+  let best = start
+  let distance = SNAP_MINUTES
+  for (const slot of slots) {
+    const low = Math.ceil(slot.earliest) <= slot.latest ? Math.ceil(slot.earliest) : slot.earliest
+    const high = Math.floor(slot.latest) >= low ? Math.floor(slot.latest) : low
+    const candidate = Math.min(Math.max(raw, low), high)
+    const gap = Math.abs(candidate - raw)
+    if (gap <= distance) {
+      best = candidate
+      distance = gap
+    }
+  }
+  return best
+}
+
+/**
+ * Проверка постановки по окнам планировщика: успеет ли инженер доехать, не сорвутся ли
+ * следующие визиты и смена. Встать поверх назначенных — замена: её проверяет backend.
+ */
+export function evaluateBySlots({
+  ticket,
+  engineer,
+  start,
+  tasks,
+  now,
+  movingId,
+  slots,
+}: {
+  ticket: GanttTicket
+  engineer: GanttEngineer
+  start: number
+  tasks: GanttTask[]
+  now: number
+  movingId?: string
+  slots: TicketSlots
+}): Placement {
+  const end = start + ticket.duration
+  const base = { engineerId: engineer.id, start, end, displaced: [], outsideWindow: false }
+  const invalid = (reason: string): Placement => ({ ...base, state: 'invalid', reason })
+
+  if (!slots.movable) return invalid(slots.reason || 'Заявку уже не сдвинуть')
+  const refusal = slots.refusals.get(engineer.id)
+  if (refusal) return invalid(refusal.charAt(0).toUpperCase() + refusal.slice(1))
+  if (start < now) return invalid('Это время уже прошло')
+
+  const outsideWindow = start < ticket.windowFrom || start > ticket.windowTo
+  const lane = laneOf(tasks, engineer.id, movingId)
+  const implied = lane.filter((task) => task.start < start).length
+  const list = slots.byEngineer.get(engineer.id) ?? []
+  const fits = list.filter((slot) => start >= slot.earliest - SLOT_EPS && start <= slot.latest + SLOT_EPS)
+  const slot = fits.find((item) => item.position === implied) ?? fits[0]
+  if (slot) {
+    return {
+      ...base,
+      outsideWindow,
+      position: slot.position,
+      travel: Math.round(slot.travel),
+      state: outsideWindow ? 'approval' : 'ok',
+    }
+  }
+
+  const overlaps = lane.filter((task) => task.start - task.travel < end && start < task.end)
+  if (overlaps.some((task) => !isMovable(task))) return invalid('Пересекается с начатой заявкой')
+  if (overlaps.length > 0) return { ...base, displaced: overlaps, outsideWindow, state: 'swap' }
+
+  const near = list.find((item) => item.position === implied)
+  if (!near) return invalid('Здесь не успеть доехать и выполнить работу')
+  if (start < near.earliest) return invalid(`Не успеет доехать: начать можно не раньше ${formatClock(near.earliest)}`)
+  return invalid(`Следующие заявки не успеют: начать нужно не позже ${formatClock(near.latest)}`)
+}
+
+/** Зелёные ячейки по окнам планировщика: в окне клиента, если получается, иначе самое раннее. */
+export function findFreeCellsBySlots({
+  ticket,
+  engineers,
+  now,
+  fromHour,
+  toHour,
+  slots,
+}: {
+  ticket: GanttTicket
+  engineers: GanttEngineer[]
+  now: number
+  fromHour: number
+  toHour: number
+  slots: TicketSlots
+}) {
+  const cells = new Map<string, number>()
+  if (!slots.movable) return cells
+  const pick = (low: number, high: number) => (Math.ceil(low) <= high ? Math.ceil(low) : low)
+  for (const engineer of engineers) {
+    const list = slots.byEngineer.get(engineer.id)
+    if (!list) continue
+    for (let hour = fromHour; hour < toHour; hour += 1) {
+      let fallback: number | null = null
+      for (const slot of list) {
+        const low = Math.max(hour * 60, slot.earliest, now)
+        const high = Math.min(hour * 60 + 59, slot.latest)
+        if (low > high) continue
+        const inLow = Math.max(low, ticket.windowFrom)
+        const inHigh = Math.min(high, ticket.windowTo)
+        if (inLow <= inHigh) {
+          fallback = pick(inLow, inHigh)
+          break
+        }
+        fallback ??= pick(low, high)
+      }
+      if (fallback != null) cells.set(`${engineer.id}:${hour}`, fallback)
+    }
+  }
+  return cells
 }

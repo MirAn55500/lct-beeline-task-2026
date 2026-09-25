@@ -1,15 +1,20 @@
 import asyncio
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from core.exceptions import AppError
 from modules.algorithm.service import AlgorithmService
+from modules.planning import board as boards
 from modules.planning import transit
+from modules.planning.models.plan import Plan
 from modules.planning.repository import PlanningRepository
 from modules.planning.scenario_builder import (
     _REASON_LABELS,
     assignments_from_result,
+    build_travel,
+    finish_plan,
     route_legs,
     build_scenario,
     reason_index,
@@ -17,6 +22,11 @@ from modules.planning.scenario_builder import (
 )
 from modules.planning.schemas import (
     CounterPair,
+    MoveRequest,
+    MoveResponse,
+    MoveVisitExport,
+    PlanSlotsResponse,
+    RequestSlotsExport,
     PlanEngineerExport,
     PlanExportResponse,
     PlanRequestExport,
@@ -31,7 +41,8 @@ from modules.planning.schemas import (
     RemakeLevel,
 )
 from planner import Algorithm
-from planner.enums import ReplanScope
+from planner.dispatch import Board, MoveOutcome, StoredVisit
+from planner.enums import ReasonCode, ReplanScope
 
 _REMAKE_TO_SCOPE = {
     RemakeLevel.FIX: ReplanScope.LOW,
@@ -43,6 +54,16 @@ _DISTRIBUTION_TO_ALGORITHM = {
     Distribution.EVEN: Algorithm.BASELINE,
     Distribution.EFFICIENT: Algorithm.OPTIMIZED,
 }
+
+
+def reason_code(label: str) -> str:
+    """Код причины неназначения по значению словаря: там код или старая подпись."""
+    label = label.strip().lower()
+    return next((c for c, text in _REASON_LABELS.items() if label in {c, text}), "not_found")
+
+
+def _minutes(value: float) -> float:
+    return round(value, 2)
 
 
 class PlanningService:
@@ -254,12 +275,8 @@ class PlanningService:
                 continue
             if row.engineer_id is None:
                 label = row.unassigned_reason.value if row.unassigned_reason else ""
-                code = next(
-                    (c for c, text in _REASON_LABELS.items() if label.strip().lower() in {c, text}),
-                    "not_found",
-                )
                 unassigned_out.append(PlanUnassignedExport(
-                    requestId=request_id, reason=code, explanation=row.explanation or label,
+                    requestId=request_id, reason=reason_code(label), explanation=row.explanation or label,
                 ))
             elif row.planned_start_at is not None and str(row.engineer_id) in starts:
                 by_engineer.setdefault(str(row.engineer_id), []).append(row)
@@ -329,4 +346,221 @@ class PlanningService:
             requests=requests_out,
             routes=routes_out,
             unassigned=unassigned_out,
+        )
+
+    # ------------------------------------------------------------ ручная правка на Ганте
+
+    async def _open_board(self, plan_id: int) -> boards.OpenBoard:
+        """Доска плана для ручных ходов: из кэша процесса или собранная из БД."""
+        cached = boards.get(plan_id)
+        if cached is not None:
+            return cached
+        plan = await self._repo.session.get(Plan, plan_id)
+        if plan is None:
+            raise AppError("План не найден", status_code=404)
+        region = await self._repo.get_region(plan.region_id)
+        requests = await self._repo.list_requests_for_plan(plan.region_id, plan.date)
+        engineers = await self._repo.list_engineers_for_plan(plan.region_id)
+        scenario, transport_of = build_scenario(
+            day=plan.date,
+            region_id=plan.region_id,
+            region_name=region.region_name if region else "",
+            requests=requests,
+            engineers=engineers,
+        )
+        zone = timezone(timedelta(hours=scenario.settings.timezone_offset_hours))
+        rows = await self._repo.list_assignments(plan_id)
+
+        def aware(moment: datetime | None, fallback: datetime | None = None) -> datetime:
+            moment = moment or fallback
+            assert moment is not None
+            return moment.replace(tzinfo=zone) if moment.tzinfo is None else moment
+
+        visits = [
+            StoredVisit(
+                request_id=str(r.request_id),
+                engineer_id=str(r.engineer_id),
+                position=r.position or 0,
+                departure_at=aware(r.planned_departure_at, r.planned_start_at),
+                arrival_at=aware(r.planned_arrival_at, r.planned_start_at),
+                service_start_at=aware(r.planned_start_at),
+                service_end_at=aware(r.planned_end_at, r.planned_start_at),
+                travel_minutes=r.travel_minutes or 0.0,
+                distance_km=r.distance_km or 0.0,
+                waiting_minutes=r.waiting_minutes or 0.0,
+            )
+            for r in rows
+            if r.engineer_id is not None and r.planned_start_at is not None
+        ]
+        if not visits and any(r.engineer_id is not None for r in rows):
+            raise AppError(
+                "В этой версии плана нет расписания визитов — обновите план", status_code=409
+            )
+        unassigned = {
+            str(r.request_id): ReasonCode(
+                reason_code(r.unassigned_reason.value if r.unassigned_reason else "")
+            )
+            for r in rows
+            if r.engineer_id is None
+        }
+        profiles = await transit.load_profiles(self._repo.session, scenario)
+
+        def build():
+            routing, travel = build_travel(scenario, profiles)
+            board = Board(
+                scenario, visits, unassigned=unassigned, travel=travel, now=datetime.now(zone)
+            )
+            return routing, travel, board
+
+        routing, travel, board = await asyncio.to_thread(build)
+        entry = boards.OpenBoard(
+            board=board,
+            scenario=scenario,
+            routing=routing,
+            travel=travel,
+            region_id=plan.region_id,
+            day=plan.date,
+            transport_of=transport_of,
+            address_of={r.request_id: r.address_id for r in requests if r.request_id is not None},
+            office_of={
+                e.engineer_id: e.brigade.office_address_id
+                for e in engineers
+                if e.engineer_id is not None and e.brigade is not None
+            },
+        )
+        boards.put(plan_id, entry)
+        return entry
+
+    async def get_slots(
+        self, plan_id: int, request_ids: list[str] | None = None
+    ) -> PlanSlotsResponse:
+        """Куда можно поставить заявки плана: окна по инженерам и позициям маршрута."""
+        entry = await self._open_board(plan_id)
+
+        def compute():
+            with entry.lock:
+                return entry.board.slots(request_ids or None)
+
+        items = await asyncio.to_thread(compute)
+        return PlanSlotsResponse(
+            planId=plan_id,
+            requests=[
+                RequestSlotsExport(
+                    requestId=item.request_id,
+                    movable=item.movable,
+                    reason=item.reason,
+                    slots={
+                        engineer_id: [
+                            [
+                                slot.position,
+                                _minutes(slot.earliest),
+                                _minutes(slot.latest),
+                                _minutes(slot.departure),
+                                _minutes(slot.travel_minutes),
+                            ]
+                            for slot in slots
+                        ]
+                        for engineer_id, slots in item.slots.items()
+                    },
+                    refusals=item.refusals,
+                )
+                for item in items
+            ],
+        )
+
+    async def move(self, plan_id: int, body: MoveRequest) -> MoveResponse:
+        """Ручной ход: проверка с превью или (commit) новая версия плана."""
+        entry = await self._open_board(plan_id)
+        options = dict(
+            start=body.start, position=body.position, release=body.release, commit=body.commit
+        )
+
+        def apply():
+            with entry.lock:
+                outcome = entry.board.move(body.requestId, body.engineerId, **options)
+                if not outcome.ok or not body.commit:
+                    return outcome, None, None
+                result = entry.board.result()
+                # Линии по улицам — только изменившимся маршрутам: на весь план это секунды,
+                # а участки остальных переносятся из исходной версии как есть.
+                changed = set(outcome.engineers)
+                partial = replace(result, routes=tuple(r for r in result.routes if r.engineer_id in changed))
+                return outcome, result, finish_plan(entry.scenario, partial, entry.routing, entry.travel)
+
+        try:
+            outcome, result, drawn = await asyncio.to_thread(apply)
+        except Exception:
+            boards.drop(plan_id)
+            raise
+        if result is None:
+            return self._move_response(outcome)
+
+        # Доска уже сделала ход: если сохранить не вышло, она расходится с БД — выбрасываем.
+        try:
+            reasons = await self._repo.ensure_unassigned_reasons()
+            offset = entry.scenario.settings.timezone_offset_hours
+            rows, _, _ = assignments_from_result(
+                result,
+                transport_by_engineer=entry.transport_of,
+                reason_by_code=reason_index(reasons),
+                offset_hours=offset,
+            )
+            changed = set(outcome.engineers)
+            legs = {
+                request_id: leg
+                for request_id, (engineer_id, leg) in (await self._repo.list_route_legs(plan_id)).items()
+                if engineer_id is not None and str(engineer_id) not in changed
+            }
+            legs.update(
+                route_legs(
+                    drawn,
+                    address_of=entry.address_of,
+                    office_of=entry.office_of,
+                    transport_of=entry.transport_of,
+                    offset_hours=offset,
+                )
+            )
+            if outcome.window_shift:
+                # Клиент согласился на время вне окна: иначе пересчёт вернул бы заявку в старое.
+                await self._repo.shift_request_window(int(body.requestId), outcome.window_shift)
+            latest = await self._repo.find_latest_plan(entry.region_id, entry.day)
+            saved = await self._repo.save_plan(
+                region_id=entry.region_id,
+                day=entry.day,
+                version=(latest.version + 1) if latest is not None else 1,
+                reference_plan_id=plan_id,
+                rows=rows,
+                legs=legs,
+            )
+        except Exception:
+            boards.drop(plan_id)
+            raise
+        boards.rename(plan_id, saved.plan_id or 0)
+        response = self._move_response(outcome)
+        response.planId = saved.plan_id
+        response.version = saved.version
+        return response
+
+    @staticmethod
+    def _move_response(outcome: MoveOutcome) -> MoveResponse:
+        return MoveResponse(
+            ok=outcome.ok,
+            reason=outcome.reason,
+            outsideWindow=outcome.outside_window,
+            windowShift=_minutes(outcome.window_shift),
+            engineers=list(outcome.engineers),
+            visits=[
+                MoveVisitExport(
+                    requestId=v.request_id,
+                    engineerId=v.engineer_id,
+                    position=v.position,
+                    departure=_minutes(v.departure),
+                    arrival=_minutes(v.arrival),
+                    start=_minutes(v.start),
+                    end=_minutes(v.end),
+                    travelMinutes=_minutes(v.travel_minutes),
+                )
+                for v in outcome.visits
+            ],
+            released=list(outcome.released),
         )

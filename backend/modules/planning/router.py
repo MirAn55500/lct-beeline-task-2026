@@ -8,7 +8,10 @@ from modules.planning.schemas import (
     DayOverviewResponse,
     Distribution,
     HealthResponse,
+    MoveRequest,
+    MoveResponse,
     PlanExportResponse,
+    PlanSlotsResponse,
     RecalculateResponse,
     RemakeLevel,
 )
@@ -61,7 +64,6 @@ async def recalculate(
     )
 
 
-
 @router.get("/plan", response_model=PlanExportResponse)
 async def get_plan(
     service: PlanningServiceDep,
@@ -75,3 +77,32 @@ async def get_plan(
     Пример: `/api/planning/plan?region_id=1&date=2026-08-17`
     """
     return await service.get_plan(region_id, date, plan_id)
+
+
+@router.get("/plan/{plan_id}/slots", response_model=PlanSlotsResponse)
+async def get_plan_slots(
+    service: PlanningServiceDep,
+    plan_id: int,
+    request_id: Annotated[list[str] | None, Query()] = None,
+) -> PlanSlotsResponse:
+    """Куда можно поставить заявки плана — для перетаскивания на Ганте без запросов на ход.
+
+    У каждой подвижной заявки по инженерам: позиция в маршруте и окно начала работ
+    (минуты от полуночи дня плана) — раньше не доехать, позже сорвутся следующие визиты
+    или смена. Окно клиента не ограничивает: вне его — с согласованием.
+    `request_id` (можно несколько) сужает ответ, без него — все заявки плана.
+    """
+    return await service.get_slots(plan_id, request_id)
+
+
+@router.post("/plan/{plan_id}/move", response_model=MoveResponse)
+async def move_request(
+    service: PlanningServiceDep, plan_id: int, body: MoveRequest
+) -> MoveResponse:
+    """Ручной ход на Ганте: поставить заявку к инженеру на время, снять или заменить.
+
+    `commit: false` — только проверка и новое расписание изменившихся маршрутов;
+    `commit: true` — ход сохраняется новой версией плана (`planId` в ответе).
+    Недопустимый ход плана не меняет: `ok: false` и причина.
+    """
+    return await service.move(plan_id, body)

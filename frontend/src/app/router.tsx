@@ -288,7 +288,10 @@ function PlanMapPage() {
 
 function PlanGanttPage() {
   const context = usePlanContext()
-  const board = usePlanGanttBoard(context.regionId, context.date.toString(), context.queryPlanId)
+  const board = usePlanGanttBoard(context.regionId, context.date.toString(), context.queryPlanId, {
+    // Ручной ход сохранён новой версией — переключаемся на неё.
+    onSaved: context.setPlanId,
+  })
 
   return (
     <WorkAreaGanttLayout header={<PlanWorkHeader context={context} />}>

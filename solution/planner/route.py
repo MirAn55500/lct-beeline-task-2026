@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import math
-from typing import Iterable, Sequence
+from typing import Iterable, NamedTuple, Sequence
 
 from .context import PlanContext
 from .cost import InsertionCost
@@ -26,7 +26,19 @@ from .feasibility import FeasibilityResult, check_static
 from .models import Engineer, GeoPoint, Request
 from .textutil import plural
 
-__all__ = ["RouteState"]
+__all__ = ["RouteState", "InsertionWindow"]
+
+
+class InsertionWindow(NamedTuple):
+    """Допустимое начало работ при вставке на позицию; минуты от `context.origin`."""
+
+    earliest: float
+    latest: float
+    departure: float
+    """Выезд к заявке при самом раннем начале."""
+    travel_minutes: float
+    """Дорога от предыдущей точки маршрута при самом раннем начале."""
+
 
 _EPS = 1e-9
 _SECOND = 1 / 60
@@ -493,6 +505,67 @@ class RouteState:
 
     def can_hold(self, request: Request) -> bool:
         return self.best_insertion(request) is not None
+
+    def insertion_window(self, request: Request, position: int) -> InsertionWindow | None:
+        """Когда можно начать работу по заявке, вставленной перед визитом `position`.
+
+        Нужна ручной постановке на Ганте: диспетчер выбирает не позицию, а время.
+        Раньше `earliest` инженер не доедет от предыдущего визита, позже `latest` —
+        сорвётся хвост маршрута (следующие окна, смена) или окно самой заявки.
+        Следующие визиты при этом могут сдвинуться позже в пределах своего запаса.
+
+        Как и `evaluate_insertion`, оценка оптимистична на границах перерывов:
+        окончательно ход подтверждает `insert_checked`.
+        """
+        if position < self.locked_count or position > len(self.stops):
+            return None
+        if not self.feasible or not self.accepts(request):
+            return None
+
+        cal = self.cal
+        travel = self.ctx.travel
+        mode = self.mode
+        strict = self.ctx.settings.service_must_start_within_window
+        timing = self.ctx.timing(request)
+
+        prev_point = self._point_before(position)
+        cursor = self._time_before(position)
+        if cursor == _NEG_INF:
+            return None
+        timed = self.timed
+        if timed is None:
+            minutes = travel.travel_minutes(prev_point, request.point, mode)
+            leg = schedule_leg(cal, timing, cursor, minutes, strict)
+        else:
+            leg = schedule_leg_timed(cal, timing, cursor, timed, prev_point, request.point, mode, strict)
+        if leg is None:
+            return None
+        departure, earliest = leg[0], leg[2]
+        if timed is not None:
+            minutes = leg[6]
+
+        if position == len(self.stops):
+            shift_end = cal.end_m
+            bound = None if shift_end is None else cal.sub_m(shift_end, timing.duration)
+        else:
+            latest_next = self._latest[position]
+            if latest_next == _NEG_INF:
+                return None
+            nxt = self.stops[position]
+            if timed is None:
+                out = travel.travel_minutes(request.point, nxt.point, mode)
+                latest_departure = cal.sub_m(latest_next, out)
+            else:
+                latest_departure = latest_departure_timed(
+                    cal, timed, request.point, nxt.point, mode, latest_next
+                )
+            bound = None if latest_departure is None else cal.sub_m(latest_departure, timing.duration)
+        if bound is None:
+            return None
+        latest = bound if bound < timing.window_end else timing.window_end
+        if latest < earliest - _EPS:
+            return None
+        return InsertionWindow(earliest, latest, departure, minutes)
 
     # ------------------------------------------------------------------ изменение состава
 

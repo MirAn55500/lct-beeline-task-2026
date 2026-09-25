@@ -126,3 +126,58 @@ class PlanExportResponse(BaseModel):
     requests: list[PlanRequestExport]
     routes: list[PlanRouteExport]
     unassigned: list[PlanUnassignedExport]
+
+
+# --- Ручная правка плана на Ганте. Времена — минуты от полуночи дня плана в поясе региона,
+# как на ленте Ганта.
+
+
+class RequestSlotsExport(BaseModel):
+    requestId: str
+    movable: bool
+    reason: str = ""
+    slots: dict[str, list[list[float]]] = Field(
+        default_factory=dict,
+        description="engineerId → [[позиция, раньше всего, позже всего, выезд, минут в пути], …]",
+    )
+    refusals: dict[str, str] = Field(default_factory=dict)
+
+
+class PlanSlotsResponse(BaseModel):
+    planId: int
+    requests: list[RequestSlotsExport]
+
+
+class MoveRequest(BaseModel):
+    requestId: str
+    engineerId: str | None = None
+    start: float | None = Field(default=None, description="Начало работ; без него — лучшее место в окне клиента")
+    position: int | None = Field(default=None, description="Место в маршруте с 0; без него — по времени")
+    release: list[str] = Field(default_factory=list, description="Снять с маршрутов, чтобы освободить место")
+    commit: bool = Field(default=False, description="false — только проверка с превью, true — новая версия плана")
+
+
+class MoveVisitExport(BaseModel):
+    requestId: str
+    engineerId: str
+    position: int
+    departure: float
+    arrival: float
+    start: float
+    end: float
+    travelMinutes: float
+
+
+class MoveResponse(BaseModel):
+    ok: bool
+    reason: str = ""
+    outsideWindow: bool = False
+    windowShift: float = Field(
+        default=0.0,
+        description="На сколько минут переехало окно клиента: согласованное время — новое окно той же длины",
+    )
+    engineers: list[str] = Field(default_factory=list)
+    visits: list[MoveVisitExport] = Field(default_factory=list)
+    released: list[str] = Field(default_factory=list)
+    planId: int | None = None
+    version: int | None = None

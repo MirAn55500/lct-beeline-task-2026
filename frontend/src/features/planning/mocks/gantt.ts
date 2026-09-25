@@ -115,6 +115,8 @@ export function buildGantt(
       ...toTicket(item.requestId),
       reason: item.reason,
       explanation: item.explanation,
+      // Снята вручную при замене: клиенту уже назвали время — нужно согласовать новое.
+      needsApproval: item.reason === 'manual',
     }),
   )
 
