@@ -12,3 +12,6 @@ __pycache__/
 .env.*
 !.env.example
 .DS_Store
+
+# Собранные расписания RAPTOR (backend/modules/planning/transit.py)
+solution/data/timetables/

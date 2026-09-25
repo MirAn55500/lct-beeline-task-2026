@@ -6,8 +6,12 @@
   фактический момент выезда, посчитаны заранее (`solution/tools/raptor_prefetch.py`),
   на стенд приезжают файлом и грузятся при старте (`core/load_transit_profiles.py`);
 * **новые адреса** — RAPTOR на 10:00 при расчёте плана (`fill_missing`): ~0.1 с на
-  точку, плюс ~15 с один раз на загрузку расписания дня в процесс. Результат ложится
-  в кэш маршрутов тем же разделом, что раньше писал ORS, и дальше берётся оттуда.
+  точку. Результат ложится в кэш маршрутов тем же разделом, что раньше писал ORS, и
+  дальше берётся оттуда.
+
+Расписание дня собирается из GTFS ~30 с, поэтому собранное хранится файлом рядом с
+кэшем маршрутов (`_timetable_dir`, на стенде — том `/cache`): дальше любой день с тем же
+набором сервисов грузится с диска за доли секунды, в том числе после перезапуска.
 
 Фонового досчёта нет: новые пары сразу получают одно значение на 10:00. Пары вне фида
 (Кашира и т. п.) запоминаются рядом с кэшем и больше не считаются.
@@ -15,8 +19,12 @@
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
 import json
 import logging
+import os
+import pickle
 from array import array
 import threading
 import time
@@ -117,10 +125,58 @@ _rides: dict[tuple[str, str], array | None] = {}
 требует поиска только из себя: в обратную сторону («известная точка → новый адрес»)
 хватает уже сохранённого прибытия на остановки у нового адреса.
 """
+KEEP_TIMETABLES = 1
+"""Расписаний в памяти: каждое ~300 МБ, а с диска следующее грузится за доли секунды."""
+KEEP_RIDE_DAYS = 2
+"""Дней, для которых помнятся `_rides`: они маленькие и переживают смену расписания."""
 
 
 def _signature(day: date) -> str:
     return transit_profiles.service_signature(gtfs_path(), day)
+
+
+def _timetable_dir() -> Path:
+    settings = get_settings()
+    return Path(settings.routing_cache_path or DEFAULT_CACHE_PATH).parent / "timetables"
+
+
+def _timetable_prefix() -> str:
+    """Фид и всё, от чего зависит собранное расписание: окно, пересадки, поля классов.
+
+    Поменялся код или фид — меняется префикс, и старые файлы не подхватываются.
+    """
+    shape = [
+        DAY_FROM, DAY_MINUTES, raptor.TRANSFER_KM, raptor.TRANSFER_PENALTY, raptor.WALK_DETOUR,
+        *(f.name for cls in (raptor.Timetable, raptor.Route) for f in dataclasses.fields(cls)),
+    ]
+    digest = hashlib.sha256(repr(shape).encode()).hexdigest()[:8]
+    return f"{feed_version()}-{digest}-"
+
+
+def _load_timetable(path: Path, day: date, signature: str) -> raptor.Timetable:
+    """Собранное расписание с диска, а если его там нет — из GTFS с сохранением на диск."""
+    folder = _timetable_dir()
+    prefix = _timetable_prefix()
+    file = folder / f"{prefix}{signature}.pickle"
+    if file.exists():
+        try:
+            # Файл пишет только этот процесс в свой том — чужих данных здесь не бывает
+            return pickle.loads(file.read_bytes())
+        except Exception:  # noqa: BLE001
+            logger.warning("RAPTOR: файл расписания %s не читается — соберу заново", file.name)
+    timetable = raptor.load_timetable(path, day, DAY_FROM, horizon_minutes=DAY_MINUTES)
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        partial = file.with_suffix(".tmp")
+        partial.write_bytes(pickle.dumps(timetable, protocol=pickle.HIGHEST_PROTOCOL))
+        os.replace(partial, file)
+        # Расписания прежнего фида или прежней версии кода больше не понадобятся
+        for stale in folder.glob("*.pickle"):
+            if not stale.name.startswith(prefix):
+                stale.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("RAPTOR: расписание не сохранено в %s", folder, exc_info=True)
+    return timetable
 
 
 def _router(day: date) -> raptor.TransitRouter:
@@ -131,16 +187,16 @@ def _router(day: date) -> raptor.TransitRouter:
         router = _timetables.get(signature)
         if router is None:
             started = time.perf_counter()
-            router = raptor.TransitRouter(
-                raptor.load_timetable(path, day, DAY_FROM, horizon_minutes=DAY_MINUTES)
-            )
-            # Держим не больше двух дней: каждый ~300 МБ, а стенд маленький
-            while len(_timetables) >= 2:
-                old = next(iter(_timetables))
-                _timetables.pop(old)
-                for key in [k for k in _rides if k[0] == old]:
-                    _rides.pop(key)
+            # Прежнее отпускаем до загрузки: два сразу стенду по памяти тяжело
+            while len(_timetables) >= KEEP_TIMETABLES:
+                _timetables.pop(next(iter(_timetables)))
+            router = raptor.TransitRouter(_load_timetable(path, day, signature))
             _timetables[signature] = router
+            days = list(dict.fromkeys(k[0] for k in _rides))
+            for old in days[: max(0, len(days) - KEEP_RIDE_DAYS + 1)]:
+                if old != signature:
+                    for key in [k for k in _rides if k[0] == old]:
+                        _rides.pop(key)
             logger.info(
                 "RAPTOR: расписание на %s загружено за %.1f с", day, time.perf_counter() - started
             )
