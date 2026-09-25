@@ -63,6 +63,8 @@ function applyChange(
     engineerId: placement.engineerId,
     start: placement.start,
     end: placement.end,
+    // Перенесённый визит везёт свою дорогу с собой; у новой заявки её посчитает планировщик.
+    travel: 'travel' in origin ? origin.travel : 0,
     status: draft ? 'draft' : 'assigned',
   }
 

@@ -37,6 +37,8 @@ export type GanttTask = GanttTicket & {
   /** Работа на адресе. */
   start: number
   end: number
+  /** Дорога до адреса перед работой, минуты: участок плашки от выезда до начала работ. */
+  travel: number
   status: GanttStatus
 }
 

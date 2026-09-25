@@ -2,13 +2,17 @@ import type { ComponentType, CSSProperties, PointerEvent } from 'react'
 import { Tooltip } from '@heroui/react'
 import {
   RiArrowRightSLine,
+  RiBus2Line,
+  RiCarLine,
   RiCheckboxCircleFill,
   RiCloseCircleFill,
   RiDraggable,
   RiFlag2Fill,
   RiMapPin4Fill,
+  RiRidingLine,
   RiRouterFill,
   RiTimeFill,
+  RiWalkLine,
 } from '@remixicon/react'
 
 import { cn } from '@/shared/lib/cn'
@@ -16,6 +20,7 @@ import { AppTooltipContent } from '@/shared/ui'
 
 import type { GanttStatus, GanttTask, GanttUnassigned } from '../../ganttTypes'
 import { equipmentLabel, formatRange } from '../../lib/ganttPlacement'
+import type { MapTransport } from '../../mapTypes'
 import { UNASSIGNED_REASON_LABEL } from '../../mocks'
 
 type Icon = ComponentType<{ size?: number | string; className?: string; style?: CSSProperties }>
@@ -100,10 +105,67 @@ function EquipmentLine({ ticket }: { ticket: Pick<GanttTask, 'needsRouter' | 'ne
   )
 }
 
+const TRANSPORT_ICON: Record<MapTransport, Icon> = {
+  car: RiCarLine,
+  public: RiBus2Line,
+  bike: RiRidingLine,
+  walking: RiWalkLine,
+}
+
+type RoadPartProps = {
+  task: GanttTask
+  transport: MapTransport
+  /** Ширина участка, px: узкий — только значок, совсем узкий — пустой; минуты есть в раскрытой карточке. */
+  width: number
+  /** Карточка работ раскрыта — дорога берёт её рамку. */
+  full?: boolean
+  className?: string
+}
+
+/**
+ * Левая часть плашки визита — дорога от выезда до начала работ. Цвет — по статусу:
+ * инженер уже на адресе — дорога пройдена, серая; штриховка отличает её от работы.
+ */
+export function GanttRoadPart({ task, transport, width, full = false, className }: RoadPartProps) {
+  const palette = STATUS_STYLE[task.status === 'working' ? 'done' : task.status]
+  const ring = STATUS_STYLE[task.status].ring
+  const TransportIcon = TRANSPORT_ICON[transport]
+  const label = `Дорога ${task.travel} мин`
+  return (
+    <div
+      role="img"
+      aria-label={label}
+      title={label}
+      className={cn(
+        'flex min-h-[52px] shrink-0 flex-col justify-center gap-0.5 overflow-hidden text-xs leading-4 whitespace-nowrap text-[#18181b]/70 select-none',
+        full ? 'border-2 border-r-0' : 'border-r border-dashed',
+        width >= 64 ? 'px-1.5' : 'items-center',
+        className,
+      )}
+      style={{
+        borderRadius: '8px 0 0 8px',
+        width,
+        borderColor: full ? ring : palette.ring,
+        background: `repeating-linear-gradient(135deg, ${palette.card} 0 6px, color-mix(in srgb, ${palette.tag} 45%, ${palette.card}) 6px 9px)`,
+      }}
+    >
+      {width >= 16 ? (
+        <span className="flex min-w-0 items-center gap-0.5">
+          <TransportIcon size={12} className="shrink-0" />
+          {width >= 64 ? <span className="truncate font-medium">{task.travel} мин</span> : null}
+        </span>
+      ) : null}
+      {width >= 64 ? <span className="truncate">Дорога</span> : null}
+    </div>
+  )
+}
+
 type TaskCardProps = {
   task: GanttTask
   /** Раскрытый вид — при наведении и у заявки, которая ждёт подтверждения. */
   full?: boolean
+  /** Слева стоит дорога — левые углы прямые, плашка выглядит одной. */
+  joined?: boolean
   className?: string
   style?: CSSProperties
   onPointerDown?: (event: PointerEvent<HTMLElement>) => void
@@ -115,6 +177,7 @@ type TaskCardProps = {
 export function GanttTaskCard({
   task,
   full = false,
+  joined = false,
   className,
   style,
   onPointerDown,
@@ -123,6 +186,7 @@ export function GanttTaskCard({
 }: TaskCardProps) {
   const palette = STATUS_STYLE[task.status]
   const cancelled = task.status === 'cancelled'
+  const borderRadius = joined ? '0 8px 8px 0' : 8
 
   if (!full) {
     return (
@@ -137,7 +201,7 @@ export function GanttTaskCard({
           cancelled && 'border border-[#cbd5e1] p-[5px]',
           className,
         )}
-        style={{ borderRadius: 8, background: palette.card, ...style }}
+        style={{ borderRadius, background: palette.card, ...style }}
       >
         <p className="truncate text-xs leading-4 font-semibold whitespace-nowrap text-[#18181b] [text-overflow:clip]">
           {task.typeLabel}
@@ -156,8 +220,8 @@ export function GanttTaskCard({
       onPointerDown={onPointerDown}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
-      className={cn('flex min-h-[52px] gap-1.5 border-2 p-1 select-none', className)}
-      style={{ borderRadius: 8, background: palette.card, borderColor: palette.ring, ...style }}
+      className={cn('flex min-h-[52px] gap-1.5 border-2 p-1 select-none', joined && 'border-l-0 pl-1.5', className)}
+      style={{ borderRadius, background: palette.card, borderColor: palette.ring, ...style }}
     >
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex min-w-0 flex-col">
@@ -167,6 +231,9 @@ export function GanttTaskCard({
             <span>{formatRange(task.start, task.end)}</span>
           </p>
           <p className="truncate text-xs leading-4 text-[#18181b]/70">{task.address}</p>
+          {task.travel > 0 ? (
+            <p className="truncate text-xs leading-4 text-[#18181b]/70">Дорога {task.travel} мин</p>
+          ) : null}
         </div>
         <EquipmentLine ticket={task} />
         <div className="flex">

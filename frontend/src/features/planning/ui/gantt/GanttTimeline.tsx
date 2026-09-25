@@ -7,7 +7,7 @@ import { cn } from '@/shared/lib/cn'
 import { AppPanel } from '@/shared/ui'
 
 import type { GanttEngineer, GanttTask } from '../../ganttTypes'
-import { GanttTaskCard } from './cards'
+import { GanttRoadPart, GanttTaskCard } from './cards'
 import { EngineerCell } from './EngineerCell'
 
 /** Размеры сетки из макета: час и строка. Колонка инженеров — общая левая колонка (useAsideWidth). */
@@ -189,28 +189,41 @@ export function GanttTimeline({
                     ) : null}
 
                     {row.map((task) => {
-                      const left = x(task.start) + 2
-                      const cardWidth = Math.max(x(task.end) - x(task.start) - 4, 20)
+                      // Плашка визита: слева дорога от выезда, справа работа на адресе.
+                      const roadWidth = task.travel > 0 ? x(task.start) - x(task.start - task.travel) : 0
+                      const left = x(task.start - task.travel) + 2
+                      const cardWidth = Math.max(x(task.end) - x(task.start) - (roadWidth > 0 ? 2 : 4), 20)
                       const full = task.status === 'draft' || (!dragging && hoveredTaskId === task.id)
+                      const fullWidth = Math.max(cardWidth, FULL_CARD)
                       return (
-                        <GanttTaskCard
+                        <div
                           key={task.id}
-                          task={task}
-                          full={full}
                           className={cn(
-                            'absolute top-1 transition-opacity',
+                            'absolute top-1 flex items-stretch transition-opacity',
                             full ? 'z-20' : 'z-10',
-                            task.status === 'assigned' && !dragging && 'cursor-grab',
                             (dimmed || task.id === draggingTaskId) && 'opacity-40',
                           )}
-                          style={{
-                            left: full ? Math.min(left, width - FULL_CARD) : left,
-                            width: full ? Math.max(cardWidth, FULL_CARD) : cardWidth,
-                          }}
+                          style={{ left: full ? Math.min(left, width - roadWidth - fullWidth) : left }}
                           onPointerEnter={() => setHoveredTaskId(task.id)}
                           onPointerLeave={() => setHoveredTaskId((current) => (current === task.id ? null : current))}
-                          onPointerDown={(event) => onTaskPointerDown(task, event)}
-                        />
+                        >
+                          {roadWidth > 0 ? (
+                            <GanttRoadPart
+                              task={task}
+                              transport={engineer.transport}
+                              full={full}
+                              width={roadWidth}
+                            />
+                          ) : null}
+                          <GanttTaskCard
+                            task={task}
+                            full={full}
+                            joined={roadWidth > 0}
+                            className={cn(task.status === 'assigned' && !dragging && 'cursor-grab')}
+                            style={{ width: full ? fullWidth : cardWidth }}
+                            onPointerDown={(event) => onTaskPointerDown(task, event)}
+                          />
+                        </div>
                       )
                     })}
                   </div>

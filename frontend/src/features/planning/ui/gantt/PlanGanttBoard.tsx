@@ -82,7 +82,7 @@ export function PlanGanttBoard({ board, viewKey }: PlanGanttBoardProps) {
 
   const edges = [
     ...engineers.flatMap((engineer) => engineer.shifts.flat()),
-    ...tasks.flatMap((task) => [task.start, task.end]),
+    ...tasks.flatMap((task) => [task.start - task.travel, task.end]),
   ]
   const fromHour = edges.length > 0 ? Math.floor(Math.min(...edges) / 60) : 9
   const toHour = edges.length > 0 ? Math.max(Math.ceil(Math.max(...edges) / 60), fromHour + 1) : 22

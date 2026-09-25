@@ -53,8 +53,9 @@ const SKILL_LABEL: Record<string, string> = {
 }
 
 /**
- * Проверка ручной постановки заявки. Дорогу между адресами не считает —
- * это приблизительная подсказка для диспетчера, окончательно план проверит планировщик.
+ * Проверка ручной постановки заявки. Дорога стоящих визитов занята, как и работа,
+ * а свою дорогу новая заявка не считает — это приблизительная подсказка для диспетчера,
+ * окончательно план проверит планировщик.
  */
 export function evaluatePlacement({
   ticket,
@@ -89,7 +90,7 @@ export function evaluatePlacement({
       task.engineerId === engineer.id &&
       task.id !== movingId &&
       task.status !== 'cancelled' &&
-      task.start < end &&
+      task.start - task.travel < end &&
       start < task.end,
   )
   if (overlaps.some((task) => !isMovable(task))) return invalid('Пересекается с начатой заявкой')

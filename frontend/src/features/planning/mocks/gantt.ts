@@ -98,11 +98,13 @@ export function buildGantt(
     route.visits.map((visit): GanttTask => {
       const start = minutes(visit.serviceStartAt)
       const end = minutes(visit.serviceEndAt)
+      const departure = minutes(visit.departureAt)
       return {
         ...toTicket(visit.requestId),
         engineerId: route.engineerId,
         start,
         end,
+        travel: Math.max(0, start - departure),
         status: statusAt(minutes(visit.departureAt), start, end, now),
       }
     }),
