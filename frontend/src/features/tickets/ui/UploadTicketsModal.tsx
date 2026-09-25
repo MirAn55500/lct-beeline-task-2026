@@ -189,7 +189,7 @@ export function UploadTicketsModal({
                           key={region.id}
                           id={region.id}
                           textValue={region.name}
-                          className="cursor-pointer px-3 py-2 text-sm text-foreground outline-none data-[focused]:bg-surface-hover data-[selected]:bg-accent/[0.08]"
+                          className="cursor-pointer px-3 py-2 text-sm text-foreground outline-none data-[focused]:bg-surface-hover data-[selected]:bg-surface-hover"
                           style={{ borderRadius: 8 }}
                         >
                           {region.name}

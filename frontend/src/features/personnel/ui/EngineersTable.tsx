@@ -198,7 +198,7 @@ function EngineerRow({
         'h-14 cursor-pointer border-b border-separator transition-colors duration-700',
         active && 'bg-surface-hover',
         highlighted && !active && 'bg-[#34c759]/[0.08]',
-        !active && !highlighted && 'hover:bg-surface-hover',
+        !active && !highlighted && 'hover:bg-surface-tertiary',
       )}
     >
       <div className="flex min-w-0 items-center gap-3">
