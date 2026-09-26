@@ -272,6 +272,7 @@ export function PlanGanttBoard({ board, viewKey }: PlanGanttBoardProps) {
         engineerId: drag.placement.engineerId,
         fromHour: Math.max(fromHour, Math.floor(drag.placement.start / 60)),
         toHour: Math.min(toHour, Math.floor((drag.placement.end - 1) / 60) + 1),
+        snapStart: drag.placement.start,
         tone: drag.placement.state === 'ok' || drag.placement.state === 'approval' ? 'target' : 'danger',
       }
     : null
