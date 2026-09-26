@@ -22,6 +22,8 @@ export type GanttTarget = {
   engineerId: string
   fromHour: number
   toHour: number
+  /** Позиция голубой линии, которая перемещается по 10-минутным шагам. */
+  snapStart: number
   /** target — сюда встанет (фиолетовая), danger — замена или нельзя (красная). */
   tone: 'target' | 'danger'
 }
@@ -187,6 +189,17 @@ export function GanttTimeline({
                           width: (target.toHour - target.fromHour) * GANTT_HOUR,
                         }}
                       />
+                    ) : null}
+
+                    {target?.engineerId === engineer.id ? (
+                      <div
+                        aria-hidden
+                        className="pointer-events-none absolute inset-y-0 z-[5] w-0.5 -translate-x-1/2 bg-[var(--beeline-accent-03-blue-primary)]"
+                        style={{ left: x(target.snapStart) }}
+                      >
+                        <span className="absolute top-0 left-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--beeline-accent-03-blue-primary)]" />
+                        <span className="absolute bottom-0 left-1/2 size-2.5 -translate-x-1/2 translate-y-1/2 rounded-full bg-[var(--beeline-accent-03-blue-primary)]" />
+                      </div>
                     ) : null}
 
                     {row.map((task) => {
