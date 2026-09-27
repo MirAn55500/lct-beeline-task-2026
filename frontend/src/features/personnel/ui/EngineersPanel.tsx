@@ -14,7 +14,7 @@ import { useGetEngineersQuery } from '@/features/personnel/api'
 import type { Engineer } from '@/features/personnel/types'
 import { routes } from '@/shared/config/routes'
 import { cn } from '@/shared/lib/cn'
-import { getInitials } from '@/shared/lib/text'
+import { getInitials, pluralRu } from '@/shared/lib/text'
 
 const TRANSPORT_ICON: Record<
   string,
@@ -72,14 +72,15 @@ export function EngineersPanel({ className, regionId }: EngineersPanelProps) {
     { skip: regionId == null },
   )
   const count = engineers.length
-  const title = isLoading ? 'Инженеры' : `${count} инженеров`
+  const title = isLoading ? 'Инженеры' : `${count} ${pluralRu(count, ['инженер', 'инженера', 'инженеров'])}`
+  const works = pluralRu(count, ['Работает', 'Работают', 'Работают'])
 
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col', className)}>
       <div className="flex shrink-0 flex-col gap-1 px-5 pb-2 pt-5">
         <h2 className="text-xl font-semibold leading-7 text-foreground">{title}</h2>
         <p className="text-sm leading-6 text-muted">
-          Работает сегодня в рамках выбранного региона
+          {works} сегодня в рамках выбранного региона
         </p>
       </div>
 

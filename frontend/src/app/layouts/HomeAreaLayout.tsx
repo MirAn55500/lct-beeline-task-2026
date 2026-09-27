@@ -137,7 +137,7 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
             regionId == null ? undefined : () => setRebuildOpen(true)
           }
           onExport={
-            regionId == null
+            regionId == null || selectedPlanId == null
               ? undefined
               : (format) =>
                   exportTickets(
