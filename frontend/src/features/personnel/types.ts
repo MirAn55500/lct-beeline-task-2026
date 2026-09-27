@@ -85,6 +85,8 @@ export type PersonnelEngineer = {
   qualificationHint?: string | null
   startWork?: string | null
   endWork?: string | null
+  /** Своя смена; без неё рабочий день идёт за бригадой. */
+  ownSchedule?: boolean
 }
 
 export type PersonnelFilterOptions = {
@@ -98,8 +100,9 @@ export type CreateEngineerBody = {
   brigade_id: number
   transport: TransportCode
   skills: SkillCode[]
-  start_work: string
-  end_work: string
+  /** Без часов — рабочий день бригады, и дальше он меняется вместе с ней. */
+  start_work?: string
+  end_work?: string
   is_lead?: boolean
   qualification?: QualificationCode
 }

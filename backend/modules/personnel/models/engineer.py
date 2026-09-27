@@ -21,8 +21,10 @@ class Engineer(BaseTable, table=True):
 
     engineer_id: Optional[int] = Field(default=None, primary_key=True)
     name: str
+    # Смена инженера. Без own_schedule это рабочий день бригады, и он меняется вместе с ним
     start_work: time
     end_work: time
+    own_schedule: bool = Field(default=False)
     transport_id: int = Field(foreign_key="dicts.dict_id")
     brigade_id: int = Field(foreign_key="brigades.brigade_id")
     # UI-квалификация страницы «Персонал»: master | worker | novice

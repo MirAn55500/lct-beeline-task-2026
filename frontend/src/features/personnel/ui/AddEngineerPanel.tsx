@@ -138,10 +138,13 @@ export function AddEngineerPanel({
   }))
   const [hoursTouched, setHoursTouched] = useState(false)
   const brigadeId = draft.brigadeId ?? defaultBrigadeId
-  const hours = hoursTouched
-    ? { timeFrom: draft.timeFrom, timeTo: draft.timeTo }
-    : brigadeHours(brigades, brigadeId)
+  const defaultHours = brigadeHours(brigades, brigadeId)
+  const hours = hoursTouched ? { timeFrom: draft.timeFrom, timeTo: draft.timeTo } : defaultHours
   const form: ManualDraft = { ...draft, brigadeId, ...hours }
+  const ownSchedule =
+    hoursTouched &&
+    (form.timeFrom?.compare(defaultHours.timeFrom) !== 0 ||
+      form.timeTo?.compare(defaultHours.timeTo) !== 0)
 
   const patch = (next: Partial<ManualDraft>) => setDraft((prev) => ({ ...prev, ...next }))
   const setHours = (next: Partial<Pick<ManualDraft, 'timeFrom' | 'timeTo'>>) => {
@@ -157,7 +160,7 @@ export function AddEngineerPanel({
     form.timeFrom != null &&
     form.timeTo != null
 
-  const submitManual = async (snapshot: ManualDraft) => {
+  const submitManual = async (snapshot: ManualDraft, own: boolean) => {
     if (
       snapshot.brigadeId == null ||
       snapshot.timeFrom == null ||
@@ -174,8 +177,10 @@ export function AddEngineerPanel({
         brigade_id: snapshot.brigadeId,
         transport,
         skills,
-        start_work: formatTime(snapshot.timeFrom),
-        end_work: formatTime(snapshot.timeTo),
+        // Часы бригады не передаём: тогда смена инженера меняется вместе с бригадой
+        ...(own
+          ? { start_work: formatTime(snapshot.timeFrom), end_work: formatTime(snapshot.timeTo) }
+          : {}),
       }).unwrap()
       onAdd([created])
       toast.success('Инженер добавлен')
@@ -187,7 +192,7 @@ export function AddEngineerPanel({
           children: 'Повторить',
           variant: 'outline',
           size: 'sm',
-          onPress: () => void submitManual(snapshot),
+          onPress: () => void submitManual(snapshot, own),
         },
       })
     } finally {
@@ -287,6 +292,22 @@ export function AddEngineerPanel({
                 onChange={(timeTo) => setHours({ timeTo })}
               />
             </div>
+            <Hint>
+              {ownSchedule ? (
+                <>
+                  Своя смена — не меняется вместе с бригадой.{' '}
+                  <button
+                    type="button"
+                    className="cursor-pointer text-accent hover:underline"
+                    onClick={() => setHoursTouched(false)}
+                  >
+                    Как у бригады
+                  </button>
+                </>
+              ) : (
+                'Как у бригады — меняется вместе с ней'
+              )}
+            </Hint>
           </div>
         </div>
       </ScrollShadow>
@@ -303,7 +324,7 @@ export function AddEngineerPanel({
         <button
           type="button"
           disabled={!isValid || submitting}
-          onClick={() => void submitManual(form)}
+          onClick={() => void submitManual(form, ownSchedule)}
           className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center bg-accent text-sm font-medium leading-5 text-accent-foreground transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent"
           style={{ borderRadius: 8, padding: '8px 16px' }}
         >

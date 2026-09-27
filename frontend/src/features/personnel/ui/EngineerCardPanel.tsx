@@ -139,7 +139,12 @@ export function EngineerCardPanel({
           <Field label="Бригада">{engineer.brigadeName}</Field>
         ) : null}
 
-        {workDay ? <Field label="Рабочий день">{workDay}</Field> : null}
+        {workDay ? (
+          <Field label="Рабочий день">
+            {workDay}
+            <span className="text-muted">{engineer.ownSchedule ? ' · своя смена' : ' · как у бригады'}</span>
+          </Field>
+        ) : null}
       </div>
 
       {onEdit ? (

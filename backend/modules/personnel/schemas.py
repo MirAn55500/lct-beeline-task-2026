@@ -73,7 +73,7 @@ class ReverseGeocodeResponse(BaseModel):
 
 class UpdateBrigadeResponse(BrigadeResponse):
     rescheduled_engineers: int = 0
-    """Скольким инженерам рабочий день переставлен вслед за бригадой."""
+    """Скольким инженерам рабочий день переставлен вслед за бригадой (у кого нет своей смены)."""
     office_moved: bool = False
     """Офис переехал — у инженеров новая точка старта."""
 
@@ -98,6 +98,8 @@ class EngineerResponse(BaseModel):
     is_lead: bool = False
     start_work: time | None = None
     end_work: time | None = None
+    own_schedule: bool = False
+    """Своя смена; без неё инженер работает по часам бригады."""
     brigade_name: str | None = None
 
 
@@ -117,8 +119,9 @@ class CreateEngineerRequest(BaseModel):
     # Пока не используется в планировании — опционально.
     qualification: QualificationFilter | None = None
     skills: list[str] = Field(min_length=1)
-    start_work: time
-    end_work: time
+    # Без часов — рабочий день бригады, и он дальше меняется вместе с бригадой
+    start_work: time | None = None
+    end_work: time | None = None
     is_lead: bool = False
 
 

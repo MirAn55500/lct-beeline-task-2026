@@ -100,8 +100,8 @@ class PersonnelService:
         """Сохранить карточку «Управление бригадой».
 
         Новый адрес офиса геокодируется — это точка старта инженеров. Рабочий день
-        переставляется тем инженерам, у кого он совпадал с прежним днём бригады;
-        свою смену инженера не трогаем. План сам не пересчитывается.
+        переставляется всем инженерам бригады, кроме тех, у кого своя смена.
+        План сам не пересчитывается.
         """
         brigade = await self._repo.get_brigade_full(brigade_id)
         if brigade is None:
@@ -156,14 +156,14 @@ class PersonnelService:
                 await self._repo.delete_address(previous)
 
         rescheduled = 0
-        old_day = (brigade.start_work, brigade.end_work)
-        if (body.start_work, body.end_work) != old_day:
-            for engineer in brigade.engineers or []:
-                if (engineer.start_work, engineer.end_work) == old_day:
-                    engineer.start_work = body.start_work
-                    engineer.end_work = body.end_work
-                    self._session.add(engineer)
-                    rescheduled += 1
+        for engineer in brigade.engineers or []:
+            if engineer.own_schedule:
+                continue
+            if (engineer.start_work, engineer.end_work) != (body.start_work, body.end_work):
+                engineer.start_work = body.start_work
+                engineer.end_work = body.end_work
+                self._session.add(engineer)
+                rescheduled += 1
 
         brigade.name = name
         brigade.start_work = body.start_work
@@ -316,13 +316,23 @@ class PersonnelService:
             if qualification is None:
                 raise AppError("Неизвестная квалификация")
 
-        if body.end_work <= body.start_work:
+        # Своя смена — только если её задали и она не совпадает с днём бригады
+        if (body.start_work is None) != (body.end_work is None):
+            raise AppError("Укажите и начало, и конец смены")
+        start_work, end_work = (
+            (brigade.start_work, brigade.end_work)
+            if body.start_work is None or body.end_work is None
+            else (body.start_work, body.end_work)
+        )
+        if end_work <= start_work:
             raise AppError("Конец смены должен быть позже начала")
+        own_schedule = (start_work, end_work) != (brigade.start_work, brigade.end_work)
 
         engineer = Engineer(
             name=body.name.strip(),
-            start_work=body.start_work,
-            end_work=body.end_work,
+            start_work=start_work,
+            end_work=end_work,
+            own_schedule=own_schedule,
             transport_id=transport_id,
             brigade_id=body.brigade_id,
             qualification=qualification,
@@ -384,6 +394,7 @@ class PersonnelService:
             is_lead=bool(engineer.is_lead),
             start_work=engineer.start_work,
             end_work=engineer.end_work,
+            own_schedule=bool(engineer.own_schedule),
             brigade_name=brigade_name,
         )
 

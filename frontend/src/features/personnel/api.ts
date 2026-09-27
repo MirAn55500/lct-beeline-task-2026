@@ -56,6 +56,7 @@ type ApiEngineer = {
   is_lead: boolean
   start_work?: string | null
   end_work?: string | null
+  own_schedule?: boolean
 }
 
 function mapBrigade(item: ApiBrigade): PersonnelBrigade {
@@ -93,6 +94,7 @@ function mapPersonnelEngineer(item: ApiEngineer): PersonnelEngineer {
     qualificationHint: item.qualification_hint,
     startWork: item.start_work,
     endWork: item.end_work,
+    ownSchedule: item.own_schedule ?? false,
   }
 }
 
