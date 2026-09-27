@@ -33,7 +33,6 @@ export type PersonnelBrigade = {
   endWork: string | null
   /** ISO-номера рабочих дней: 1 — понедельник, 7 — воскресенье. */
   workDays: number[]
-  inPlanning: boolean
   areaIds: number[]
 }
 
@@ -60,7 +59,6 @@ export type UpdateBrigadeBody = {
   work_days: number[]
   start_work: string
   end_work: string
-  in_planning: boolean
 }
 
 export type UpdateBrigadeResult = PersonnelBrigade & {
@@ -87,6 +85,11 @@ export type PersonnelEngineer = {
   endWork?: string | null
   /** Своя смена; без неё рабочий день идёт за бригадой. */
   ownSchedule?: boolean
+  /** Рабочие дни (ISO): свои или бригады. */
+  workDays: number[]
+  /** Свой график; без него дни идут за бригадой. */
+  ownWorkDays: boolean
+  homeAddress: string | null
 }
 
 export type PersonnelFilterOptions = {
@@ -95,16 +98,23 @@ export type PersonnelFilterOptions = {
   qualifications: string[]
 }
 
-export type CreateEngineerBody = {
+/** Поля формы инженера — одни и те же при добавлении и редактировании. */
+export type EngineerBody = {
   name: string
   brigade_id: number
   transport: TransportCode
   skills: SkillCode[]
+  qualification?: QualificationCode
+  home_address?: string | null
   /** Без часов — рабочий день бригады, и дальше он меняется вместе с ней. */
   start_work?: string
   end_work?: string
+  /** Без дней — рабочие дни бригады. */
+  work_days?: number[]
+}
+
+export type CreateEngineerBody = EngineerBody & {
   is_lead?: boolean
-  qualification?: QualificationCode
 }
 
 export type EngineersListArgs = {

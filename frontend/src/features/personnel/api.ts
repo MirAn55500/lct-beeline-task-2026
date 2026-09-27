@@ -6,6 +6,7 @@ import type {
   BrigadeArea,
   CreateEngineerBody,
   Engineer,
+  EngineerBody,
   EngineersListArgs,
   PersonnelBrigade,
   PersonnelEngineer,
@@ -31,7 +32,6 @@ type ApiBrigade = {
   start_work: string | null
   end_work: string | null
   work_days: number[]
-  in_planning: boolean
   area_ids: number[]
 }
 
@@ -57,6 +57,9 @@ type ApiEngineer = {
   start_work?: string | null
   end_work?: string | null
   own_schedule?: boolean
+  work_days?: number[]
+  own_work_days?: boolean
+  home_address?: string | null
 }
 
 function mapBrigade(item: ApiBrigade): PersonnelBrigade {
@@ -74,7 +77,6 @@ function mapBrigade(item: ApiBrigade): PersonnelBrigade {
     startWork: item.start_work,
     endWork: item.end_work,
     workDays: item.work_days ?? [],
-    inPlanning: item.in_planning ?? true,
     areaIds: item.area_ids ?? [],
   }
 }
@@ -95,6 +97,9 @@ function mapPersonnelEngineer(item: ApiEngineer): PersonnelEngineer {
     startWork: item.start_work,
     endWork: item.end_work,
     ownSchedule: item.own_schedule ?? false,
+    workDays: item.work_days ?? [],
+    ownWorkDays: item.own_work_days ?? false,
+    homeAddress: item.home_address ?? null,
   }
 }
 
@@ -196,6 +201,12 @@ export const personnelApi = baseApi.injectEndpoints({
       transformResponse: (response: ApiEngineer) => mapPersonnelEngineer(response),
       invalidatesTags: ['Engineer', 'Brigade'],
     }),
+    updateEngineer: build.mutation<PersonnelEngineer, { id: number; body: EngineerBody }>({
+      query: ({ id, body }) => ({ url: `/api/personnel/engineers/${id}`, method: 'PATCH', body }),
+      transformResponse: (response: ApiEngineer) => mapPersonnelEngineer(response),
+      // Бригада — счётчик и бригадир в списке; план — имена и смены на Ганте
+      invalidatesTags: ['Engineer', 'Brigade', 'Plan'],
+    }),
     deleteEngineer: build.mutation<void, number>({
       query: (engineerId) => ({
         url: `/api/personnel/engineers/${engineerId}`,
@@ -218,4 +229,5 @@ export const {
   useCreateEngineerMutation,
   useDeleteEngineerMutation,
   useUpdateBrigadeMutation,
+  useUpdateEngineerMutation,
 } = personnelApi

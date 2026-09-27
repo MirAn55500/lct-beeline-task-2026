@@ -32,7 +32,6 @@ class BrigadeResponse(BaseModel):
     end_work: time | None = None
     work_days: list[int] = Field(default_factory=list)
     """ISO-номера рабочих дней недели: 1 — понедельник, 7 — воскресенье."""
-    in_planning: bool = True
     area_ids: list[int] = Field(default_factory=list)
 
 
@@ -53,7 +52,6 @@ class UpdateBrigadeRequest(BaseModel):
     work_days: list[int] = Field(min_length=1)
     start_work: time
     end_work: time
-    in_planning: bool = True
 
 
 class AddressSuggestionResponse(BaseModel):
@@ -100,6 +98,11 @@ class EngineerResponse(BaseModel):
     end_work: time | None = None
     own_schedule: bool = False
     """Своя смена; без неё инженер работает по часам бригады."""
+    work_days: list[int] = Field(default_factory=list)
+    """Рабочие дни инженера (ISO): свои или бригады."""
+    own_work_days: bool = False
+    """Свой график; без него дни идут за бригадой."""
+    home_address: str | None = None
     brigade_name: str | None = None
 
 
@@ -112,17 +115,29 @@ class EngineersQuery(BaseModel):
     transport: list[str] = Field(default_factory=list)
 
 
-class CreateEngineerRequest(BaseModel):
+class EngineerFields(BaseModel):
+    """Поля формы инженера — одни и те же при добавлении и редактировании."""
+
     name: str = Field(min_length=1, max_length=200)
     brigade_id: int = Field(ge=1)
     transport: str = Field(min_length=1)
     # Пока не используется в планировании — опционально.
     qualification: QualificationFilter | None = None
     skills: list[str] = Field(min_length=1)
+    home_address: str | None = Field(default=None, max_length=300)
     # Без часов — рабочий день бригады, и он дальше меняется вместе с бригадой
     start_work: time | None = None
     end_work: time | None = None
+    # Без дней — рабочие дни бригады
+    work_days: list[int] | None = None
+
+
+class CreateEngineerRequest(EngineerFields):
     is_lead: bool = False
+
+
+class UpdateEngineerRequest(EngineerFields):
+    """Карточка инженера целиком: не переданные часы и дни — как у бригады."""
 
 
 class PersonnelFilterOptions(BaseModel):

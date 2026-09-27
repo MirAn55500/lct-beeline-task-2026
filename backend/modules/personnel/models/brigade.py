@@ -1,4 +1,4 @@
-from datetime import date, time
+from datetime import time
 from typing import TYPE_CHECKING, Optional
 
 from sqlmodel import Field, Relationship
@@ -27,8 +27,6 @@ class Brigade(BaseTable, table=True):
     office_address_id: int = Field(foreign_key="addresses.address_id")
     # Рабочие дни — ISO-номера дней недели подряд: «12345» — с понедельника по пятницу
     work_days: str = Field(default="1234567")
-    # Выключенная бригада в расчёт плана не попадает, уже составленные планы не трогаются
-    in_planning: bool = Field(default=True)
 
     region: Optional["Region"] = Relationship(back_populates="brigades")
     office_address: Optional["Address"] = Relationship(back_populates="brigades")
@@ -38,7 +36,3 @@ class Brigade(BaseTable, table=True):
     @property
     def weekdays(self) -> list[int]:
         return sorted({int(ch) for ch in self.work_days if ch in "1234567"})
-
-    def plans_on(self, day: date) -> bool:
-        """Бригада участвует в плане на этот день."""
-        return self.in_planning and day.isoweekday() in self.weekdays

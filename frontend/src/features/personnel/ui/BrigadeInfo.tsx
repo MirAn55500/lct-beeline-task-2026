@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { ScrollShadow, Switch, Tooltip, toast } from '@heroui/react'
+import { ScrollShadow, Tooltip, toast } from '@heroui/react'
 import type { Time } from '@internationalized/date'
 import { RiInformationLine, RiMapPinLine } from '@remixicon/react'
 
@@ -17,22 +17,13 @@ import { pluralRu } from '@/shared/lib/text'
 import { AppPanel, AppTooltipContent } from '@/shared/ui'
 import { MultiSelectField } from '@/shared/ui/MultiSelectField'
 
+import { errorReason } from '../lib/errors'
 import { formatTime, parseTime } from '../lib/time'
+import { WEEKDAYS } from '../lib/weekdays'
 
 import { BrigadeMap } from './BrigadeMap'
 import { AddressField } from './AddressField'
 import { FieldLabel, Hint, TextInput, ToggleChip, WorkTimeField } from './formParts'
-
-/** Дни недели с понедельника, ISO-номера как в API. */
-const WEEKDAYS = [
-  { day: 1, label: 'Пн' },
-  { day: 2, label: 'Вт' },
-  { day: 3, label: 'Ср' },
-  { day: 4, label: 'Чт' },
-  { day: 5, label: 'Пт' },
-  { day: 6, label: 'Сб' },
-  { day: 7, label: 'Вс' },
-]
 
 type Draft = {
   name: string
@@ -46,7 +37,6 @@ type Draft = {
   workDays: number[]
   timeFrom: Time | null
   timeTo: Time | null
-  inPlanning: boolean
 }
 
 function draftOf(brigade: PersonnelBrigade, areaName: Map<number, string>): Draft {
@@ -59,7 +49,6 @@ function draftOf(brigade: PersonnelBrigade, areaName: Map<number, string>): Draf
     workDays: [...brigade.workDays].sort(),
     timeFrom: parseTime(brigade.startWork),
     timeTo: parseTime(brigade.endWork),
-    inPlanning: brigade.inPlanning,
   }
 }
 
@@ -72,22 +61,11 @@ function sameDraft(a: Draft, b: Draft) {
     [...a.areas].sort().join('|') === [...b.areas].sort().join('|') &&
     [...a.workDays].sort().join() === [...b.workDays].sort().join() &&
     time(a.timeFrom) === time(b.timeFrom) &&
-    time(a.timeTo) === time(b.timeTo) &&
-    a.inPlanning === b.inPlanning
+    time(a.timeTo) === time(b.timeTo)
   )
 }
 
 /** Текст ошибки backend: FastAPI кладёт его в detail. */
-function errorReason(error: unknown) {
-  const detail = ((error as { data?: unknown } | null)?.data as { detail?: unknown } | null)?.detail
-  if (typeof detail === 'string' && detail.trim()) return detail
-  // 422 FastAPI — список ошибок полей; форма их не допускает, так что это что-то вне формы
-  if (Array.isArray(detail)) return 'Сервер не принял данные — проверьте поля формы'
-  if ((error as { status?: unknown } | null)?.status === 'FETCH_ERROR')
-    return 'Нет связи с сервером'
-  return 'Что-то пошло не так'
-}
-
 /** Что изменилось для плана — подпись тоста после сохранения. */
 function savedNote(result: UpdateBrigadeResult, before: Draft, after: Draft) {
   const notes: string[] = []
@@ -100,7 +78,6 @@ function savedNote(result: UpdateBrigadeResult, before: Draft, after: Draft) {
   const planning =
     result.officeMoved ||
     result.rescheduledEngineers > 0 ||
-    before.inPlanning !== after.inPlanning ||
     before.workDays.join() !== after.workDays.join()
   if (planning) notes.push('План учтёт это при следующем пересчёте')
   return notes.length > 0 ? notes.join('. ') : undefined
@@ -249,7 +226,6 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
           work_days: [...snapshot.workDays].sort(),
           start_work: formatTime(snapshot.timeFrom),
           end_work: formatTime(snapshot.timeTo),
-          in_planning: snapshot.inPlanning,
         },
       }).unwrap()
       // Правку, сделанную во время сохранения, не трогаем; сохранённую держим, пока список
@@ -423,29 +399,6 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
               ) : null}
             </div>
 
-            <div className="h-px w-full bg-border" />
-
-            <Switch
-              className="w-full gap-0"
-              style={{
-                ['--switch-control-bg-checked' as string]: 'var(--accent)',
-              }}
-              isSelected={draft.inPlanning}
-              onChange={(inPlanning) => patch({ inPlanning })}
-            >
-              <Switch.Content className="flex h-6 w-full items-center justify-between">
-                <span className="flex items-center gap-1 text-sm font-medium leading-6 text-foreground">
-                  Участвует в планировании
-                  <InfoHint>
-                    Выключенная бригада не попадает в следующий расчёт плана. Уже составленные планы
-                    не меняются
-                  </InfoHint>
-                </span>
-                <Switch.Control>
-                  <Switch.Thumb style={{ backgroundColor: 'var(--accent-foreground)' }} />
-                </Switch.Control>
-              </Switch.Content>
-            </Switch>
           </div>
         </ScrollShadow>
 

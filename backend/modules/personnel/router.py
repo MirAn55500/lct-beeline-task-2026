@@ -15,6 +15,7 @@ from modules.personnel.schemas import (
     ReverseGeocodeResponse,
     UpdateBrigadeRequest,
     UpdateBrigadeResponse,
+    UpdateEngineerRequest,
 )
 from modules.personnel.service import PersonnelService
 
@@ -119,6 +120,16 @@ async def create_engineer(
     body: CreateEngineerRequest,
 ) -> EngineerResponse:
     return await service.create_engineer(body)
+
+
+@router.patch("/engineers/{engineer_id}", response_model=EngineerResponse)
+async def update_engineer(
+    service: PersonnelServiceDep,
+    engineer_id: int,
+    body: UpdateEngineerRequest,
+) -> EngineerResponse:
+    """Карточка инженера: не переданные часы и рабочие дни — как у бригады."""
+    return await service.update_engineer(engineer_id, body)
 
 
 @router.delete("/engineers/{engineer_id}", status_code=status.HTTP_204_NO_CONTENT)

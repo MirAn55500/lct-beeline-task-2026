@@ -140,12 +140,12 @@ class PlanningService:
             raise AppError("На эту дату в регионе нет заявок")
 
         engineers = await self._repo.list_engineers_for_plan(region_id)
-        # Выключенные из планирования и выходные бригады в новый план не попадают
-        working = [e for e in engineers if e.brigade is None or e.brigade.plans_on(day)]
+        # Инженеры в выходной (свой или бригады) в новый план не попадают
+        working = [e for e in engineers if e.works_on(day)]
         if engineers and not working:
             raise AppError(
-                "В этот день бригада региона не работает — проверьте рабочий график "
-                "и «Участвует в планировании» в карточке бригады"
+                "В этот день никто из инженеров региона не работает — проверьте рабочий "
+                "график в карточках бригады и инженеров"
             )
         engineers = working
         scenario, transport_by_engineer = build_scenario(

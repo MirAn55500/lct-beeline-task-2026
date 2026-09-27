@@ -37,6 +37,13 @@ export const QUALIFICATION_LABEL = {
 
 export const QUALIFICATION_OPTIONS = Object.values(QUALIFICATION_LABEL)
 
+/** Как в backend qualification.py — подпись под квалификацией. */
+export const QUALIFICATION_HINT = {
+  master: 'Выполняет задачи быстрее нормативов',
+  worker: 'Выполняет задачи в рамках нормативов',
+  novice: 'Выполняет задачи дольше нормативов',
+} as const
+
 /** «Саша Белый» → «Белый С.» — как подпись бригадира в макете. */
 export function shortName(name: string): string {
   const [first, last] = name.split(/\s+/)
@@ -74,5 +81,8 @@ export function createUploadBatch(
     name,
     skills,
     transport,
+    workDays: [],
+    ownWorkDays: false,
+    homeAddress: null,
   }))
 }

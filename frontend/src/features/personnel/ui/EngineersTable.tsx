@@ -169,6 +169,7 @@ function EngineerRow({
   deleting,
   onToggle,
   onOpen,
+  onEdit,
   onDelete,
 }: {
   engineer: PersonnelEngineer
@@ -178,6 +179,7 @@ function EngineerRow({
   deleting?: boolean
   onToggle: (next: boolean) => void
   onOpen: () => void
+  onEdit: () => void
   onDelete: () => void
 }) {
   const TransportIcon = TRANSPORT_ICON[engineer.transport]
@@ -239,7 +241,7 @@ function EngineerRow({
       </span>
 
       <div className="flex justify-end gap-1.5">
-        <IconButton label={`Редактировать ${engineer.name}`} tone="outline" onClick={onOpen}>
+        <IconButton label={`Редактировать ${engineer.name}`} tone="outline" onClick={onEdit}>
           <RiPencilLine size={16} />
         </IconButton>
         <IconButton
@@ -263,6 +265,8 @@ type EngineersTableProps = {
   /** Открытая карточка инженера. */
   activeId?: number | null
   onOpenEngineer?: (engineer: PersonnelEngineer) => void
+  /** Карандаш в строке — сразу форма редактирования. */
+  onEditEngineer?: (engineer: PersonnelEngineer) => void
 }
 
 export function EngineersTable({
@@ -271,6 +275,7 @@ export function EngineersTable({
   isLoading = false,
   activeId = null,
   onOpenEngineer,
+  onEditEngineer,
 }: EngineersTableProps) {
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState<EngineersFiltersState>(EMPTY_ENGINEERS_FILTERS)
@@ -414,6 +419,7 @@ export function EngineersTable({
               deleting={isDeleting && deletingId === engineer.id}
               onToggle={(next) => toggle(engineer.id, next)}
               onOpen={() => onOpenEngineer?.(engineer)}
+              onEdit={() => (onEditEngineer ?? onOpenEngineer)?.(engineer)}
               onDelete={() => void handleDelete(engineer.id)}
             />
           ))

@@ -9,10 +9,10 @@ import {
   type HomeAreaContext,
 } from '@/app/layouts'
 import {
-  AddEngineerPanel,
   BrigadeInfo,
   BrigadesPanel,
   EngineerCardPanel,
+  EngineerFormPanel,
   EngineersTable,
   PersonnelHeader,
   downloadEngineers,
@@ -81,6 +81,8 @@ function PersonnelPage() {
   const [params, setParams] = useSearchParams()
   const [isAddOpen, setAddOpen] = useState(false)
   const [activeEngineerId, setActiveEngineerId] = useState<number | null>(null)
+  // Открытая карточка — в форме редактирования
+  const [isEditing, setEditing] = useState(false)
   const [highlightIds, setHighlightIds] = useState<ReadonlySet<number>>(
     () => new Set(),
   )
@@ -109,11 +111,6 @@ function PersonnelPage() {
     const timer = setTimeout(() => setHighlightIds(new Set()), HIGHLIGHT_MS)
     return () => clearTimeout(timer)
   }, [highlightIds])
-
-  // Смена бригады закрывает карточку другого состава.
-  useEffect(() => {
-    setActiveEngineerId(null)
-  }, [brigadeId])
 
   // Если в URL нет/устарела бригада — подставляем первую из ответа API.
   useEffect(() => {
@@ -160,7 +157,14 @@ function PersonnelPage() {
           countById={countById}
           selectedId={brigadeId}
           isLoading={brigadesLoading}
-          onSelect={(next) => update({ brigade: next })}
+          onSelect={(next) => {
+            // Другая бригада — другой состав: карточка прежнего инженера закрывается
+            if (next !== brigadeId) {
+              setActiveEngineerId(null)
+              setEditing(false)
+            }
+            update({ brigade: next })
+          }}
         />
       }
       header={
@@ -170,10 +174,12 @@ function PersonnelPage() {
           onTabChange={(next) => {
             setAddOpen(false)
             setActiveEngineerId(null)
+            setEditing(false)
             update({ tab: next })
           }}
           onAddEngineer={() => {
             setActiveEngineerId(null)
+            setEditing(false)
             setAddOpen(true)
             // Добавленные инженеры подсвечиваются в таблице
             update({ tab: 'engineers' })
@@ -200,7 +206,13 @@ function PersonnelPage() {
             activeId={activeEngineerId}
             onOpenEngineer={(engineer) => {
               setAddOpen(false)
+              setEditing(false)
               setActiveEngineerId(engineer.id)
+            }}
+            onEditEngineer={(engineer) => {
+              setAddOpen(false)
+              setActiveEngineerId(engineer.id)
+              setEditing(true)
             }}
           />
         ) : (
@@ -212,16 +224,30 @@ function PersonnelPage() {
         )}
 
         {isAddOpen ? (
-          <AddEngineerPanel
+          <EngineerFormPanel
             brigades={brigades}
             defaultBrigadeId={brigadeId}
             onAdd={handleAdded}
             onClose={() => setAddOpen(false)}
           />
+        ) : activeEngineer && isEditing ? (
+          <EngineerFormPanel
+            key={activeEngineer.id}
+            brigades={brigades}
+            defaultBrigadeId={brigadeId}
+            engineer={activeEngineer}
+            onSaved={(saved) => {
+              setEditing(false)
+              // Переведён в другую бригаду — открываем её состав, карточка остаётся
+              if (saved.brigadeId !== brigadeId) update({ brigade: saved.brigadeId })
+            }}
+            onClose={() => setEditing(false)}
+          />
         ) : activeEngineer ? (
           <EngineerCardPanel
             engineer={activeEngineer}
             onClose={() => setActiveEngineerId(null)}
+            onEdit={() => setEditing(true)}
           />
         ) : null}
       </div>

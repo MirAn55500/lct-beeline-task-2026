@@ -9,12 +9,14 @@ export {
   useGetPersonnelFilterOptionsQuery,
   useGetPersonnelHealthQuery,
   useUpdateBrigadeMutation,
+  useUpdateEngineerMutation,
 } from './api'
 export type {
   BrigadeArea,
   BrigadeId,
   CreateEngineerBody,
   Engineer,
+  EngineerBody,
   EngineerId,
   PersonnelBrigade,
   PersonnelEngineer,
@@ -26,6 +28,7 @@ export type {
   UpdateBrigadeResult,
 } from './types'
 export {
+  QUALIFICATION_HINT,
   QUALIFICATION_LABEL,
   QUALIFICATION_OPTIONS,
   SKILL_LABEL,
@@ -34,7 +37,7 @@ export {
   shortName,
 } from './mocks'
 export { downloadEngineers } from './lib/exportEngineers'
-export { AddEngineerPanel } from './ui/AddEngineerPanel'
+export { EngineerFormPanel } from './ui/EngineerFormPanel'
 export { BrigadeInfo } from './ui/BrigadeInfo'
 export { BrigadeMap } from './ui/BrigadeMap'
 export { BrigadesPanel } from './ui/BrigadesPanel'

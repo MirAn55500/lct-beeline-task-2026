@@ -1,42 +1,51 @@
-import type { ReactNode } from 'react'
-import { RiCloseLine } from '@remixicon/react'
+import { Fragment, type ReactNode } from 'react'
+import { RiCloseLine, RiPencilLine } from '@remixicon/react'
 
 import {
-  SKILL_LABEL,
+  QUALIFICATION_HINT,
   TRANSPORT_LABEL,
   type PersonnelEngineer,
 } from '@/features/personnel/mocks'
+import { WORK_TYPE_OPTIONS } from '@/features/tickets'
 import { getInitials } from '@/shared/lib/text'
 import { AppPanel } from '@/shared/ui'
 
+import { describeWeekdays } from '../lib/weekdays'
 import { TRANSPORT_ICON } from './transportIcons'
+
+// Навыки — виды работ из заявок, как в форме: подключение открывает и дозаказы
+const WORK_TYPE_SKILL: Record<string, string> = {
+  'Аварийные работы': 'emergency',
+  Подключение: 'connection',
+  Ремонт: 'local',
+  Дозаказ: 'connection',
+}
 
 function formatWorkDay(start?: string | null, end?: string | null) {
   if (!start || !end) return null
-  const trim = (value: string) => value.slice(0, 5)
+  // «09:00:00» → «9:00», как в макете
+  const trim = (value: string) => value.slice(0, 5).replace(/^0(\d)/, '$1')
   return `${trim(start)}–${trim(end)}`
 }
 
-function Field({
-  label,
-  children,
-}: {
-  label: string
-  children: ReactNode
-}) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-xs font-medium leading-5 text-muted">{label}</span>
-      <div className="text-sm leading-6 text-foreground">{children}</div>
+      <span className="text-xs leading-5 text-muted">{label}</span>
+      <div className="text-sm font-medium leading-6 text-foreground">{children}</div>
     </div>
   )
 }
 
-function Chip({ children }: { children: ReactNode }) {
+function Note({ children }: { children: ReactNode }) {
+  return <span className="block text-xs font-normal leading-5 text-muted">{children}</span>
+}
+
+function Tag({ children }: { children: ReactNode }) {
   return (
     <span
-      className="inline-flex h-7 items-center bg-surface-tertiary px-2.5 text-sm font-medium leading-5 text-foreground"
-      style={{ borderRadius: 8 }}
+      className="inline-flex h-6 items-center gap-1 bg-surface-tertiary px-1.5 text-sm font-medium leading-6 text-foreground"
+      style={{ borderRadius: 4 }}
     >
       {children}
     </span>
@@ -49,25 +58,89 @@ type EngineerCardPanelProps = {
   onEdit?: () => void
 }
 
-/** Правая панель «Карточка Инженера» — только поля, которые есть в API/БД. */
-export function EngineerCardPanel({
-  engineer,
-  onClose,
-  onEdit,
-}: EngineerCardPanelProps) {
+/** Правая панель «Карточка Инженера». */
+export function EngineerCardPanel({ engineer, onClose, onEdit }: EngineerCardPanelProps) {
   const TransportIcon = TRANSPORT_ICON[engineer.transport]
   const workDay = formatWorkDay(engineer.startWork, engineer.endWork)
-  const skillLabels =
-    engineer.skillLabels && engineer.skillLabels.length > 0
-      ? engineer.skillLabels
-      : engineer.skills.map((code) => SKILL_LABEL[code]).filter(Boolean)
+  const schedule = describeWeekdays(engineer.workDays)
+  const workTypes = WORK_TYPE_OPTIONS.filter((type) =>
+    (engineer.skills as string[]).includes(WORK_TYPE_SKILL[type]!),
+  )
+  const qualificationHint =
+    engineer.qualificationHint ??
+    (engineer.qualification ? QUALIFICATION_HINT[engineer.qualification] : null)
+
+  const fields: { label: string; value: ReactNode }[] = [
+    {
+      label: 'Домашний адрес',
+      value: engineer.homeAddress ?? <span className="font-normal text-muted">Не указан</span>,
+    },
+    {
+      label: 'Доступный транспорт',
+      value: (
+        <span className="flex flex-wrap gap-1">
+          <Tag>
+            {TransportIcon ? <TransportIcon size={14} className="shrink-0 text-muted" /> : null}
+            {TRANSPORT_LABEL[engineer.transport] ?? engineer.transport}
+          </Tag>
+        </span>
+      ),
+    },
+    {
+      label: 'Квалификация',
+      value: engineer.position ? (
+        <>
+          {engineer.position}
+          {qualificationHint ? <Note>{qualificationHint}</Note> : null}
+        </>
+      ) : (
+        <span className="font-normal text-muted">Не указана</span>
+      ),
+    },
+    {
+      label: 'Навыки',
+      value:
+        workTypes.length > 0 ? (
+          <span className="flex flex-wrap gap-1">
+            {workTypes.map((type) => (
+              <Tag key={type}>{type}</Tag>
+            ))}
+          </span>
+        ) : (
+          <span className="font-normal text-muted">Нет навыков</span>
+        ),
+    },
+    { label: 'Бригада', value: engineer.brigadeName ?? '—' },
+    {
+      label: 'Рабочий график',
+      value: (
+        <>
+          {schedule.work}
+          <Note>
+            {[schedule.off, engineer.ownWorkDays ? 'свой график' : 'как у бригады']
+              .filter(Boolean)
+              .join(' · ')}
+          </Note>
+        </>
+      ),
+    },
+    {
+      label: 'Рабочий день',
+      value: workDay ? (
+        <>
+          {workDay}
+          <Note>{engineer.ownSchedule ? 'Своя смена' : 'Как у бригады'}</Note>
+        </>
+      ) : (
+        '—'
+      ),
+    },
+  ]
 
   return (
     <AppPanel className="flex min-h-0 w-[346px] shrink-0 flex-col">
-      <div className="relative flex shrink-0 flex-col gap-1 px-5 pt-5 pr-12">
-        <h2 className="text-xl font-semibold leading-7 text-foreground">
-          Карточка Инженера
-        </h2>
+      <div className="relative flex shrink-0 flex-col px-5 pt-5 pr-12 pb-2">
+        <h2 className="text-xl font-semibold leading-7 text-foreground">Карточка Инженера</h2>
         <button
           type="button"
           aria-label="Закрыть"
@@ -79,72 +152,25 @@ export function EngineerCardPanel({
         </button>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-4">
-        <div className="flex flex-col items-center gap-3 pt-1">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-5 py-3">
+        <div className="flex items-center gap-3">
           <span
-            className="flex size-16 items-center justify-center bg-surface-tertiary text-lg font-semibold leading-7 text-foreground"
-            style={{ borderRadius: 999 }}
+            className="flex size-8 shrink-0 items-center justify-center bg-surface-tertiary text-xs font-medium leading-5 text-foreground"
+            style={{ borderRadius: 8 }}
           >
             {getInitials(engineer.name)}
           </span>
-          <div className="flex flex-col items-center gap-0.5 text-center">
-            <span className="text-base font-semibold leading-6 text-foreground">
-              {engineer.name}
-            </span>
-            {engineer.position ? (
-              <span className="text-sm leading-6 text-muted">
-                {engineer.position}
-              </span>
-            ) : null}
-          </div>
+          <span className="min-w-0 text-sm font-medium leading-6 break-words text-foreground">
+            {engineer.name}
+          </span>
         </div>
 
-        <Field label="Доступный транспорт">
-          <span className="flex flex-wrap gap-1.5">
-            <Chip>
-              <span className="inline-flex items-center gap-1">
-                {TransportIcon ? (
-                  <TransportIcon size={14} className="shrink-0 text-muted" />
-                ) : null}
-                {TRANSPORT_LABEL[engineer.transport] ?? engineer.transport}
-              </span>
-            </Chip>
-          </span>
-        </Field>
-
-        {engineer.position ? (
-          <Field label="Квалификация">
-            <div className="flex flex-col gap-0.5">
-              <span>{engineer.position}</span>
-              {engineer.qualificationHint ? (
-                <span className="text-xs leading-5 text-muted">
-                  {engineer.qualificationHint}
-                </span>
-              ) : null}
-            </div>
-          </Field>
-        ) : null}
-
-        {skillLabels.length > 0 ? (
-          <Field label="Навыки">
-            <span className="flex flex-wrap gap-1.5">
-              {skillLabels.map((label) => (
-                <Chip key={label}>{label}</Chip>
-              ))}
-            </span>
-          </Field>
-        ) : null}
-
-        {engineer.brigadeName ? (
-          <Field label="Бригада">{engineer.brigadeName}</Field>
-        ) : null}
-
-        {workDay ? (
-          <Field label="Рабочий день">
-            {workDay}
-            <span className="text-muted">{engineer.ownSchedule ? ' · своя смена' : ' · как у бригады'}</span>
-          </Field>
-        ) : null}
+        {fields.map(({ label, value }) => (
+          <Fragment key={label}>
+            <div className="h-px w-full shrink-0 bg-border" />
+            <Field label={label}>{value}</Field>
+          </Fragment>
+        ))}
       </div>
 
       {onEdit ? (
@@ -152,9 +178,10 @@ export function EngineerCardPanel({
           <button
             type="button"
             onClick={onEdit}
-            className="inline-flex h-9 w-full cursor-pointer items-center justify-center bg-accent text-sm font-medium leading-5 text-accent-foreground transition-colors hover:bg-accent-hover"
-            style={{ borderRadius: 8 }}
+            className="inline-flex h-9 w-full cursor-pointer items-center justify-center gap-2 border border-border bg-surface text-sm font-medium leading-5 text-foreground transition-colors hover:bg-surface-hover"
+            style={{ borderRadius: 8, padding: '8px 16px' }}
           >
+            <RiPencilLine size={16} className="shrink-0" />
             Редактировать
           </button>
         </div>

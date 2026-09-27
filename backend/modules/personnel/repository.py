@@ -138,6 +138,8 @@ class PersonnelRepository:
                 selectinload(Engineer.equipment),
                 selectinload(Engineer.brigade),
             )
+            # Сессия не сбрасывает объекты при коммите — иначе после правки старые навыки
+            .execution_options(populate_existing=True)
         )
         return result.first()
 
@@ -165,6 +167,9 @@ class PersonnelRepository:
 
     async def add_skill(self, engineer_id: int, skill_id: int) -> None:
         self._session.add(EngineerSkill(engineer_id=engineer_id, skill_id=skill_id))
+
+    async def delete_skill(self, link: EngineerSkill) -> None:
+        await self._session.delete(link)
 
     async def delete_engineer(self, engineer: Engineer) -> None:
         # FK без ON DELETE CASCADE — сначала связи.

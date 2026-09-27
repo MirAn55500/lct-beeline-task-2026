@@ -28,12 +28,14 @@ from modules.personnel.schemas import (
     AreaResponse,
     BrigadeResponse,
     CreateEngineerRequest,
+    EngineerFields,
     EngineerResponse,
     EngineersQuery,
     PersonnelFilterOptions,
     ReverseGeocodeResponse,
     UpdateBrigadeRequest,
     UpdateBrigadeResponse,
+    UpdateEngineerRequest,
 )
 from modules.personnel.skills import SKILL_LABELS, map_skill, skill_code
 from modules.personnel.transport import map_transport
@@ -169,7 +171,6 @@ class PersonnelService:
         brigade.start_work = body.start_work
         brigade.end_work = body.end_work
         brigade.work_days = "".join(str(day) for day in days)
-        brigade.in_planning = body.in_planning
         brigade.areas = [areas[area_id] for area_id in dict.fromkeys(body.area_ids)]
         self._session.add(brigade)
         await self._repo.commit()
@@ -276,7 +277,6 @@ class PersonnelService:
             start_work=brigade.start_work,
             end_work=brigade.end_work,
             work_days=brigade.weekdays,
-            in_planning=brigade.in_planning,
             area_ids=sorted(area.id for area in brigade.areas or [] if area.id is not None),
         )
 
@@ -295,9 +295,65 @@ class PersonnelService:
         brigade = await self._repo.get_brigade(body.brigade_id)
         if brigade is None:
             raise NotFoundError("Бригада не найдена")
+        fields, skill_codes = await self._engineer_fields(body, brigade)
 
+        engineer = Engineer(**fields, is_lead=body.is_lead)
+        engineer = await self._repo.add_engineer(engineer)
+        assert engineer.engineer_id is not None
+
+        for code in skill_codes:
+            skill_id = await self._repo.ensure_dict(DictGroup.SKILL, code)
+            await self._repo.add_skill(engineer.engineer_id, skill_id)
+
+        refreshed = await self._repo.refresh_engineer(engineer.engineer_id)
+        if refreshed is None:
+            raise AppError("Не удалось сохранить инженера", status_code=500)
+        return self._to_response(refreshed)
+
+    async def update_engineer(
+        self, engineer_id: int, body: UpdateEngineerRequest
+    ) -> EngineerResponse:
+        """Сохранить карточку инженера. Составленные планы не пересчитываются."""
+        engineer = await self._repo.get_engineer(engineer_id)
+        if engineer is None:
+            raise NotFoundError("Инженер не найден")
+        brigade = await self._repo.get_brigade(body.brigade_id)
+        if brigade is None:
+            raise NotFoundError("Бригада не найдена")
+        fields, skill_codes = await self._engineer_fields(body, brigade)
+        for key, value in fields.items():
+            setattr(engineer, key, value)
+        self._session.add(engineer)
+
+        wanted = set(skill_codes)
+        kept: set[str] = set()
+        for link in list(engineer.skills or []):
+            code = skill_code(link.skill.value if link.skill is not None else None)
+            if code in wanted and code not in kept:
+                kept.add(code)
+            else:
+                await self._repo.delete_skill(link)
+        for code in skill_codes:
+            if code not in kept:
+                skill_id = await self._repo.ensure_dict(DictGroup.SKILL, code)
+                await self._repo.add_skill(engineer_id, skill_id)
+
+        refreshed = await self._repo.refresh_engineer(engineer_id)
+        if refreshed is None:
+            raise AppError("Не удалось сохранить инженера", status_code=500)
+        return self._to_response(refreshed)
+
+    async def _engineer_fields(
+        self, body: EngineerFields, brigade: Brigade
+    ) -> tuple[dict[str, object], list[str]]:
+        """Проверенные поля инженера и коды навыков — общие для добавления и правки."""
+        name = " ".join(body.name.split())
+        if not name:
+            raise AppError("Укажите ФИО инженера")
+
+        # Незнакомое значение map_transport отдаёт как есть — такой строки в словаре быть не должно
         transport_code, _ = map_transport(body.transport)
-        if transport_code == "unknown":
+        if transport_code not in _TRANSPORT_UI_LABEL:
             raise AppError("Неизвестный транспорт")
         store_transport = _TRANSPORT_STORE.get(transport_code, transport_code)
         transport_id = await self._repo.ensure_dict(DictGroup.TRANSPORT, store_transport)
@@ -328,27 +384,31 @@ class PersonnelService:
             raise AppError("Конец смены должен быть позже начала")
         own_schedule = (start_work, end_work) != (brigade.start_work, brigade.end_work)
 
-        engineer = Engineer(
-            name=body.name.strip(),
-            start_work=start_work,
-            end_work=end_work,
-            own_schedule=own_schedule,
-            transport_id=transport_id,
-            brigade_id=body.brigade_id,
-            qualification=qualification,
-            is_lead=body.is_lead,
+        # Свой график — тоже только если он отличается от дней бригады
+        work_days: str | None = None
+        if body.work_days is not None:
+            days = sorted(set(body.work_days))
+            if not days or any(day < 1 or day > 7 for day in days):
+                raise AppError("Выберите хотя бы один рабочий день")
+            if days != brigade.weekdays:
+                work_days = "".join(str(day) for day in days)
+
+        home_address = " ".join((body.home_address or "").split()) or None
+
+        return (
+            {
+                "name": name,
+                "brigade_id": body.brigade_id,
+                "transport_id": transport_id,
+                "qualification": qualification,
+                "start_work": start_work,
+                "end_work": end_work,
+                "own_schedule": own_schedule,
+                "work_days": work_days,
+                "home_address": home_address,
+            },
+            skill_codes,
         )
-        engineer = await self._repo.add_engineer(engineer)
-        assert engineer.engineer_id is not None
-
-        for code in skill_codes:
-            skill_id = await self._repo.ensure_dict(DictGroup.SKILL, code)
-            await self._repo.add_skill(engineer.engineer_id, skill_id)
-
-        refreshed = await self._repo.refresh_engineer(engineer.engineer_id)
-        if refreshed is None:
-            raise AppError("Не удалось сохранить инженера", status_code=500)
-        return self._to_response(refreshed)
 
     async def delete_engineer(self, engineer_id: int) -> None:
         engineer = await self._repo.get_engineer(engineer_id)
@@ -395,6 +455,9 @@ class PersonnelService:
             start_work=engineer.start_work,
             end_work=engineer.end_work,
             own_schedule=bool(engineer.own_schedule),
+            work_days=engineer.weekdays,
+            own_work_days=engineer.work_days is not None,
+            home_address=engineer.home_address,
             brigade_name=brigade_name,
         )
 
