@@ -50,7 +50,6 @@ export type BrigadeArea = {
 }
 
 export type UpdateBrigadeBody = {
-  name: string
   office_address: string
   /** Точка, поставленная на карте; без неё адрес ищет геокодер. */
   office_lat?: number

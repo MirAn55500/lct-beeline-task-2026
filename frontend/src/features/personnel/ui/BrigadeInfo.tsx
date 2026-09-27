@@ -23,10 +23,9 @@ import { WEEKDAYS } from '../lib/weekdays'
 
 import { BrigadeMap } from './BrigadeMap'
 import { AddressField } from './AddressField'
-import { FieldLabel, Hint, TextInput, ToggleChip, WorkTimeField } from './formParts'
+import { FieldLabel, Hint, ToggleChip, WorkTimeField } from './formParts'
 
 type Draft = {
-  name: string
   officeAddress: string
   /** Точка офиса [lng, lat]: сохранённая или новая — из подсказки или с карты. */
   officePoint: [number, number] | null
@@ -41,7 +40,6 @@ type Draft = {
 
 function draftOf(brigade: PersonnelBrigade, areaName: Map<number, string>): Draft {
   return {
-    name: brigade.name,
     officeAddress: brigade.officeAddress ?? '',
     officePoint: brigade.officePoint,
     officeConfirmed: true,
@@ -55,7 +53,6 @@ function draftOf(brigade: PersonnelBrigade, areaName: Map<number, string>): Draf
 function sameDraft(a: Draft, b: Draft) {
   const time = (value: Time | null) => (value ? formatTime(value) : '')
   return (
-    a.name === b.name &&
     a.officeAddress === b.officeAddress &&
     a.officePoint?.join() === b.officePoint?.join() &&
     [...a.areas].sort().join('|') === [...b.areas].sort().join('|') &&
@@ -197,7 +194,6 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
     draft.timeTo != null &&
     formatTime(draft.timeTo) <= formatTime(draft.timeFrom)
   const isValid =
-    draft.name.trim() !== '' &&
     draft.officeAddress.trim() !== '' &&
     draft.officeConfirmed &&
     !locating &&
@@ -214,7 +210,6 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
       const result = await updateBrigade({
         id: brigade.id,
         body: {
-          name: snapshot.name.trim(),
           office_address: snapshot.officeAddress.trim(),
           ...(snapshot.officePoint
             ? {
@@ -230,7 +225,7 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
       }).unwrap()
       // Правку, сделанную во время сохранения, не трогаем; сохранённую держим, пока список
       // бригад не перезагрузится, — иначе на миг мелькнут старые значения
-      const stored = { ...snapshot, name: snapshot.name.trim(), officeAddress: snapshot.officeAddress.trim() }
+      const stored = { ...snapshot, officeAddress: snapshot.officeAddress.trim() }
       setEdit((prev) => (prev === snapshot ? stored : prev))
       setJustSaved(stored)
       setPicking(false)
@@ -273,17 +268,6 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
 
         <ScrollShadow hideScrollBar size={40} className="min-h-0 flex-1" orientation="vertical">
           <div className="flex flex-col gap-4 px-5 py-4">
-            <label className="flex flex-col gap-1">
-              <FieldLabel required>Название</FieldLabel>
-              <TextInput
-                aria-label="Название"
-                value={draft.name}
-                onChange={(name) => patch({ name })}
-                placeholder="Введите название"
-                maxLength={100}
-              />
-            </label>
-
             <div className="flex flex-col gap-1">
               <FieldLabel required>Адрес офиса</FieldLabel>
               <AddressField
