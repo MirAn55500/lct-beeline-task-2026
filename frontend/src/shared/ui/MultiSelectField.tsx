@@ -75,7 +75,7 @@ export function MultiSelectField({
       </div>
       <Select.Trigger
         className={cn(
-          'flex min-h-9 w-full items-center justify-between gap-2 border border-border bg-surface !px-3 !py-2 text-left shadow-none outline-none',
+          'flex min-h-9 w-full items-center justify-between gap-2 border border-border bg-surface !py-2 !pr-8 !pl-3 text-left shadow-none outline-none',
           'data-[focus-visible]:outline data-[focus-visible]:outline-2 data-[focus-visible]:outline-offset-2 data-[focus-visible]:outline-focus',
         )}
         style={{ borderRadius: 8 }}

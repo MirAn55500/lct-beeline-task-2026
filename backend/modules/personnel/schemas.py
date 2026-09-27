@@ -66,7 +66,9 @@ class AddressSuggestionResponse(BaseModel):
 
 class ReverseGeocodeResponse(BaseModel):
     address: str | None = None
-    """Ближайший адрес; None — по точке ничего не нашлось, адрес вписывают сами."""
+    """Ближайший адрес; None — по точке ничего не нашлось."""
+    has_house: bool = False
+    """В адресе есть дом — только такой годится для офиса."""
 
 
 class UpdateBrigadeResponse(BrigadeResponse):

@@ -100,12 +100,16 @@ type BrigadeMapProps = {
   engineers: PersonnelEngineer[]
   /** Где рисовать офис: сохранённая точка или выбранная до сохранения. */
   officePoint: [number, number] | null
+  /** Подпись офиса в подсказке булавки — адрес из формы, в том числе ещё не сохранённый. */
+  officeLabel?: string
   /**
    * Выбор точки офиса, как на сайтах доставки: булавка стоит в центре, двигается карта.
    * Остановилась — onCenter с точкой под булавкой.
    */
   picking?: boolean
   onCenter?: (point: [number, number]) => void
+  /** Карта едет или только встала — точка под булавкой ещё не выбрана. */
+  onSettling?: (settling: boolean) => void
   /** Enter или Esc — выбор закончен. */
   onDone?: () => void
 }
@@ -121,8 +125,10 @@ export function BrigadeMap({
   brigade,
   engineers,
   officePoint,
+  officeLabel,
   picking = false,
   onCenter,
+  onSettling,
   onDone,
 }: BrigadeMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -172,7 +178,7 @@ export function BrigadeMap({
             coord: office,
             offset: [0, 0],
             content: (
-              <Pin fill={OFFICE_COLOR} title={`Офис: ${brigade.officeAddress ?? ''}`}>
+              <Pin fill={OFFICE_COLOR} title={`Офис: ${officeLabel ?? brigade.officeAddress ?? ''}`}>
                 <RiBuilding2Fill size={16} className="text-[var(--beeline-white)]" />
               </Pin>
             ),
@@ -180,7 +186,7 @@ export function BrigadeMap({
         ]
       : []
     return [...people, ...officeItem]
-  }, [plan, office, now, engineers, brigade.officeAddress])
+  }, [plan, office, now, engineers, officeLabel, brigade.officeAddress])
 
   useEffect(() => {
     const container = containerRef.current
@@ -228,9 +234,9 @@ export function BrigadeMap({
   }, [map, shown])
 
   // Выбор точки: карта встаёт центром на офис, дальше двигают её; клик — «подвинь сюда»
-  const pickRef = useRef({ onCenter, onDone, officePoint })
+  const pickRef = useRef({ onCenter, onDone, onSettling, officePoint })
   useEffect(() => {
-    pickRef.current = { onCenter, onDone, officePoint }
+    pickRef.current = { onCenter, onDone, onSettling, officePoint }
   })
   useEffect(() => {
     if (!map || !picking) return
@@ -241,18 +247,23 @@ export function BrigadeMap({
     const moveStart = () => {
       clearTimeout(timer)
       setMoving(true)
+      pickRef.current.onSettling?.(true)
     }
     const moveEnd = () => {
       setMoving(false)
       clearTimeout(timer)
       timer = setTimeout(() => {
         const center = map.getCenter()
+        pickRef.current.onSettling?.(false)
         pickRef.current.onCenter?.([center.lng, center.lat])
       }, SETTLE_MS)
     }
     const click = (event: { lngLat: { lng: number; lat: number } }) =>
       map.easeTo({ center: event.lngLat, duration: 300 })
     const key = (event: KeyboardEvent) => {
+      // Enter в поле формы — не «готово»: человек печатает
+      const target = event.target as HTMLElement | null
+      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
       if (event.key === 'Escape' || event.key === 'Enter') pickRef.current.onDone?.()
     }
     map.on('movestart', moveStart)
@@ -262,6 +273,7 @@ export function BrigadeMap({
     return () => {
       clearTimeout(timer)
       setMoving(false)
+      pickRef.current.onSettling?.(false)
       map.off('movestart', moveStart)
       map.off('moveend', moveEnd)
       map.off('click', click)

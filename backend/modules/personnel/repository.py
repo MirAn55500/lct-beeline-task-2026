@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy.orm import selectinload
-from sqlmodel import col, select
+from sqlmodel import col, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from modules.catalogs.enums import DictGroup
@@ -11,6 +11,8 @@ from modules.catalogs.models.dictionary import Dictionary
 from modules.personnel.models.brigade import Brigade
 from modules.personnel.models.engineer import Engineer
 from modules.personnel.models.engineer_skill import EngineerSkill
+from modules.planning.models.route import Route
+from modules.tickets.models.request import Request
 
 
 OFFICE_AREA = "Офис"
@@ -64,6 +66,36 @@ class PersonnelRepository:
             .order_by(Area.area)
         )
         return list(result.all())
+
+    async def find_address(
+        self, area_id: int, address: str, lat: float, lon: float
+    ) -> Address | None:
+        """Уже записанный адрес с тем же текстом и точкой — чтобы не плодить строки."""
+        result = await self._session.exec(
+            select(Address).where(
+                Address.area_id == area_id,
+                Address.address == address,
+                func.abs(Address.latitude - lat) < 1e-6,
+                func.abs(Address.longitude - lon) < 1e-6,
+            )
+        )
+        return result.first()
+
+    async def address_in_use(self, address_id: int) -> bool:
+        """На адрес ссылаются бригады, заявки или маршруты."""
+        for statement in (
+            select(func.count()).select_from(Brigade).where(Brigade.office_address_id == address_id),
+            select(func.count()).select_from(Request).where(Request.address_id == address_id),
+            select(func.count())
+            .select_from(Route)
+            .where((Route.start_point_id == address_id) | (Route.end_point_id == address_id)),
+        ):
+            if (await self._session.exec(statement)).one():
+                return True
+        return False
+
+    async def delete_address(self, address: Address) -> None:
+        await self._session.delete(address)
 
     async def add_address(self, address: Address) -> Address:
         self._session.add(address)

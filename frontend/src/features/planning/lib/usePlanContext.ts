@@ -108,8 +108,15 @@ export function usePlanContext() {
       toast.success(`План №${result.version} составлен`, {
         description: `Назначено ${result.assigned}, без инженера: ${result.unassigned}`,
       })
-    } catch {
-      toast.danger('Не удалось обновить план', { description: 'Текущий план остался без изменений' })
+    } catch (error) {
+      // Причину backend (например, «в этот день бригада не работает») показываем как есть
+      const detail = (error as { data?: { detail?: unknown } } | null)?.data?.detail
+      toast.danger('Не удалось обновить план', {
+        description:
+          typeof detail === 'string' && detail.trim()
+            ? `${detail}. Текущий план остался без изменений`
+            : 'Текущий план остался без изменений',
+      })
     }
   }
 

@@ -27,6 +27,10 @@ from modules.geocoding.geocoder import REGION_BBOX, address_text, has_house
 logger = logging.getLogger(__name__)
 
 _API = "https://suggestions.dadata.ru/suggestions/api/4_1/rs"
+MOSCOW_REGIONS = frozenset({"Москва", "Московская"})
+"""Регионы DaData, где может стоять офис."""
+PHOTON_TIMEOUT = 5.0
+"""Секунд на запасные подсказки Photon: дольше человек у поля ждать не станет."""
 _LOCATIONS = [{"region": "Москва"}, {"region": "Московская"}]
 _client: httpx.AsyncClient | None = None
 _photon: Photon | None = None
@@ -39,6 +43,18 @@ class Suggestion:
     lon: float
     house: bool
     """Адрес с номером дома — только такой годится для офиса."""
+
+
+class DadataUnavailable(Exception):
+    """Нет ключа DaData или она не ответила — тогда спрашивают OpenStreetMap."""
+
+
+@dataclass(frozen=True, slots=True)
+class PointAddress:
+    address: str
+    house: bool
+    region: str | None
+    """Регион DaData: «Москва», «Московская», «Тверская»…"""
 
 
 def _dadata() -> httpx.AsyncClient | None:
@@ -56,7 +72,8 @@ def _dadata() -> httpx.AsyncClient | None:
             # local_address 0.0.0.0 — соединение и DNS только по IPv4
             transport=httpx.AsyncHTTPTransport(local_address="0.0.0.0", retries=1),
             limits=httpx.Limits(keepalive_expiry=300),
-            timeout=httpx.Timeout(settings.geocoder_timeout, connect=5),
+            # Нет связи — быстрее отдать запасные подсказки, чем ждать
+            timeout=httpx.Timeout(5.0, connect=3.0),
         )
     return _client
 
@@ -114,7 +131,13 @@ async def suggest(query: str, count: int = 7) -> list[Suggestion]:
                 for item in found
                 if item["data"].get("geo_lat") and item["data"].get("geo_lon")
             ]
-    return await asyncio.to_thread(_photon_suggest, query, count)
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(_photon_suggest, query, count), PHOTON_TIMEOUT
+        )
+    except TimeoutError:
+        logger.warning("Photon suggest: нет ответа за %.0f с", PHOTON_TIMEOUT)
+        return []
 
 
 def _photon_suggest(query: str, count: int) -> list[Suggestion]:
@@ -139,18 +162,46 @@ def _photon_suggest(query: str, count: int) -> list[Suggestion]:
     return items
 
 
-async def geolocate(lat: float, lon: float) -> str | None:
-    """Ближайший к точке адрес по DaData — «г Москва, ул Тверская, д 13»."""
+async def locate_point(lat: float, lon: float, radius: int = 100) -> PointAddress | None:
+    """Ближайший к точке адрес по DaData с признаком дома и регионом.
+
+    None — в радиусе нет ни одного адреса (лес, поле, промзона). DadataUnavailable —
+    спросить не у кого: ключа нет или DaData не ответила.
+    """
     if _dadata() is None:
-        return None
+        raise DadataUnavailable
     try:
         found = await _post(
-            "/geolocate/address", {"lat": lat, "lon": lon, "count": 1, "radius_meters": 100}
+            "/geolocate/address",
+            {"lat": lat, "lon": lon, "count": 1, "radius_meters": radius},
         )
     except httpx.HTTPError as exc:
         logger.warning("DaData geolocate: %r", exc)
+        raise DadataUnavailable from exc
+    if not found:
         return None
-    return found[0]["value"] if found else None
+    data = found[0].get("data", {})
+    return PointAddress(found[0]["value"], bool(data.get("house")), data.get("region"))
 
 
-__all__ = ["Suggestion", "close", "geolocate", "has_house", "suggest", "warm_up"]
+async def geolocate(lat: float, lon: float) -> str | None:
+    """Ближайший к точке адрес по DaData — «г Москва, ул Тверская, д 13»."""
+    try:
+        point = await locate_point(lat, lon)
+    except DadataUnavailable:
+        return None
+    return point.address if point else None
+
+
+__all__ = [
+    "MOSCOW_REGIONS",
+    "DadataUnavailable",
+    "PointAddress",
+    "Suggestion",
+    "close",
+    "geolocate",
+    "has_house",
+    "locate_point",
+    "suggest",
+    "warm_up",
+]

@@ -182,11 +182,15 @@ def address_text(city: str | None, street: str | None, house: str | None) -> str
     return ", ".join(chunk for chunk in chunks if chunk) or None
 
 
-_HOUSE_MARK = re.compile(r"(?:^|[\s,])(?:д|дом|вл|влд|стр|к|корп)\.?\s*\d", re.IGNORECASE)
+_HOUSE_MARK = re.compile(
+    r"(?:^|[\s,])(?:д|дом|вл|влд|двлд|стр|к|корп|зд|соор|уч|г-ж|литера)\.?\s*\d",
+    re.IGNORECASE,
+)
 
 
 def has_house(address: str) -> bool:
-    """В адресе есть номер дома: «д 86/1», «д. 8 с7», «вл 5», «стр 1»."""
+    """В адресе есть номер дома — типы домов ФИАС, как их пишет DaData: «д 86/1»,
+    «д. 8 с7», «влд 5», «стр 1», «зд 42», «соор 28Б», «уч 3»."""
     return bool(_HOUSE_MARK.search(address))
 
 
@@ -368,7 +372,7 @@ class AddressGeocoder:
         """Точка в Москве или Московской области."""
         return _in_bbox(lat, lon, REGION_BBOX)
 
-    async def reverse(self, lat: float, lon: float) -> str | None:
+    async def reverse(self, lat: float, lon: float, dadata: bool = True) -> str | None:
         """Адрес по точке. None — не нашёл никто.
 
         Ответа ждёт человек у карты, поэтому источники спрашиваются разом, каждый — не
@@ -380,7 +384,8 @@ class AddressGeocoder:
             if provider.broken:
                 continue
             if isinstance(provider, DadataProvider):
-                askers.append(("dadata", provider.reverse))
+                if dadata:
+                    askers.append(("dadata", provider.reverse))
             elif isinstance(provider, OsmProvider):
                 askers.append(("photon", provider.reverse_photon))
                 askers.append(("nominatim", provider.reverse))

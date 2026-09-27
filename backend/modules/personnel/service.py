@@ -7,7 +7,13 @@ from core.exceptions import AppError, NotFoundError
 from modules.catalogs.enums import DictGroup
 from modules.catalogs.models.address import Address
 from modules.geocoding import suggest as address_suggest
-from modules.geocoding.geocoder import HOUSE, AddressGeocoder, has_house
+from modules.geocoding.geocoder import (
+    HOUSE,
+    MOSCOW_CENTRE,
+    AddressGeocoder,
+    distance_km,
+    has_house,
+)
 from modules.personnel.models.brigade import Brigade
 from modules.personnel.models.engineer import Engineer
 from modules.personnel.qualification import (
@@ -58,6 +64,11 @@ _TRANSPORT_UI_LABEL: dict[str, str] = {
     "bike": "Велосипед",
     "walking": "Пешеход",
 }
+
+
+OFFICE_FALLBACK_KM = 120.0
+"""Без DaData: офис не дальше этого от центра Москвы. Область тянется примерно на
+120–150 км, Тверь, Рязань и Калуга — дальше 150."""
 
 
 class PersonnelService:
@@ -130,8 +141,19 @@ class PersonnelService:
                 raise AppError("Выберите адрес офиса из подсказок или укажите его на карте")
             if not has_house(address):
                 raise AppError("Укажите адрес офиса с номером дома")
+            previous = brigade.office_address
             office = await self._place_office(brigade, address, point)
             brigade.office_address_id = office.address_id or 0
+            self._session.add(brigade)
+            await self._session.flush()
+            # Прежний офис, поставленный здесь же с карты, больше никому не нужен
+            if (
+                previous is not None
+                and previous.address_id != office.address_id
+                and previous.geo_source == "map"
+                and not await self._repo.address_in_use(previous.address_id or 0)
+            ):
+                await self._repo.delete_address(previous)
 
         rescheduled = 0
         old_day = (brigade.start_work, brigade.end_work)
@@ -170,23 +192,60 @@ class PersonnelService:
         ]
 
     async def reverse_geocode(self, lat: float, lon: float) -> ReverseGeocodeResponse:
+        """Адрес точки под булавкой. DaData знает дома и регион точно и отвечает за
+        десятки миллисекунд; «здесь ничего нет» от неё — тоже ответ. OpenStreetMap —
+        только когда DaData недоступна: он медленный и дом находит редко."""
+        try:
+            near = await self._check_office_region(lat, lon)
+        except address_suggest.DadataUnavailable:
+            async with AddressGeocoder(get_settings()) as geocoder:
+                text = await geocoder.reverse(lat, lon, dadata=False)
+            return ReverseGeocodeResponse(address=text, has_house=bool(text and has_house(text)))
+        if near is None:
+            return ReverseGeocodeResponse()
+        return ReverseGeocodeResponse(address=near.address, has_house=near.house)
+
+    async def _check_office_region(
+        self, lat: float, lon: float
+    ) -> address_suggest.PointAddress | None:
+        """Офис — только в Москве и области. Прямоугольник вокруг них захватывает Тверь,
+        Рязань и Калугу, поэтому регион уточняем у DaData.
+
+        Возвращает ближайший адрес DaData в 100 м (None — адресов рядом нет).
+        DadataUnavailable — DaData нет, проверен только прямоугольник.
+        """
         async with AddressGeocoder(get_settings()) as geocoder:
             if not geocoder.in_region(lat, lon):
-                raise AppError("Точка вне Москвы и Московской области")
-            return ReverseGeocodeResponse(address=await geocoder.reverse(lat, lon))
+                raise AppError("Офис должен быть в Москве или Московской области")
+        try:
+            near = await address_suggest.locate_point(lat, lon)
+            region = near if near is not None else await address_suggest.locate_point(lat, lon, 1000)
+        except address_suggest.DadataUnavailable:
+            # Без DaData регион не узнать — хотя бы не дальше, чем тянется область
+            if distance_km((lat, lon), MOSCOW_CENTRE) > OFFICE_FALLBACK_KM:
+                raise AppError("Офис должен быть в Москве или Московской области") from None
+            raise
+        if region is not None and region.region not in address_suggest.MOSCOW_REGIONS:
+            raise AppError("Офис должен быть в Москве или Московской области")
+        return near
 
     async def _place_office(
         self, brigade: Brigade, address: str, point: tuple[float, float]
     ) -> Address:
-        """Офис в точке, поставленной на карте; адрес — подпись к ней."""
+        """Офис в выбранной точке (подсказка или карта); адрес — подпись к ней."""
         if brigade.office_address is None:
             raise AppError("У бригады нет офиса, к району которого привязать новый адрес")
-        async with AddressGeocoder(get_settings()) as geocoder:
-            if not geocoder.in_region(*point):
-                raise AppError("Офис должен быть в Москве или Московской области")
+        try:
+            await self._check_office_region(*point)
+        except address_suggest.DadataUnavailable:
+            pass  # регион не уточнить — прямоугольник Москвы и области уже проверен
+        area_id = brigade.office_address.area_id
+        same = await self._repo.find_address(area_id, address, *point)
+        if same is not None:
+            return same
         return await self._repo.add_address(
             Address(
-                area_id=brigade.office_address.area_id,
+                area_id=area_id,
                 address=address,
                 latitude=point[0],
                 longitude=point[1],

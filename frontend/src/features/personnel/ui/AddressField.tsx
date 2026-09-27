@@ -7,6 +7,8 @@ import { cn } from '@/shared/lib/cn'
 
 /** Пауза после последней буквы перед запросом подсказок. */
 const DEBOUNCE_MS = 250
+/** Столько принимает backend (address-suggest, PATCH office_address). */
+const MAX_LENGTH = 200
 
 type AddressFieldProps = {
   value: string
@@ -38,10 +40,11 @@ export function AddressField({
   const listId = useId()
   const [suggestAddress, { isFetching }] = useLazySuggestAddressQuery()
   // Подсказки помнят, к какому тексту пришли: к другому тексту их не показываем
-  const [result, setResult] = useState<{ query: string; items: AddressSuggestion[] }>({
-    query: '',
-    items: [],
-  })
+  const [result, setResult] = useState<{
+    query: string
+    items: AddressSuggestion[]
+    failed?: boolean
+  }>({ query: '', items: [] })
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(-1)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -61,7 +64,7 @@ export function AddressField({
           setActive(-1)
         })
         .catch(() => {
-          if (request.current === id) setResult({ query, items: [] })
+          if (request.current === id) setResult({ query, items: [], failed: true })
         })
     }, DEBOUNCE_MS)
     return () => clearTimeout(timer)
@@ -69,8 +72,13 @@ export function AddressField({
   // Пока идёт ответ на новую букву, видны прошлые подсказки — список не мигает.
   // «Ничего не нашлось» — только когда пустой ответ пришёл на этот самый текст
   const fresh = result.query === query
-  const items = result.items
+  // Прошлые подсказки — только к продолжению того же текста: к «Лен» подсказки
+  // для «Тверская» не относятся, и выбрать их нельзя
+  const related =
+    fresh || (result.query.length > 0 && (query.startsWith(result.query) || result.query.startsWith(query)))
+  const items = related && !result.failed ? result.items : []
   const nothing = fresh && items.length === 0
+  const failed = fresh && result.failed === true
 
   const choose = (item: AddressSuggestion) => {
     if (item.hasHouse) {
@@ -106,6 +114,7 @@ export function AddressField({
           aria-controls={listId}
           aria-autocomplete="list"
           value={value}
+          maxLength={MAX_LENGTH}
           placeholder={placeholder}
           onChange={(event) => {
             onType(event.target.value)
@@ -114,6 +123,15 @@ export function AddressField({
           onFocus={() => setOpen(true)}
           onBlur={() => setOpen(false)}
           onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              setOpen(false)
+              return
+            }
+            if (!open && event.key === 'ArrowDown') {
+              event.preventDefault()
+              setOpen(true)
+              return
+            }
             if (!showList || nothing) return
             if (event.key === 'ArrowDown') {
               event.preventDefault()
@@ -121,11 +139,9 @@ export function AddressField({
             } else if (event.key === 'ArrowUp') {
               event.preventDefault()
               setActive((index) => (index <= 0 ? items.length - 1 : index - 1))
-            } else if (event.key === 'Enter' && active >= 0) {
+            } else if (event.key === 'Enter' && active >= 0 && items[active]) {
               event.preventDefault()
-              choose(items[active]!)
-            } else if (event.key === 'Escape') {
-              setOpen(false)
+              choose(items[active])
             }
           }}
           className="h-full min-w-0 flex-1 bg-transparent text-sm leading-5 text-foreground outline-none placeholder:text-muted"
@@ -138,9 +154,13 @@ export function AddressField({
           className="absolute top-[calc(100%+4px)] right-0 left-0 z-30 flex flex-col gap-1 border border-border bg-surface px-3 py-2 shadow-lg"
           style={{ borderRadius: 12 }}
         >
-          <p className="text-sm leading-5 text-foreground">Ничего не нашлось</p>
+          <p className="text-sm leading-5 text-foreground">
+            {failed ? 'Подсказки не загрузились' : 'Ничего не нашлось'}
+          </p>
           <p className="text-xs leading-5 text-muted">
-            Проверьте, как пишется улица, или поставьте офис на карте
+            {failed
+              ? 'Попробуйте ещё раз чуть позже или поставьте офис на карте'
+              : 'Проверьте, как пишется улица, или поставьте офис на карте'}
           </p>
           {onPickOnMap ? (
             <button

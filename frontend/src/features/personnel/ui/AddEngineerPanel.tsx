@@ -99,8 +99,6 @@ function brigadeHours(brigades: PersonnelBrigade[], brigadeId: number | null) {
   }
 }
 
-const sameTime = (a: Time | null, b: Time | null) =>
-  (a ? formatTime(a) : '') === (b ? formatTime(b) : '')
 
 type ManualDraft = {
   name: string
@@ -128,23 +126,36 @@ export function AddEngineerPanel({
 }: AddEngineerPanelProps) {
   const [submitting, setSubmitting] = useState(false)
   const [createEngineer] = useCreateEngineerMutation()
+  // Бригада и часы идут за бригадой, открытой слева, пока их не выбрали руками:
+  // null в черновике — «как у бригады», значение — выбор человека
   const [draft, setDraft] = useState<ManualDraft>(() => ({
     name: '',
     transports: [],
     workTypes: [],
-    brigadeId: defaultBrigadeId,
-    ...brigadeHours(brigades, defaultBrigadeId),
+    brigadeId: null,
+    timeFrom: null,
+    timeTo: null,
   }))
+  const [hoursTouched, setHoursTouched] = useState(false)
+  const brigadeId = draft.brigadeId ?? defaultBrigadeId
+  const hours = hoursTouched
+    ? { timeFrom: draft.timeFrom, timeTo: draft.timeTo }
+    : brigadeHours(brigades, brigadeId)
+  const form: ManualDraft = { ...draft, brigadeId, ...hours }
 
   const patch = (next: Partial<ManualDraft>) => setDraft((prev) => ({ ...prev, ...next }))
+  const setHours = (next: Partial<Pick<ManualDraft, 'timeFrom' | 'timeTo'>>) => {
+    setHoursTouched(true)
+    setDraft((prev) => ({ ...prev, ...hours, ...next }))
+  }
 
   const isValid =
-    draft.name.trim() !== '' &&
-    draft.transports.length > 0 &&
-    draft.workTypes.length > 0 &&
-    draft.brigadeId != null &&
-    draft.timeFrom != null &&
-    draft.timeTo != null
+    form.name.trim() !== '' &&
+    form.transports.length > 0 &&
+    form.workTypes.length > 0 &&
+    form.brigadeId != null &&
+    form.timeFrom != null &&
+    form.timeTo != null
 
   const submitManual = async (snapshot: ManualDraft) => {
     if (
@@ -250,20 +261,8 @@ export function AddEngineerPanel({
               label="Бригада"
               placeholder="Выберите бригаду"
               options={brigades.map((brigade) => ({ id: brigade.id, label: brigade.name }))}
-              value={draft.brigadeId}
-              onChange={(brigadeId) =>
-                setDraft((prev) => {
-                  // Часы идут за бригадой, пока их не поменяли руками
-                  const was = brigadeHours(brigades, prev.brigadeId)
-                  const untouched =
-                    sameTime(prev.timeFrom, was.timeFrom) && sameTime(prev.timeTo, was.timeTo)
-                  return {
-                    ...prev,
-                    brigadeId,
-                    ...(untouched ? brigadeHours(brigades, brigadeId) : {}),
-                  }
-                })
-              }
+              value={form.brigadeId}
+              onChange={(next) => patch({ brigadeId: next })}
             />
             <Hint>Бригада определяет офис и рабочее время</Hint>
           </div>
@@ -273,8 +272,8 @@ export function AddEngineerPanel({
             <div className="flex items-center">
               <WorkTimeField
                 aria-label="Начало рабочего дня"
-                value={draft.timeFrom}
-                onChange={(timeFrom) => patch({ timeFrom })}
+                value={form.timeFrom}
+                onChange={(timeFrom) => setHours({ timeFrom })}
               />
               <span
                 className="shrink-0 text-sm leading-5 text-muted"
@@ -284,8 +283,8 @@ export function AddEngineerPanel({
               </span>
               <WorkTimeField
                 aria-label="Конец рабочего дня"
-                value={draft.timeTo}
-                onChange={(timeTo) => patch({ timeTo })}
+                value={form.timeTo}
+                onChange={(timeTo) => setHours({ timeTo })}
               />
             </div>
           </div>
@@ -304,7 +303,7 @@ export function AddEngineerPanel({
         <button
           type="button"
           disabled={!isValid || submitting}
-          onClick={() => void submitManual(draft)}
+          onClick={() => void submitManual(form)}
           className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center bg-accent text-sm font-medium leading-5 text-accent-foreground transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent"
           style={{ borderRadius: 8, padding: '8px 16px' }}
         >

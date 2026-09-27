@@ -37,7 +37,7 @@ const WEEKDAYS = [
 type Draft = {
   name: string
   officeAddress: string
-  /** Новая точка офиса [lng, lat] — из подсказки или с карты; null — офис на прежнем месте. */
+  /** Точка офиса [lng, lat]: сохранённая или новая — из подсказки или с карты. */
   officePoint: [number, number] | null
   /** Адрес выбран из подсказок или найден по точке, и в нём есть дом. Напечатанный — нет. */
   officeConfirmed: boolean
@@ -53,7 +53,7 @@ function draftOf(brigade: PersonnelBrigade, areaName: Map<number, string>): Draf
   return {
     name: brigade.name,
     officeAddress: brigade.officeAddress ?? '',
-    officePoint: null,
+    officePoint: brigade.officePoint,
     officeConfirmed: true,
     areas: brigade.areaIds.flatMap((id) => areaName.get(id) ?? []),
     workDays: [...brigade.workDays].sort(),
@@ -77,13 +77,12 @@ function sameDraft(a: Draft, b: Draft) {
   )
 }
 
-/** Номер дома в адресе: «д 86/1», «д. 8 с7», «вл 5», «стр 1» — как has_house на backend. */
-const HOUSE_MARK = /(^|[\s,])(д|дом|вл|влд|стр|к|корп)\.?\s*\d/i
-
 /** Текст ошибки backend: FastAPI кладёт его в detail. */
 function errorReason(error: unknown) {
   const detail = ((error as { data?: unknown } | null)?.data as { detail?: unknown } | null)?.detail
   if (typeof detail === 'string' && detail.trim()) return detail
+  // 422 FastAPI — список ошибок полей; форма их не допускает, так что это что-то вне формы
+  if (Array.isArray(detail)) return 'Сервер не принял данные — проверьте поля формы'
   if ((error as { status?: unknown } | null)?.status === 'FETCH_ERROR')
     return 'Нет связи с сервером'
   return 'Что-то пошло не так'
@@ -141,6 +140,10 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
   // Точка, для которой ищем адрес: пока ищем, её можно сдвинуть — ответ для старой не нужен
   const [locatingAt, setLocatingAt] = useState<string | null>(null)
   const [pickNote, setPickNote] = useState<string | null>(null)
+  // Карта ещё едет или только встала: точка под булавкой вот-вот сменится
+  const [settling, setSettling] = useState(false)
+  // Точка последнего поиска адреса: ответы для прежних точек не трогают ни поле, ни подсказку
+  const lastLocate = useRef<string | null>(null)
 
   const areaName = new Map(areas.map((area) => [area.id, area.name]))
   const areaId = new Map(areas.map((area) => [area.name, area.id]))
@@ -151,7 +154,9 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
   const draft = edit ?? saved
   // Функциональное обновление: адрес по точке приходит позже, другие правки не затираются
   const patch = (next: Partial<Draft>) => setEdit((prev) => ({ ...(prev ?? saved), ...next }))
-  const dirty = edit != null && !sameDraft(edit, saved)
+  // Только что сохранённая правка: пока список бригад не перезагрузился, она и есть сохранённое
+  const [justSaved, setJustSaved] = useState<Draft | null>(null)
+  const dirty = edit != null && edit !== justSaved && !sameDraft(edit, saved)
 
   // «Повторить» со старого тоста не должен перезаписать более позднее сохранение
   // или сохранить бригаду, с которой уже ушли
@@ -167,26 +172,35 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
   // Карта остановилась под булавкой — ищем адрес этой точки
   const locateAt = async (point: [number, number]) => {
     const key = point.join()
+    lastLocate.current = key
     setPickNote(null)
     patch({ officePoint: point, officeConfirmed: false })
     setLocatingAt(key)
-    const mine = (prev: Draft | null) => prev?.officePoint?.join() === key
+    const current = () => alive.current && lastLocate.current === key
     try {
-      const { address } = await reverseGeocode({ lat: point[1], lon: point[0] }).unwrap()
-      if (!alive.current) return
-      const house = address != null && HOUSE_MARK.test(address)
+      const { address, hasHouse } = await reverseGeocode({ lat: point[1], lon: point[0] }).unwrap()
+      if (!current()) return
       setEdit((prev) =>
-        mine(prev) && address
-          ? { ...prev!, officeAddress: address, officeConfirmed: house }
+        prev?.officePoint?.join() === key && address
+          ? { ...prev, officeAddress: address, officeConfirmed: hasHouse }
           : prev,
       )
-      if (!house) setPickNote('Здесь не нашёлся дом — поставьте булавку на здание')
+      if (!hasHouse) setPickNote('Здесь не нашёлся дом — поставьте булавку на здание')
     } catch (error) {
-      if (alive.current) setPickNote(errorReason(error))
+      if (current()) setPickNote(errorReason(error))
     } finally {
-      if (alive.current) setLocatingAt((current) => (current === key ? null : current))
+      if (alive.current) setLocatingAt((at) => (at === key ? null : at))
     }
   }
+
+  /** Сбросить выбор на карте: ждущие ответы больше ничего не пишут. */
+  const stopLocating = () => {
+    lastLocate.current = null
+    setLocatingAt(null)
+    setPickNote(null)
+  }
+
+  const moved = draft.officePoint?.join() !== brigade.officePoint?.join()
 
   const locating = locatingAt != null && draft.officePoint?.join() === locatingAt
   const officeHint =
@@ -197,7 +211,7 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
         ? 'Двигайте карту: офис — под булавкой'
         : !draft.officeConfirmed
           ? 'Выберите адрес с номером дома из списка'
-          : draft.officePoint
+          : moved
             ? 'Офис переедет сюда после сохранения'
             : 'Точка старта инженеров')
 
@@ -210,6 +224,7 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
     draft.officeAddress.trim() !== '' &&
     draft.officeConfirmed &&
     !locating &&
+    !settling &&
     draft.workDays.length > 0 &&
     draft.timeFrom != null &&
     draft.timeTo != null &&
@@ -237,7 +252,13 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
           in_planning: snapshot.inPlanning,
         },
       }).unwrap()
-      setEdit(null)
+      // Правку, сделанную во время сохранения, не трогаем; сохранённую держим, пока список
+      // бригад не перезагрузится, — иначе на миг мелькнут старые значения
+      const stored = { ...snapshot, name: snapshot.name.trim(), officeAddress: snapshot.officeAddress.trim() }
+      setEdit((prev) => (prev === snapshot ? stored : prev))
+      setJustSaved(stored)
+      setPicking(false)
+      stopLocating()
       toast.success('Сведения по бригаде обновлены', {
         description: savedNote(result, saved, snapshot),
       })
@@ -261,8 +282,10 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
       <BrigadeMap
         brigade={brigade}
         engineers={engineers}
-        officePoint={draft.officePoint ?? brigade.officePoint}
+        officePoint={draft.officePoint}
+        officeLabel={draft.officeAddress}
         picking={picking}
+        onSettling={setSettling}
         onCenter={(point) => void locateAt(point)}
         onDone={() => setPicking(false)}
       />
@@ -281,6 +304,7 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
                 value={draft.name}
                 onChange={(name) => patch({ name })}
                 placeholder="Введите название"
+                maxLength={100}
               />
             </label>
 
@@ -292,16 +316,21 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
                 busy={locating}
                 placeholder="Улица и дом"
                 onType={(officeAddress) => {
-                  setPickNote(null)
                   // Напечатанный адрес — только поиск: офис на прежнем месте, пока не выбран
-                  patch({ officeAddress, officePoint: null, officeConfirmed: false })
+                  stopLocating()
+                  setPicking(false)
+                  patch({
+                    officeAddress,
+                    officePoint: brigade.officePoint,
+                    officeConfirmed: false,
+                  })
                 }}
                 onPickOnMap={() => {
                   setPickNote(null)
                   setPicking(true)
                 }}
                 onSelect={(item) => {
-                  setPickNote(null)
+                  stopLocating()
                   setPicking(false)
                   patch({
                     officeAddress: item.address,
@@ -389,6 +418,8 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
               </div>
               {timeError ? (
                 <p className="text-xs leading-5 text-danger">Конец дня должен быть позже начала</p>
+              ) : draft.timeFrom == null || draft.timeTo == null ? (
+                <p className="text-xs leading-5 text-danger">Укажите начало и конец рабочего дня</p>
               ) : null}
             </div>
 
@@ -426,7 +457,7 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
               onClick={() => {
                 setEdit(null)
                 setPicking(false)
-                setPickNote(null)
+                stopLocating()
               }}
               className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center border border-border bg-surface text-sm font-medium leading-5 text-foreground transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
               style={{ borderRadius: 8, padding: '8px 16px' }}

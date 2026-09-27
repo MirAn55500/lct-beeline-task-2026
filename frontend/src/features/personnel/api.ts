@@ -144,8 +144,15 @@ export const personnelApi = baseApi.injectEndpoints({
       keepUnusedDataFor: 300,
     }),
     /** Адрес точки, поставленной на карте. */
-    reverseGeocode: build.query<{ address: string | null }, { lat: number; lon: number }>({
+    reverseGeocode: build.query<
+      { address: string | null; hasHouse: boolean },
+      { lat: number; lon: number }
+    >({
       query: ({ lat, lon }) => ({ url: '/api/personnel/reverse-geocode', params: { lat, lon } }),
+      transformResponse: (response: { address: string | null; has_house: boolean }) => ({
+        address: response.address,
+        hasHouse: response.has_house,
+      }),
     }),
     updateBrigade: build.mutation<UpdateBrigadeResult, { id: number; body: UpdateBrigadeBody }>({
       query: ({ id, body }) => ({ url: `/api/personnel/brigades/${id}`, method: 'PATCH', body }),
