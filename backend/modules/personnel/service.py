@@ -109,9 +109,6 @@ class PersonnelService:
         if brigade is None:
             raise NotFoundError("Бригада не найдена")
 
-        name = body.name.strip()
-        if not name:
-            raise AppError("Укажите название бригады")
         if body.end_work <= body.start_work:
             raise AppError("Конец рабочего дня должен быть позже начала")
         days = sorted(set(body.work_days))
@@ -167,7 +164,6 @@ class PersonnelService:
                 self._session.add(engineer)
                 rescheduled += 1
 
-        brigade.name = name
         brigade.start_work = body.start_work
         brigade.end_work = body.end_work
         brigade.work_days = "".join(str(day) for day in days)

@@ -110,6 +110,9 @@ services:
       # Правило ORS: <размер pbf> × <число профилей> × 2 — для ЦФО минимум 6 ГБ
       XMS: ${ORS_XMS:-4g}
       XMX: ${ORS_XMX:-10g}
+      # Нехватка heap роняет отдельные потоки, а процесс остаётся висеть без ответа (так
+      # ORS пролежал сутки 26.09). С этим флагом JVM выходит, и restart поднимает её заново
+      ADDITIONAL_JAVA_OPTS: -XX:+ExitOnOutOfMemoryError
       # Экономный режим для машины с 3-4 ГБ RAM: графы читаются с диска (MMAP), а не
       # держатся в heap; без общественного транспорта — backend его у ORS не запрашивает
       ors.engine.graphs_data_access: ${ORS_GRAPHS_DATA_ACCESS:-RAM_STORE}

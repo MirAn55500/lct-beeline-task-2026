@@ -41,9 +41,9 @@ class AreaResponse(BaseModel):
 
 
 class UpdateBrigadeRequest(BaseModel):
-    """Карточка «Управление бригадой»: всё, что в ней есть, приходит целиком."""
+    """Карточка «Управление бригадой»: всё, что в ней есть, приходит целиком.
+    Название бригады не редактируется."""
 
-    name: str = Field(min_length=1, max_length=100)
     office_address: str = Field(min_length=3, max_length=300)
     # Точка, поставленная на карте: тогда адрес — только подпись, геокодер не нужен
     office_lat: float | None = Field(default=None, ge=-90, le=90)

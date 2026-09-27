@@ -52,7 +52,7 @@ async def update_brigade(
     brigade_id: int,
     body: UpdateBrigadeRequest,
 ) -> UpdateBrigadeResponse:
-    """Карточка «Управление бригадой»: название, офис, районы, рабочие дни и часы."""
+    """Карточка «Управление бригадой»: офис, районы, рабочие дни и часы."""
     return await service.update_brigade(brigade_id, body)
 
 

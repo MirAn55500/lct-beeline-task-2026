@@ -383,6 +383,7 @@ class OrsClient:
         "retries",
         "profiles",
         "max_routes_per_request",
+        "block_rows",
         "_transport",
     )
 
@@ -408,6 +409,13 @@ class OrsClient:
         Больше этого числа пар в одном запросе сервис не примет, поэтому матрица
         режется на блоки по источникам. Для наших наборов (~100 точек = 10 000 пар)
         либо поднимается лимит в конфиге, либо работает нарезка — оба пути рабочие.
+        """
+        self.block_rows: dict[str, int] = {}
+        """Сколько источников прошло в одну матрицу профиля — с этого начинается следующая.
+
+        Без памяти каждый расчёт заново нащупывал бы предел обхода графа отказами: у
+        пешего профиля это четыре-пять запросов по 13 с, и каждый держит в heap ORS
+        до `maximum_visited_nodes` узлов.
         """
         self._transport = transport or _urllib_transport
 
@@ -858,9 +866,13 @@ class OrsTravelModel:
         warnings: list[str] = []
 
         # Недостающие матрицы профилей запрашиваются одновременно: при графах на диске
-        # (graphs_data_access: MMAP) каждый запрос ждёт чтения, а профили независимы
+        # (graphs_data_access: MMAP) каждый запрос ждёт чтения, а профили независимы.
+        # Кроме SEARCH_PROFILES: их поиски держат в heap ORS миллионы узлов, вдвоём они
+        # уронили его по OutOfMemoryError (26.09), а выигрыш от параллели — 5 % (замер
+        # на стенде: 84 с против 88 с), поэтому они идут друг за другом в своей очереди
         prefetch: dict[TransportMode, concurrent.futures.Future] = {}
         pool = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(wanted)))
+        search_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         for mode in wanted:
             try:
                 profile = client.profile_of(mode)
@@ -870,8 +882,10 @@ class OrsTravelModel:
                 continue
             table = {} if refresh else (cache.legs_of(sections[mode]) if cache else {})
             if not _covers(table, points):
-                prefetch[mode] = pool.submit(fetch_missing, client, profile, points, table)
+                queue = search_pool if profile in SEARCH_PROFILES else pool
+                prefetch[mode] = queue.submit(fetch_missing, client, profile, points, table)
         pool.shutdown(wait=False)
+        search_pool.shutdown(wait=False)
 
         for mode in wanted:
             try:
@@ -1212,6 +1226,17 @@ def _covers(table: Mapping[tuple[str, str], tuple[float, float]], points: Sequen
     return True
 
 
+SEARCH_PROFILES: frozenset[str] = frozenset({"foot-walking", "cycling-regular"})
+"""Профили без contraction hierarchies: матрица — отдельный поиск на каждый источник.
+
+Замер на стенде (100 адресов Востока): ~2.2 с на источник, 6 источников в запросе
+проходят, 8 — отказ 6020 по `maximum_visited_nodes` через те же 13 с. Поэтому блок
+сразу маленький, а не 250 строк, из которых нащупывать предел пришлось бы отказами.
+"""
+
+SEARCH_BLOCK_ROWS = 5
+"""Стартовый блок источников для `SEARCH_PROFILES`; дальше — `OrsClient.block_rows`."""
+
 SYMMETRIC_PROFILES: frozenset[str] = frozenset({"foot-walking", "cycling-regular"})
 """Профили, где путь «туда» считается равным пути «обратно» при дозапросе новых точек.
 
@@ -1314,6 +1339,11 @@ def fetch_matrix(
     if not rows or not columns:
         return {}
     rows_per_request = max(1, client.max_routes_per_request // len(columns))
+    learned = client.block_rows.get(profile)
+    if learned is None and profile in SEARCH_PROFILES:
+        learned = SEARCH_BLOCK_ROWS
+    if learned is not None:
+        rows_per_request = min(rows_per_request, learned)
     table: dict[tuple[str, str], tuple[float, float]] = {}
 
     start = 0
@@ -1336,6 +1366,7 @@ def fetch_matrix(
             if exc.code is None or rows_per_request <= 1:
                 raise
             rows_per_request = max(1, rows_per_request // 2)
+            client.block_rows[profile] = rows_per_request
             continue
 
         distances = payload.get("distances")

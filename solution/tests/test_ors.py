@@ -27,6 +27,7 @@ from factories import Algorithm, TransportMode, eng, gp, plan, req, routes_by_en
 
 from planner.models import GeoPoint
 from planner.ors import (
+    SEARCH_BLOCK_ROWS,
     DEFAULT_PROFILES,
     NO_MATRIX_PROFILES,
     OrsClient,
@@ -1015,6 +1016,43 @@ def test_matrix_block_is_halved_when_the_instance_refuses_the_request():
     assert len(table) == 20, "матрица собралась не полностью"
     assert table[(point_key(C), point_key(A))][0] == pytest.approx(_km(2, 0))
     assert any(len(p.get("sources") or []) <= 2 for _u, p in fake.calls)
+
+
+def test_learned_block_size_is_reused_by_the_next_matrix():
+    """Нащупанный предел запоминается: следующая матрица не повторяет отказы, каждый из
+    которых у пешего профиля ORS считает 13 с и держит в heap миллионы узлов."""
+
+    class NodeBudget(FakeOrs):
+        def __call__(self, url, body, headers, timeout):
+            payload = json.loads(body.decode("utf-8"))
+            if "/matrix/" in url and len(payload.get("sources") or payload["locations"]) > 2:
+                self.calls.append((url, payload))
+                raise urllib.error.HTTPError(
+                    url, 500, "Internal Server Error", {},
+                    _body('{"error": {"code": 6020, "message": "Search exceeds the limit of visited nodes."}}'),
+                )
+            return super().__call__(url, body, headers, timeout)
+
+    points = [A, B, C, gp((55.85, 37.75)), gp((55.90, 37.80))]
+    fake = NodeBudget()
+    shared = client(fake, max_routes_per_request=10_000)
+    fetch_matrix(shared, "driving-car", points)
+    fake.calls.clear()
+    again = fetch_matrix(shared, "driving-car", points)
+
+    assert len(again) == 20
+    assert all(len(p["sources"]) <= 2 for _u, p in fake.calls), "отказы повторились"
+
+
+def test_search_profiles_start_with_a_small_block():
+    """Пеший и велосипедный профили без contraction hierarchies: 250 источников в
+    запросе ORS всё равно не примет, поэтому блок сразу маленький."""
+    fake = FakeOrs()
+    points = [gp((55.70 + i / 100, 37.60)) for i in range(12)]
+    table = fetch_matrix(client(fake, max_routes_per_request=10_000), "foot-walking", points)
+
+    assert len(table) == 12 * 11
+    assert max(len(p["sources"]) for _u, p in fake.calls) == SEARCH_BLOCK_ROWS
 
 
 def test_deterministic_service_verdict_is_not_retried():
