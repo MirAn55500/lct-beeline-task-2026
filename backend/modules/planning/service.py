@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Iterable
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 
@@ -9,6 +10,7 @@ from modules.algorithm.service import AlgorithmService
 from modules.planning import background
 from modules.planning import board as boards
 from modules.planning import transit
+from modules.planning.models.assignment import Assignment
 from modules.planning.models.plan import Plan
 from modules.planning.repository import PlanningRepository
 from modules.planning.scenario_builder import (
@@ -44,6 +46,8 @@ from modules.planning.schemas import (
 from planner import Algorithm
 from planner.dispatch import Board, MoveOutcome, StoredVisit
 from planner.enums import ReasonCode, ReplanScope
+from planner.models import Scenario
+from planner.result import PlanResult
 
 _REMAKE_TO_SCOPE = {
     RemakeLevel.FIX: ReplanScope.LOW,
@@ -167,13 +171,27 @@ class PlanningService:
         *,
         remake_level: RemakeLevel = RemakeLevel.FREE,
         distribution: Distribution = Distribution.EFFICIENT,
+        fresh: Iterable[int] = (),
     ) -> RecalculateResponse:
+        """Новая версия плана дня.
+
+        «Свободный» (и первый план дня) — расчёт с нуля. «Фикс» и «Инженерный» берут
+        последнюю версию и только ставят в неё заявки, которых там нет: в свободные окна
+        или (Инженерный) с вытеснением внутри маршрута одного инженера, см. `Board.place_new`.
+        `fresh` — id добавленных и изменённых загрузкой заявок: их прежние визиты
+        не сохраняются, заявки ставятся заново.
+        """
         scenario, transport_by_engineer = await self._scenario(region_id, day)
         scenario.settings.replan_scope = _REMAKE_TO_SCOPE[remake_level]
         algorithm = _DISTRIBUTION_TO_ALGORITHM[distribution]
 
+        previous = await self._repo.find_latest_plan(region_id, day)
         profiles = await transit.load_profiles(self._repo.session, scenario)
-        result = await asyncio.to_thread(run_plan, scenario, algorithm, profiles)
+        result = None
+        if remake_level is not RemakeLevel.FREE and previous is not None:
+            result = await self._extend(previous.plan_id or 0, day, scenario, profiles, fresh, remake_level)
+        if result is None:
+            result = await asyncio.to_thread(run_plan, scenario, algorithm, profiles)
         reasons = await self._repo.ensure_unassigned_reasons()
         rows, assigned, unassigned = assignments_from_result(
             result,
@@ -182,7 +200,6 @@ class PlanningService:
             offset_hours=scenario.settings.timezone_offset_hours,
         )
 
-        previous = await self._repo.find_latest_plan(region_id, day)
         version = (previous.version + 1) if previous is not None else 1
         requests, engineers = self._rows
         plan = await self._repo.save_plan(
@@ -208,6 +225,79 @@ class PlanningService:
             assigned=assigned,
             unassigned=unassigned,
         )
+
+    async def _extend(
+        self,
+        plan_id: int,
+        day: date,
+        scenario: Scenario,
+        profiles,
+        fresh: Iterable[int],
+        remake_level: RemakeLevel,
+    ) -> PlanResult | None:
+        """Версия плана + заявки, которых в ней нет. None — восстановить нечего, считать с нуля.
+
+        Кандидаты — новые и изменённые заявки, а также оставшиеся в версии без инженера:
+        свободное окно могло найтись и для них.
+        """
+        fresh_ids = {str(i) for i in fresh}
+        rows = [r for r in await self._repo.list_assignments(plan_id) if str(r.request_id) not in fresh_ids]
+        visits, unassigned = self._stored_visits(rows, scenario)
+        if not visits and any(r.engineer_id is not None for r in rows):
+            return None  # в версии нет расписания визитов
+        in_plan = {v.request_id for v in visits}
+        candidates = [r.id for r in scenario.planning_requests() if r.id not in in_plan]
+        zone = timezone(timedelta(hours=scenario.settings.timezone_offset_hours))
+        now = datetime.now(zone)
+        # Начатое замораживается только сегодня. Прошедший день (разбор выгрузки задним
+        # числом) считается, как и расчёт с нуля, без «сейчас» — иначе заморожен весь день.
+        if now.date() != day:
+            now = None
+
+        def compute() -> PlanResult:
+            routing, travel = build_travel(scenario, profiles)
+            board = Board(scenario, visits, unassigned=unassigned, travel=travel, now=now)
+            board.place_new(candidates, scope=_REMAKE_TO_SCOPE[remake_level])
+            return finish_plan(scenario, board.result(), routing, travel)
+
+        return await asyncio.to_thread(compute)
+
+    @staticmethod
+    def _stored_visits(
+        rows: list[Assignment], scenario: Scenario
+    ) -> tuple[list[StoredVisit], dict[str, ReasonCode]]:
+        """Сохранённая версия плана → визиты для `Board` и причины неназначенных."""
+        zone = timezone(timedelta(hours=scenario.settings.timezone_offset_hours))
+
+        def aware(moment: datetime | None, fallback: datetime | None = None) -> datetime:
+            moment = moment or fallback
+            assert moment is not None
+            return moment.replace(tzinfo=zone) if moment.tzinfo is None else moment
+
+        visits = [
+            StoredVisit(
+                request_id=str(r.request_id),
+                engineer_id=str(r.engineer_id),
+                position=r.position or 0,
+                departure_at=aware(r.planned_departure_at, r.planned_start_at),
+                arrival_at=aware(r.planned_arrival_at, r.planned_start_at),
+                service_start_at=aware(r.planned_start_at),
+                service_end_at=aware(r.planned_end_at, r.planned_start_at),
+                travel_minutes=r.travel_minutes or 0.0,
+                distance_km=r.distance_km or 0.0,
+                waiting_minutes=r.waiting_minutes or 0.0,
+            )
+            for r in rows
+            if r.engineer_id is not None and r.planned_start_at is not None
+        ]
+        unassigned = {
+            str(r.request_id): ReasonCode(
+                reason_code(r.unassigned_reason.value if r.unassigned_reason else "")
+            )
+            for r in rows
+            if r.engineer_id is None
+        }
+        return visits, unassigned
 
     async def get_plan(
         self, region_id: int, day: date, plan_id: int | None = None
@@ -386,39 +476,11 @@ class PlanningService:
         )
         zone = timezone(timedelta(hours=scenario.settings.timezone_offset_hours))
         rows = await self._repo.list_assignments(plan_id)
-
-        def aware(moment: datetime | None, fallback: datetime | None = None) -> datetime:
-            moment = moment or fallback
-            assert moment is not None
-            return moment.replace(tzinfo=zone) if moment.tzinfo is None else moment
-
-        visits = [
-            StoredVisit(
-                request_id=str(r.request_id),
-                engineer_id=str(r.engineer_id),
-                position=r.position or 0,
-                departure_at=aware(r.planned_departure_at, r.planned_start_at),
-                arrival_at=aware(r.planned_arrival_at, r.planned_start_at),
-                service_start_at=aware(r.planned_start_at),
-                service_end_at=aware(r.planned_end_at, r.planned_start_at),
-                travel_minutes=r.travel_minutes or 0.0,
-                distance_km=r.distance_km or 0.0,
-                waiting_minutes=r.waiting_minutes or 0.0,
-            )
-            for r in rows
-            if r.engineer_id is not None and r.planned_start_at is not None
-        ]
+        visits, unassigned = self._stored_visits(rows, scenario)
         if not visits and any(r.engineer_id is not None for r in rows):
             raise AppError(
                 "В этой версии плана нет расписания визитов — обновите план", status_code=409
             )
-        unassigned = {
-            str(r.request_id): ReasonCode(
-                reason_code(r.unassigned_reason.value if r.unassigned_reason else "")
-            )
-            for r in rows
-            if r.engineer_id is None
-        }
         profiles = await transit.load_profiles(self._repo.session, scenario)
 
         def build():

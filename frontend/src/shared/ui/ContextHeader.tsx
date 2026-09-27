@@ -134,9 +134,15 @@ export function ContextHeader({
   const [versionOpen, setVersionOpen] = useState(false)
   const [ticketsOpen, setTicketsOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
+  const selectedPlanRef = useRef<HTMLButtonElement>(null)
   const region = regions.find((item) => item.id === regionId) ?? null
   const selectedPlan = plans.find((item) => item.id === planId) ?? plans[0] ?? null
   const plannedDateSet = useMemo(() => new Set(plannedDates), [plannedDates])
+
+  // Длинный список планов открывается на выбранном, а не на первом
+  useEffect(() => {
+    if (versionOpen) selectedPlanRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [versionOpen])
 
   const regionLabel = isRegionsLoading
     ? 'Регион'
@@ -355,20 +361,22 @@ export function ContextHeader({
             </button>
             {versionOpen ? (
               <div
-                className="absolute top-[calc(100%+8px)] right-0 z-50 w-[193px] bg-surface p-1 shadow-lg"
-                style={{ borderRadius: 16 }}
+                className="absolute top-[calc(100%+8px)] right-0 z-50 flex w-[193px] flex-col bg-surface p-1 shadow-lg"
+                style={{ borderRadius: 16, maxHeight: 'min(420px, calc(100vh - 120px))' }}
               >
-                <div className="flex flex-col">
+                {/* Планы прокручиваются, «Новый план» всегда под ними */}
+                <div className="flex min-h-0 flex-col overflow-y-auto overscroll-contain">
                   {plans.map((item) => (
                     <button
                       key={item.id}
+                      ref={item.id === selectedPlan.id ? selectedPlanRef : undefined}
                       type="button"
                       onClick={() => {
                         onPlanIdChange?.(item.id)
                         setVersionOpen(false)
                       }}
                       className={cn(
-                        'flex w-full cursor-pointer flex-col items-start rounded-lg px-3 py-2 text-left transition-colors hover:bg-surface-hover',
+                        'flex w-full shrink-0 cursor-pointer flex-col items-start rounded-lg px-3 py-2 text-left transition-colors hover:bg-surface-hover',
                         item.id === selectedPlan.id && 'bg-surface-hover',
                       )}
                     >
@@ -380,6 +388,8 @@ export function ContextHeader({
                       </span>
                     </button>
                   ))}
+                </div>
+                <div className="flex shrink-0 flex-col">
                   <div className="mx-2 my-1 h-px bg-separator" />
                   <button
                     type="button"

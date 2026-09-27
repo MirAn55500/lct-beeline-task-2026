@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+from sqlalchemy import BigInteger, cast, func
 from sqlalchemy.orm import selectinload
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -163,6 +164,14 @@ class TicketsRepository:
         )
         return result.first()
 
+    async def next_external_id(self) -> str:
+        """Номер для заявки, добавленной вручную: следующий после самого большого числового."""
+        numeric = col(Request.external_id).op("~")(r"^[0-9]{1,15}$")
+        result = await self._session.exec(
+            select(func.max(cast(Request.external_id, BigInteger))).where(numeric)
+        )
+        return str((result.first() or 0) + 1)
+
     async def save_upload(
         self,
         *,
@@ -171,9 +180,11 @@ class TicketsRepository:
         file_type: str,
         tickets: list[ParsedTicket],
         skipped: int,
-    ) -> tuple[int, int, int]:
+    ) -> tuple[int, int, int, list[int]]:
+        """(добавлено, обновлено, пропущено, id добавленных и изменённых заявок)."""
         created = 0
         updated = 0
+        touched: list[int] = []
         upload_type_id = await self.ensure_dict(DictGroup.UPLOAD_TYPE, "request")
         file_type_id = await self.ensure_dict(DictGroup.FILE_TYPE, file_type)
         created_action_id = await self.ensure_dict(DictGroup.SNAPSHOT_ACTION, "created")
@@ -256,6 +267,8 @@ class TicketsRepository:
                 action_id = updated_action_id
                 request_id = existing.request_id
                 updated += 1
+            if request_id is not None:
+                touched.append(request_id)
 
             self._session.add(
                 SnapshotItem(
@@ -269,4 +282,4 @@ class TicketsRepository:
         snapshot.updated = updated
         snapshot.skipped = skipped
         await self._session.commit()
-        return created, updated, skipped
+        return created, updated, skipped, touched

@@ -4,8 +4,9 @@ export {
   useGetTicketsQuery,
   useLazyGetTicketsQuery,
   useUploadTicketsMutation,
+  useCreateTicketMutation,
 } from './api'
-export type { Ticket, TicketsListArgs, UploadTicketsResult } from './api'
+export type { CreateTicketBody, CreateTicketResult, Ticket, TicketsListArgs, UploadTicketsResult } from './api'
 export type { TicketId } from './types'
 export { TicketsDropzone, isAcceptedTicketFile } from './ui/TicketsDropzone'
 export {
@@ -13,7 +14,7 @@ export {
   uploadSuccessDescription,
 } from './ui/UploadTicketsModal'
 export { TicketsUploadDialog } from './ui/TicketsUploadDialog'
-export { useTicketsUpload } from './lib/useTicketsUpload'
+export { useTicketCreate, useTicketsUpload } from './lib/useTicketsUpload'
 export { isTicketsFile } from './lib/template'
 export { downloadTickets, type TicketsExportFormat } from './lib/exportTickets'
 export {

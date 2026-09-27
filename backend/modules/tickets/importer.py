@@ -158,3 +158,32 @@ def parse_upload(raw: bytes, filename: str, day: date) -> tuple[list[ParsedTicke
         )
 
     return tickets, skipped
+
+
+WORK_TYPE_BK = {
+    "Подключение": "Подключение",
+    "Дозаказ": "Дозаказ",
+    "Ремонт": "Локальная заявка",
+    "Аварийные работы": "Глобальная проблема",
+}
+"""Тип работ из окна «Добавить заявку» → «Тип заявки BK» выгрузки: по нему норматив и навык."""
+
+
+def manual_ticket(
+    *, external_id: str, address: str, start: datetime, end: datetime, work_type: str
+) -> ParsedTicket:
+    """Одна заявка из окна «Добавить заявку» — как строка выгрузки без района и HD."""
+    bk = WORK_TYPE_BK[work_type]
+    spec = WorkTypeCatalog.load().resolve(bk, "—")
+    return ParsedTicket(
+        external_id=external_id,
+        address=address,
+        district="—",
+        window_start=start,
+        window_end=end,
+        category=_category(bk),
+        hd="—",
+        status="pending",
+        skill=str(spec.get("skill", "connection")),
+        priority=str(spec.get("priority", "connection")),
+    )

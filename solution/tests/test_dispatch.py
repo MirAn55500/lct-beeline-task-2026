@@ -191,3 +191,44 @@ def test_result_is_a_regular_plan():
     result = board.result()
     assert [v.request_id for v in result.routes[0].visits] == ["R1", "R3", "R2"]
     assert all(a.is_assigned for a in result.assignments)
+
+
+# ---------------------------------------------------------------- новые заявки в готовый план
+
+
+def test_place_new_fix_uses_a_free_window_and_moves_nobody():
+    board, _ = board_without_r3()
+    before = starts(board)
+    assert board.place_new(["R3"], scope="low") == ["R3"]
+    after = starts(board)
+    assert {k: after[k] for k in before} == before
+    assert "R3" in after and "R3" not in board.solution.unassigned
+
+
+def tight_board():
+    """R2 стоит сразу после R1; R3 встаёт только перед R2, отодвинув его в пределах окна."""
+    known = [
+        req("R1", window=("10:00", "11:00"), dur=60, at=A),
+        req("R2", window=("11:00", "13:00"), dur=60, at=B),
+    ]
+    engineers = [eng("E1", shift=("09:00", "18:00"), at=HOME)]
+    result = plan(sc(known, engineers))
+    scenario = sc([*known, req("R3", window=("11:00", "11:20"), dur=30, at=C)], engineers)
+    return Board(scenario, stored(result))
+
+
+def test_place_new_fix_does_not_shift_client_times():
+    board = tight_board()
+    before = starts(board)
+    assert board.place_new(["R3"], scope="low") == []
+    assert starts(board) == before
+    assert "R3" in board.solution.unassigned
+
+
+def test_place_new_engineer_may_shift_one_route_within_windows():
+    board = tight_board()
+    before = starts(board)
+    assert board.place_new(["R3"], scope="medium") == ["R3"]
+    after = starts(board)
+    assert after["R1"] == before["R1"]
+    assert before["R2"] < after["R2"] <= minutes(t("13:00")) + 1e-6

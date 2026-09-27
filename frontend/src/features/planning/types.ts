@@ -1,5 +1,7 @@
+import type { RebuildLevel } from '@/shared/ui'
+
 /** Уровень перестроения: Фикс / Инженерный / Свободный. */
-export type RemakeLevel = 'fix' | 'engineer' | 'free'
+export type RemakeLevel = RebuildLevel
 
 /** Алиас для UI-диалога перестроения плана. */
 export type PlanRebuildLevel = RemakeLevel

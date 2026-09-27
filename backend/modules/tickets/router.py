@@ -4,7 +4,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 
 from modules.tickets.dependencies import get_tickets_service
+from modules.planning.schemas import RemakeLevel
 from modules.tickets.schemas import (
+    CreateTicketRequest,
+    CreateTicketResult,
     HealthResponse,
     TicketAssignmentFilter,
     TicketResponse,
@@ -87,13 +90,16 @@ async def upload_tickets(
     file: Annotated[UploadFile, File()],
     region_id: Annotated[int, Form(ge=1)],
     date: Annotated[date, Form()],
+    remake_level: Annotated[RemakeLevel, Form()] = RemakeLevel.FREE,
 ) -> UploadTicketsResult:
     """Загрузка CSV заявок и расчёт плана на даты из файла.
 
     Ответ приходит, как только заявки записаны; план считается в фоне, и пока он не
     готов, `/api/planning/day-overview` отдаёт `planning: true`.
-    Поля формы: `file`, `region_id`, `date` (`YYYY-MM-DD`).
+    Поля формы: `file`, `region_id`, `date` (`YYYY-MM-DD`), `remake_level`.
     Дата заявки берётся из файла. `date` нужен, только если в строке времени нет даты.
+    `remake_level` — уровень перестроения: `fix` и `engineer` ставят новые заявки
+    в последнюю версию плана дня, `free` (по умолчанию) считает день заново.
     """
     raw = await file.read()
     return await service.upload(
@@ -101,4 +107,15 @@ async def upload_tickets(
         day=date,
         filename=file.filename or "upload.csv",
         raw=raw,
+        remake_level=remake_level,
     )
+
+
+@router.post("", response_model=CreateTicketResult)
+async def create_ticket(service: TicketsServiceDep, body: CreateTicketRequest) -> CreateTicketResult:
+    """Одна заявка вручную (окно «Добавить заявку») и её постановка в план дня.
+
+    Номер назначается следующим после самого большого. План считается в фоне, как после
+    загрузки; `remake_level` по умолчанию `fix` — только свободные окна.
+    """
+    return await service.create(body)

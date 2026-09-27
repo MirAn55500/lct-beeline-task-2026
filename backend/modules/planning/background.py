@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Iterable
 from datetime import date
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from core.config import get_settings
 from core.database import async_session_factory
 from core.exceptions import AppError
+from modules.planning.schemas import RemakeLevel
 from modules.planning.scenario_builder import routing_cache_lock  # и sys.path к planner
 
 from planner.models import Scenario  # noqa: E402
@@ -110,8 +112,21 @@ async def estimate(session: AsyncSession, region_id: int, days: list[date]) -> d
     return estimates
 
 
-def schedule(region_id: int, days: list[date], estimates: dict[date, tuple[float, int]] | None = None) -> None:
-    """Поставить в очередь расчёт плана на каждый день."""
+def schedule(
+    region_id: int,
+    days: list[date],
+    estimates: dict[date, tuple[float, int]] | None = None,
+    *,
+    remake_level: RemakeLevel = RemakeLevel.FREE,
+    fresh: Iterable[int] = (),
+) -> None:
+    """Поставить в очередь расчёт плана на каждый день.
+
+    `remake_level` — уровень перестроения из окна загрузки: «Фикс» и «Инженерный» ставят
+    новые заявки в последнюю версию плана, «Свободный» считает день заново.
+    `fresh` — id добавленных и изменённых заявок: их прежние визиты не сохраняются.
+    """
+    fresh = frozenset(fresh)
     global _sequence
     for day in days:
         key = (region_id, day)
@@ -120,7 +135,7 @@ def schedule(region_id: int, days: list[date], estimates: dict[date, tuple[float
         _sequence += 1
         _queued[key] = _sequence
         _estimate[key] = (estimates or {}).get(day) or (_rate["base"], 0)
-        task = asyncio.create_task(_run(key))
+        task = asyncio.create_task(_run(key, remake_level, fresh))
         _tasks.add(task)
         task.add_done_callback(_tasks.discard)
 
@@ -152,7 +167,7 @@ def _learn(key: Key, elapsed: float) -> None:
         _rate["base"] = (1 - _LEARN) * _rate["base"] + _LEARN * min(max(elapsed, 2.0), 120.0)
 
 
-async def _run(key: Key) -> None:
+async def _run(key: Key, remake_level: RemakeLevel, fresh: frozenset[int]) -> None:
     from modules.planning.service import PlanningService
 
     try:
@@ -160,7 +175,9 @@ async def _run(key: Key) -> None:
             _started[key] = time.monotonic()
             try:
                 async with async_session_factory() as session:
-                    planned = await PlanningService(session).recalculate(*key)
+                    planned = await PlanningService(session).recalculate(
+                        *key, remake_level=remake_level, fresh=fresh
+                    )
                 _failed.pop(key, None)
                 elapsed = time.monotonic() - _started[key]
                 _learn(key, elapsed)

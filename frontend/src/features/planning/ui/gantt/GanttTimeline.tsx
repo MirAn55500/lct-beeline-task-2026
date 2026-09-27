@@ -81,7 +81,7 @@ export function GanttTimeline({
         className="min-h-0 flex-1 overflow-auto [scrollbar-color:#e1e1e1_transparent] [scrollbar-width:thin]"
       >
         <div className="relative flex min-h-full flex-col" style={{ width: column + width }}>
-          {/* Шкала часов прилипает сверху, угол с «План работ» — ещё и слева. */}
+          {/* Шкала часов прилипает сверху, угол со ссылкой «Обзор дня» — ещё и слева. */}
           <div className="sticky top-0 z-40 flex shrink-0 bg-surface" style={{ height: GANTT_HEADER }}>
             <div
               className="sticky left-0 z-10 flex shrink-0 items-center border-r-[3px] border-b border-separator bg-surface px-1.5"
@@ -93,7 +93,7 @@ export function GanttTimeline({
                 style={{ borderRadius: 8 }}
               >
                 <RiArrowLeftSLine size={16} className="shrink-0 text-muted" />
-                План работ
+                Обзор дня
               </Link>
             </div>
             <div className="relative flex">

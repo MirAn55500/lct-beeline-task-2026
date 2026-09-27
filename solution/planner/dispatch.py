@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from .context import PlanContext, RequestTiming
-from .enums import Algorithm, ReasonCode
+from .enums import Algorithm, ReasonCode, ReplanScope
 from .feasibility import check_static
 from .models import Scenario
 from .result import PlanResult
@@ -414,6 +414,65 @@ class Board:
         if start > window.latest + _EPS:
             return f"Следующие заявки {name} не успеют: начать нужно не позже {_clock(window.latest)}"
         return f"Заявка не помещается в маршрут {name} на {_clock(start)}"
+
+    # ------------------------------------------------------------------ новые заявки
+
+    def place_new(self, request_ids: Iterable[str], *, scope: ReplanScope | str) -> list[str]:
+        """Ставит новые заявки в готовый план, не пересобирая его. Возвращает поставленные.
+
+        Уровень перестроения при загрузке заявок (Figma: Фикс / Инженерный / Свободный):
+
+        * `LOW` («Фикс») — только свободные окна: остальные визиты остаются ровно на
+          своём времени, клиентам ничего не переносим;
+        * `MEDIUM` («Инженерный») — ещё и вытеснение менее приоритетных работ внутри
+          маршрута одного инженера (`place_with_ejection`); хвост маршрута может
+          сдвинуться в пределах окон клиентов, вытесненные ищут свободное окно у других.
+
+        Весь день заново («Свободный») считает `planner.plan`, а не доска.
+        """
+        from .construct import place_single, place_with_ejection
+
+        scope = ReplanScope(scope)
+        ctx, solution = self.ctx, self.solution
+        if not scope.allows_ejection:
+            for state in solution.routes.values():
+                if state.engineer.id in self.frozen_routes or state.locked_count >= state.size:
+                    continue
+                held = [(state.stops[i].id, state.schedule_at(i)[2]) for i in range(state.locked_count, state.size)]
+                for request_id, start in held:
+                    self._pin_at(request_id, start)
+                if not state.recompute():
+                    # Расписание не сошлось в точку — остаётся «не раньше своего времени»
+                    for request_id, start in held:
+                        self._hold(request_id, start)
+                    state.recompute()
+
+        assigned = solution.assigned_ids()
+        pending = sorted(
+            {i: self._by_id[i] for i in request_ids if i in self._by_id and i not in assigned}.values(),
+            key=lambda r: (-r.priority.rank, r.input_order, r.id),
+        )
+        placed: list[str] = []
+        for request in pending:
+            found = place_single(ctx, solution, request)
+            if found is None and scope.allows_ejection:
+                found = place_with_ejection(ctx, solution, request)
+            if found is not None:
+                placed.append(request.id)
+        return placed
+
+    def _pin_at(self, request_id: str, start: float) -> None:
+        """Визит ровно в `start`: «Фикс» не переносит клиентам время."""
+        client = self._client[request_id]
+        self._set_timing(
+            request_id,
+            RequestTiming(
+                window_start=start,
+                window_end=start,
+                duration=client.duration,
+                available_from=client.available_from if client.available_from < start else start,
+            ),
+        )
 
     # ------------------------------------------------------------------ расписание
 

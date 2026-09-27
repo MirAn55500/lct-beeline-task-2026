@@ -1,5 +1,6 @@
 import { baseApi } from '@/shared/api/baseApi'
 import type { ModuleHealth } from '@/shared/types'
+import type { RebuildLevel } from '@/shared/ui'
 
 export type TicketAssignment = 'all' | 'assigned' | 'unassigned'
 
@@ -43,6 +44,19 @@ export type UploadTicketsResult = {
   planning_eta_seconds?: number | null
 }
 
+/** Окно «Добавить заявку». Время — «ЧЧ:ММ», тип работ — из WORK_TYPE_OPTIONS. */
+export type CreateTicketBody = {
+  region_id: number
+  date: string
+  address: string
+  start: string
+  end: string
+  work_type: string
+  remake_level: RebuildLevel
+}
+
+export type CreateTicketResult = UploadTicketsResult & { number: string }
+
 export const ticketsApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
     getTicketsHealth: build.query<ModuleHealth, void>({
@@ -82,6 +96,14 @@ export const ticketsApi = baseApi.injectEndpoints({
       }),
       invalidatesTags: ['Ticket', 'Plan'],
     }),
+    createTicket: build.mutation<CreateTicketResult, CreateTicketBody>({
+      query: (body) => ({
+        url: '/api/tickets',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Ticket', 'Plan'],
+    }),
   }),
 })
 
@@ -90,4 +112,5 @@ export const {
   useGetTicketsQuery,
   useLazyGetTicketsQuery,
   useUploadTicketsMutation,
+  useCreateTicketMutation,
 } = ticketsApi

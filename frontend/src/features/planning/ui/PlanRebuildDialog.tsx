@@ -1,14 +1,8 @@
 import { useState } from 'react'
 
-import { AppModal, FieldLabel, SegmentedControl, buttonClass } from '@/shared/ui'
+import { AppModal, FieldLabel, RebuildLevelField, SegmentedControl, buttonClass } from '@/shared/ui'
 
 import type { PlanDistribution, PlanRebuildLevel } from '../types'
-
-const LEVELS: { id: PlanRebuildLevel; label: string; hint: string }[] = [
-  { id: 'fix', label: 'Фикс', hint: 'Можно добавить новую заявку только в свободное окно' },
-  { id: 'engineer', label: 'Инженерный', hint: 'Заявки можно менять только в рамках одного инженера' },
-  { id: 'free', label: 'Свободный', hint: 'Обратите внимание! На этом уровне перестраивается весь план' },
-]
 
 const DISTRIBUTIONS: { id: PlanDistribution; label: string; hint: string }[] = [
   {
@@ -59,11 +53,7 @@ export function PlanRebuildDialog({ isOpen, onClose, onConfirm }: PlanRebuildDia
       }
     >
       <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <FieldLabel>Уровень перестроения плана</FieldLabel>
-          <SegmentedControl aria-label="Уровень перестроения плана" options={LEVELS} value={level} onChange={setLevel} />
-          <p className="text-xs leading-5 text-muted">{LEVELS.find((item) => item.id === level)?.hint}</p>
-        </div>
+        <RebuildLevelField value={level} onChange={setLevel} />
         <div className="flex flex-col gap-1">
           <FieldLabel>Распределение заявок</FieldLabel>
           <SegmentedControl

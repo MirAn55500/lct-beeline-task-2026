@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections import Counter
 from dataclasses import replace
-from datetime import date, time
+from datetime import date, datetime, time
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -14,10 +14,13 @@ from modules.geocoding.anchors import district_anchors
 from modules.geocoding.geocoder import DISTRICT, SETTLED, AddressGeocoder
 from modules.planning.models.assignment import Assignment
 from modules.planning import background
-from modules.tickets.importer import ParsedTicket, parse_upload
+from modules.planning.schemas import RemakeLevel
+from modules.tickets.importer import WORK_TYPE_BK, ParsedTicket, manual_ticket, parse_upload
 from modules.tickets.models.request import Request
 from modules.tickets.repository import TicketsRepository
 from modules.tickets.schemas import (
+    CreateTicketRequest,
+    CreateTicketResult,
     TicketAssignmentFilter,
     TicketResponse,
     TicketsQuery,
@@ -212,6 +215,7 @@ class TicketsService:
         day: date,
         filename: str,
         raw: bytes,
+        remake_level: RemakeLevel = RemakeLevel.FREE,
     ) -> UploadTicketsResult:
         region = await self._repo.get_region(region_id)
         if region is None:
@@ -227,24 +231,81 @@ class TicketsService:
         tickets = await self._geocode(region_id, tickets)
 
         file_type = "json" if filename.lower().endswith(".json") else "csv"
-        created, updated, skipped = await self._repo.save_upload(
+        created, updated, skipped, touched = await self._repo.save_upload(
             region_id=region_id,
             filename=filename or "upload.csv",
             file_type=file_type,
             tickets=tickets,
             skipped=skipped,
         )
-
-        counts = Counter(ticket.window_start.date() for ticket in tickets)
-        primary = counts.most_common(1)[0][0] if counts else None
-        # План считается в фоне: с сотней новых адресов это минуты, см. planning.background
-        days = sorted(counts)
-        background.schedule(region_id, days, await background.estimate(self._session, region_id, days))
-
         return UploadTicketsResult(
             created=created,
             updated=updated,
             skipped=skipped,
+            **await self._plan_after(region_id, tickets, remake_level, touched),
+        )
+
+    async def create(self, body: CreateTicketRequest) -> CreateTicketResult:
+        """Одна заявка из окна «Добавить заявку» и её постановка в план дня."""
+        region = await self._repo.get_region(body.region_id)
+        if region is None:
+            raise AppError("Регион не найден", status_code=404)
+        if body.work_type not in WORK_TYPE_BK:
+            raise AppError("Неизвестный тип работ")
+        if body.end <= body.start:
+            raise AppError("Окончание окна должно быть позже начала")
+        address = " ".join(body.address.split())
+        if not address:
+            raise AppError("Укажите адрес заявки")
+
+        number = await self._repo.next_external_id()
+        ticket = manual_ticket(
+            external_id=number,
+            address=address,
+            start=datetime.combine(body.date, body.start),
+            end=datetime.combine(body.date, body.end),
+            work_type=body.work_type,
+        )
+        [ticket] = await self._geocode(body.region_id, [ticket])
+        stored = (await self._repo.find_addresses(body.region_id)).get((ticket.district, address))
+        if ticket.geo_precision not in SETTLED and (stored is None or stored.geo_precision not in SETTLED):
+            # Точка по району или городу увела бы инженера не туда — лучше уточнить адрес
+            raise AppError("Не удалось найти адрес на карте — уточните улицу и дом")
+
+        created, updated, skipped, touched = await self._repo.save_upload(
+            region_id=body.region_id,
+            filename="Добавлена вручную",
+            file_type="manual",
+            tickets=[ticket],
+            skipped=0,
+        )
+        return CreateTicketResult(
+            number=number,
+            created=created,
+            updated=updated,
+            skipped=skipped,
+            **await self._plan_after(body.region_id, [ticket], body.remake_level, touched),
+        )
+
+    async def _plan_after(
+        self,
+        region_id: int,
+        tickets: list[ParsedTicket],
+        remake_level: RemakeLevel,
+        touched: list[int],
+    ) -> dict:
+        """Расчёт плана на дни записанных заявок — в фоне: с сотней новых адресов это минуты."""
+        counts = Counter(ticket.window_start.date() for ticket in tickets)
+        primary = counts.most_common(1)[0][0] if counts else None
+        days = sorted(counts)
+        background.schedule(
+            region_id,
+            days,
+            await background.estimate(self._session, region_id, days),
+            remake_level=remake_level,
+            fresh=touched,
+        )
+        return dict(
             date=primary,
             planning=bool(counts),
             planning_eta_seconds=background.status(region_id, primary)[2] if primary else None,

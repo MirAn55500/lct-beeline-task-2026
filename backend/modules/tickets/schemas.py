@@ -3,6 +3,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from modules.planning.schemas import RemakeLevel
+
 
 class HealthResponse(BaseModel):
     module: str
@@ -18,6 +20,24 @@ class UploadTicketsResult(BaseModel):
     """План на даты из файла поставлен в расчёт; готовность — `planning` в обзоре дня."""
     planning_eta_seconds: int | None = None
     """Примерно сколько секунд считаться плану на `date` — вместе с днями перед ним в очереди."""
+
+
+class CreateTicketRequest(BaseModel):
+    """Одна заявка из окна «Добавить заявку»: адрес, окно клиента, тип работ."""
+
+    region_id: int = Field(ge=1)
+    date: date_type
+    address: str = Field(min_length=1, max_length=300)
+    start: time
+    end: time
+    work_type: str
+    """Подключение / Дозаказ / Ремонт / Аварийные работы."""
+    remake_level: RemakeLevel = RemakeLevel.FIX
+
+
+class CreateTicketResult(UploadTicketsResult):
+    number: str
+    """Номер новой заявки."""
 
 
 class TicketAssignmentFilter(StrEnum):
