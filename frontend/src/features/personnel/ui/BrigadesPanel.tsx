@@ -1,5 +1,5 @@
 import { ScrollShadow, Tooltip } from '@heroui/react'
-import { RiAddCircleLine, RiUser3Line, RiVipCrown2Line } from '@remixicon/react'
+import { RiAddCircleLine, RiUser3Line } from '@remixicon/react'
 
 import type { PersonnelBrigade } from '@/features/personnel/types'
 import { cn } from '@/shared/lib/cn'
@@ -32,15 +32,6 @@ function BrigadeCard({
         {brigade.name}
       </span>
       <span className="flex min-w-0 items-center gap-2 text-sm font-medium leading-6 text-muted">
-        {brigade.leaderShortName ? (
-          <>
-            <span className="flex min-w-0 items-center gap-1" title="Бригадир">
-              <RiVipCrown2Line size={16} className="shrink-0" />
-              <span className="truncate">{brigade.leaderShortName}</span>
-            </span>
-            <span aria-hidden className="h-3.5 w-px shrink-0 bg-separator" />
-          </>
-        ) : null}
         <span className="flex shrink-0 items-center gap-1">
           <RiUser3Line size={16} className="shrink-0" />
           {count} {pluralRu(count, ['человек', 'человека', 'человек'])}
