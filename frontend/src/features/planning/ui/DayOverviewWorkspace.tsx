@@ -1,17 +1,15 @@
 import { Link } from 'react-router'
-import { RiArrowRightUpLine } from '@remixicon/react'
 
 import beesPromo from '@/shared/assets/day-overview-bees-promo.png'
-import { EngineersPanel } from '@/features/personnel'
 import { TicketsDropzone, TicketsPanel } from '@/features/tickets'
-import { useGetTicketsQuery, type Ticket } from '@/features/tickets/api'
 import { routes } from '@/shared/config/routes'
 import { cn } from '@/shared/lib/cn'
-import { formatWait } from '@/shared/lib/format'
 import { AppPanel } from '@/shared/ui'
 
 import { useDayOverview } from '../lib/useDayOverview'
-import { DayPlanPreview, type PlanRow } from './DayPlanPreview'
+import { getOverviewPlanRows, getPlanMetrics } from '../lib/planMetrics'
+import { useGetPlanExportQuery } from '../planApi'
+import { DayPlanPreview } from './DayPlanPreview'
 
 function PanelHeading({
   title,
@@ -30,51 +28,24 @@ function PanelHeading({
   )
 }
 
-function SummaryCounter({
+function MetricCard({
   value,
-  total,
+  suffix,
   label,
 }: {
-  value: number
-  total: number
+  value: string | number
+  suffix?: string
   label: string
 }) {
   return (
-    <div className="flex min-w-0 flex-1 flex-col gap-1">
-      <div className="flex items-baseline gap-1 text-xl font-semibold leading-7">
-        <span className="text-foreground">{value}</span>
-        <span className="text-muted">из {total}</span>
+    <div className="flex h-20 min-w-0 flex-col justify-between rounded-lg bg-background px-3 py-2">
+      <div className="flex items-baseline gap-1 text-4xl font-semibold leading-10 text-foreground">
+        <span>{value}</span>
+        {suffix ? <span className="text-base leading-6">{suffix}</span> : null}
       </div>
-      <p className="text-sm leading-6 text-muted">{label}</p>
+      <p className="truncate text-sm leading-5 text-foreground">{label}</p>
     </div>
   )
-}
-
-/** «Алексеев Александр» → «Алексеев А.», как в превью плана из макета. */
-function shortName(name: string) {
-  const [first, second] = name.trim().split(/\s+/)
-  if (!first || !second || /бригада/i.test(first)) return name
-  return `${first} ${second[0]}.`
-}
-
-function planRowsFromTickets(tickets: Ticket[]): PlanRow[] {
-  const grouped = new Map<string, PlanRow['blocks']>()
-  for (const ticket of tickets) {
-    if (!ticket.assigned || !ticket.engineer) continue
-    const match = /^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/.exec(ticket.window.trim())
-    if (!match) continue
-    const from = Number(match[1]) + Number(match[2]) / 60
-    const to = Number(match[3]) + Number(match[4]) / 60
-    if (!(to > from)) continue
-    const blocks = grouped.get(ticket.engineer) ?? []
-    blocks.push({
-      from,
-      to,
-      tone: ticket.category.toLowerCase().includes('авар') ? 'strong' : 'soft',
-    })
-    grouped.set(ticket.engineer, blocks)
-  }
-  return [...grouped.entries()].map(([name, blocks]) => ({ id: name, name: shortName(name), blocks }))
 }
 
 type DayOverviewWorkspaceProps = {
@@ -101,14 +72,12 @@ export function DayOverviewWorkspace({
     { skip: regionId == null || date === '' },
   )
   const hasTickets = (overview?.tickets.total ?? 0) > 0
-  const planning = overview?.planning ?? false
-  const planningError = overview?.planning_error ?? null
-  const planningSeconds = overview?.planning_eta_seconds ?? null
-  // Об окончании фонового расчёта скажет тост из getDayOverview — один на все экраны
-  const { data: chartTickets = [] } = useGetTicketsQuery(
+  const { data: plan } = useGetPlanExportQuery(
     { regionId: regionId ?? 0, date, planId },
-    { skip: !hasTickets || regionId == null },
+    { skip: !overview?.has_plan || regionId == null || !date },
   )
+  const metrics = getPlanMetrics(plan)
+  const planRows = getOverviewPlanRows(plan)
   const regionLabel = regionName ?? '—'
   // Гант и карта откроются на том же регионе, дне и версии плана.
   const planLink = {
@@ -123,64 +92,31 @@ export function DayOverviewWorkspace({
 
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col gap-4', className)}>
-      <AppPanel className="flex min-h-24 shrink-0 items-center gap-12 px-5 py-4">
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <h2 className="text-xl font-semibold leading-7 text-foreground">
-            {planning
-              ? 'Составляем план работ'
-              : planningError
-                ? 'План работ не составлен'
-                : hasTickets
-                  ? 'План работ составлен'
-                  : 'Создайте план работ'}
-          </h2>
-          {planning ? (
-            <p className="truncate text-sm leading-6 text-muted">
-              Распределяем заявки по инженерам
-              {planningSeconds != null ? ` — осталось ${formatWait(planningSeconds)}` : ''}
-            </p>
-          ) : planningError ? (
-            <p className="truncate text-sm leading-6 text-muted">{planningError}</p>
-          ) : hasTickets ? (
-            <p className="flex min-w-0 items-center text-sm leading-6 text-muted">
-              <span className="truncate">Расписание и маршруты инженеров доступны в</span>
-              <Link
-                to={planLink}
-                className="ms-1 inline-flex shrink-0 items-start font-medium text-foreground transition-colors hover:text-link"
-              >
-                плане работ
-                <RiArrowRightUpLine size={12} className="mt-0.5" />
-              </Link>
-            </p>
-          ) : (
-            <p className="truncate text-sm leading-6 text-muted">
-              Загрузите заявки для региона «{regionLabel}»
-            </p>
-          )}
-        </div>
-
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <div className="flex min-w-0 gap-4">
-            <SummaryCounter
-              value={overview?.tickets.assigned ?? 0}
-              total={overview?.tickets.total ?? 0}
-              label="заявок назначено"
-            />
-            <SummaryCounter
-              value={overview?.engineers.engaged ?? 0}
-              total={overview?.engineers.total ?? 0}
-              label="инженеров задействовано"
-            />
-          </div>
-          {overview?.distance_km != null &&
-          overview.travel_minutes != null &&
-          (overview.tickets.assigned ?? 0) > 0 ? (
-            <p className="truncate text-sm leading-6 text-muted">
-              В пути {Math.round(overview.travel_minutes)} мин · {overview.distance_km.toFixed(1)} км ·{' '}
-              {(overview.distance_km / (overview.tickets.assigned || 1)).toFixed(1)} км на заявку
-            </p>
+      <AppPanel className="shrink-0 px-5 py-5">
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <h2 className="text-xl font-semibold leading-7 text-foreground">Текущий план</h2>
+          {overview?.has_plan ? (
+            <Link
+              to={planLink}
+              className="inline-flex h-9 items-center rounded-lg bg-accent px-4 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent-hover"
+            >
+              Перейти к плану
+            </Link>
           ) : null}
         </div>
+        {overview?.has_plan ? (
+          <div className="grid grid-cols-3 gap-2">
+            <MetricCard value={metrics?.assigned ?? overview.tickets.assigned ?? 0} label="Заявок назначено" />
+            <MetricCard value={metrics?.unassigned ?? Math.max(0, overview.tickets.total - (overview.tickets.assigned ?? 0))} label="Заявки не назначено" />
+            <MetricCard value={metrics?.engaged ?? overview.engineers.engaged ?? 0} suffix={`из ${metrics?.engineers ?? overview.engineers.total}`} label="Инженеров задействовано" />
+            <MetricCard value={metrics?.averageTravelMinutes ?? 0} suffix="мин" label="Среднее время в пути" />
+            <MetricCard value={`${metrics?.averageLoad ?? 0}%`} label="Средняя загрузка" />
+          </div>
+        ) : (
+          <p className="py-4 text-sm leading-6 text-muted">
+            Загрузите заявки для региона «{regionLabel}», чтобы составить план
+          </p>
+        )}
       </AppPanel>
 
       <div className="flex min-h-0 flex-1 gap-4">
@@ -200,17 +136,13 @@ export function DayOverviewWorkspace({
           )}
         </AppPanel>
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+        {hasTickets ? (
           <AppPanel className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-            <EngineersPanel regionId={regionId} />
+            <DayPlanPreview rows={planRows} title="График" showLink={false} planLink={planLink} />
           </AppPanel>
-
-          {hasTickets ? (
-            <AppPanel className="flex h-[303px] min-w-0 shrink-0 flex-col overflow-hidden">
-              <DayPlanPreview rows={planRowsFromTickets(chartTickets)} planLink={planLink} />
-            </AppPanel>
-          ) : (
-            <AppPanel className="relative aspect-[515/208] w-full shrink-0 overflow-hidden">
+        ) : (
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+            <AppPanel className="relative min-h-0 w-full flex-1 overflow-hidden">
               <img
                 src={beesPromo}
                 alt="Наши пчелки распределят заявки — а ты станешь не нужен!"
@@ -218,8 +150,8 @@ export function DayOverviewWorkspace({
                 draggable={false}
               />
             </AppPanel>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   )

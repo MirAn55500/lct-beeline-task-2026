@@ -154,6 +154,8 @@ function PlanBars({
 type DayPlanPreviewProps = {
   className?: string
   rows?: PlanRow[]
+  title?: string
+  showLink?: boolean
   /** Куда ведёт «Перейти к плану» — Гант с тем же регионом, днём и версией. */
   planLink?: To
 }
@@ -161,6 +163,8 @@ type DayPlanPreviewProps = {
 export function DayPlanPreview({
   className,
   rows = [],
+  title = 'План работ',
+  showLink = true,
   planLink = routes.planGantt,
 }: DayPlanPreviewProps) {
   const { start, end } = useMemo(() => buildDayRange(rows), [rows])
@@ -170,7 +174,7 @@ export function DayPlanPreview({
     <div className={cn('flex min-h-0 w-full flex-1 flex-col', className)}>
       <div className="flex shrink-0 items-end gap-4 px-5 pt-5 pb-2">
         <h2 className="w-[136px] shrink-0 text-xl font-semibold leading-7 text-foreground">
-          План работ
+          {title}
         </h2>
         <TimeLabels start={start} end={end} labels={labels} />
       </div>
@@ -203,17 +207,19 @@ export function DayPlanPreview({
         </div>
       </ScrollShadow>
 
-      <div className="flex shrink-0 justify-end px-5 pt-2 pb-5">
-        <Link
-          to={planLink}
-          className="inline-flex h-9 cursor-pointer items-center gap-2 bg-accent px-4 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent-hover"
-          style={{ borderRadius: 8 }}
-        >
-          <RiCalendarScheduleLine size={16} className="shrink-0" />
-          Перейти к плану
-          <RiArrowRightLine size={16} className="shrink-0" />
-        </Link>
-      </div>
+      {showLink ? (
+        <div className="flex shrink-0 justify-end px-5 pt-2 pb-5">
+          <Link
+            to={planLink}
+            className="inline-flex h-9 cursor-pointer items-center gap-2 bg-accent px-4 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent-hover"
+            style={{ borderRadius: 8 }}
+          >
+            <RiCalendarScheduleLine size={16} className="shrink-0" />
+            Перейти к плану
+            <RiArrowRightLine size={16} className="shrink-0" />
+          </Link>
+        </div>
+      ) : null}
     </div>
   )
 }

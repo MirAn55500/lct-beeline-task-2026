@@ -24,6 +24,7 @@ import {
 } from '@/features/personnel'
 import {
   DayOverviewWorkspace,
+  PlanComparisonWorkspace,
   EngineersSidebar,
   PlanCompareDialog,
   PlanEventReport,
@@ -76,6 +77,16 @@ function OverviewPage() {
   return (
     <HomeAreaLayout>
       {(context) => <OverviewContent context={context} />}
+    </HomeAreaLayout>
+  )
+}
+
+function PlanComparisonPage() {
+  return (
+    <HomeAreaLayout>
+      {(context) => (
+        <PlanComparisonWorkspace regionId={context.regionId} date={context.date} />
+      )}
     </HomeAreaLayout>
   )
 }
@@ -442,6 +453,7 @@ export function AppRouter() {
       <Route path={routes.plan} element={<Navigate to={routes.planGantt} replace />} />
       <Route path={routes.planGantt} element={<PlanGanttPage />} />
       <Route path={routes.planMap} element={<PlanMapPage />} />
+      <Route path={routes.planComparison} element={<PlanComparisonPage />} />
 
       <Route path={routes.personnel} element={<PersonnelPage />} />
       <Route path={routes.config} element={<PlaceholderPage />} />
