@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy.orm import selectinload
 from sqlmodel import col, func, select
@@ -14,8 +14,10 @@ from modules.personnel.models.engineer_equipment import EngineerEquipment
 from modules.personnel.models.engineer_skill import EngineerSkill
 from modules.planning.models.assignment import Assignment
 from modules.planning.models.plan import Plan
+from modules.planning.models.replan_event import ReplanEvent
 from modules.planning.models.route import Route
 from modules.tickets.models.request import Request
+from modules.tickets.models.status_change import StatusChange
 
 
 class PlanningRepository:
@@ -212,6 +214,84 @@ class PlanningRepository:
         request.plan_start_time = request.plan_start_time + shift
         request.plan_end_time = request.plan_end_time + shift
         self._session.add(request)
+
+    async def travel_totals(self, plan_id: int) -> tuple[float, float]:
+        """Сумма минут в пути и километров по назначенным визитам плана."""
+        result = await self._session.exec(
+            select(
+                func.coalesce(func.sum(Assignment.travel_minutes), 0.0),
+                func.coalesce(func.sum(Assignment.distance_km), 0.0),
+            ).where(
+                Assignment.plan_id == plan_id,
+                col(Assignment.engineer_id).is_not(None),
+            )
+        )
+        minutes, km = result.one()
+        return float(minutes or 0), float(km or 0)
+
+    async def unavailable_cutoffs(self, day: date) -> dict[str, datetime]:
+        """Самый ранний момент недоступности инженера в этот день. Ключ — id инженера строкой."""
+        start = datetime.combine(day, time.min)
+        result = await self._session.exec(
+            select(ReplanEvent).where(
+                ReplanEvent.event_type == "engineer_unavailable",
+                ReplanEvent.event_time >= start,
+                ReplanEvent.event_time < start + timedelta(days=1),
+                col(ReplanEvent.engineer_id).is_not(None),
+            )
+        )
+        cutoffs: dict[str, datetime] = {}
+        for event in result.all():
+            if event.engineer_id is None:
+                continue
+            key = str(event.engineer_id)
+            moment = event.event_time
+            previous = cutoffs.get(key)
+            if previous is None or moment < previous:
+                cutoffs[key] = moment
+        return cutoffs
+
+    async def cancel_request(self, request_id: int, at: datetime) -> None:
+        request = (
+            await self._session.exec(
+                select(Request)
+                .where(Request.request_id == request_id)
+                .options(selectinload(Request.status))
+            )
+        ).first()
+        if request is None:
+            return
+        status = request.status.value.strip().lower() if request.status else ""
+        if status in {"cancelled", "отменена"}:
+            return
+        new_status_id = await self.ensure_dict(DictGroup.STATUS, "cancelled")
+        self._session.add(
+            StatusChange(
+                prev_status_id=request.status_id,
+                new_status_id=new_status_id,
+                request_id=request_id,
+                status_change_dt=at,
+            )
+        )
+        request.status_id = new_status_id
+        self._session.add(request)
+
+    async def add_replan_event(
+        self,
+        *,
+        event_type: str,
+        event_time: datetime,
+        request_id: int | None,
+        engineer_id: int | None,
+    ) -> None:
+        self._session.add(
+            ReplanEvent(
+                event_type=event_type,
+                event_time=event_time.replace(tzinfo=None),
+                request_id=request_id,
+                engineer_id=engineer_id,
+            )
+        )
 
     async def list_assignments(self, plan_id: int) -> list[Assignment]:
         result = await self._session.exec(

@@ -35,16 +35,12 @@ function Summary({ engineer, badgeClassName }: { engineer: GanttEngineer; badgeC
   return (
     <div className="flex w-[282px] shrink-0 items-center gap-2">
       <div className="relative size-10 shrink-0">
-        {engineer.avatarUrl ? (
-          <img src={engineer.avatarUrl} alt="" className="size-10 object-cover" style={{ borderRadius: 8 }} />
-        ) : (
-          <span
-            className="flex size-10 items-center justify-center bg-surface-tertiary text-xs leading-5 font-medium text-foreground"
-            style={{ borderRadius: 8 }}
-          >
-            {getInitials(engineer.name.replace(/^Бригада\s+/, ''))}
-          </span>
-        )}
+        <span
+          className="flex size-10 items-center justify-center bg-surface-tertiary text-xs leading-5 font-medium text-foreground"
+          style={{ borderRadius: 8 }}
+        >
+          {getInitials(engineer.name.replace(/^Бригада\s+/, ''))}
+        </span>
         <span
           title={TRANSPORT_LABEL[engineer.transport]}
           className={cn(

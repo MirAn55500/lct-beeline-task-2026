@@ -1,5 +1,6 @@
-from datetime import date, datetime
+from datetime import date, datetime, time
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -34,11 +35,26 @@ class Distribution(StrEnum):
     EFFICIENT = "efficient"
 
 
+class ComparisonLine(BaseModel):
+    label: str
+    baseline: str
+    optimized: str
+    verdict: str
+
+
+class PlanComparison(BaseModel):
+    """Базовый алгоритм против сохранённого плана. Критерий — в `summary`."""
+
+    summary: str
+    lines: list[ComparisonLine] = Field(default_factory=list)
+
+
 class RecalculateResponse(BaseModel):
     plan_id: int
     version: int
     assigned: int
     unassigned: int
+    comparison: PlanComparison | None = None
 
 
 class PlanVersionResponse(BaseModel):
@@ -61,6 +77,8 @@ class DayOverviewResponse(BaseModel):
     planning_eta_seconds: int | None = None
     """Примерно через сколько секунд фоновый расчёт закончится (с очередью других дней)."""
     """Почему последний фоновый расчёт не удался."""
+    travel_minutes: float | None = None
+    distance_km: float | None = None
 
 
 # --- План дня для карты и Ганта: та же форма, что у выгрузки планировщика в моках
@@ -103,6 +121,7 @@ class PlanVisitExport(BaseModel):
     waitingMinutes: float
     idleMinutes: float
     transit: list[str] = Field(default_factory=list)
+    explanation: str = ""
 
 
 class PlanRouteExport(BaseModel):
@@ -187,3 +206,27 @@ class MoveResponse(BaseModel):
     released: list[str] = Field(default_factory=list)
     planId: int | None = None
     version: int | None = None
+
+
+class PlanEventType(StrEnum):
+    CANCEL_REQUEST = "cancel_request"
+    ENGINEER_UNAVAILABLE = "engineer_unavailable"
+
+
+class PlanEventRequest(BaseModel):
+    type: Literal["cancel_request", "engineer_unavailable"]
+    request_id: int | None = None
+    engineer_id: int | None = None
+    at: time | None = Field(
+        default=None,
+        description="Местное время события. Без него — 12:00 дня плана",
+    )
+
+
+class PlanEventResponse(BaseModel):
+    plan_id: int
+    version: int
+    assigned: int
+    unassigned: int
+    summary: str
+    warnings: list[str] = Field(default_factory=list)

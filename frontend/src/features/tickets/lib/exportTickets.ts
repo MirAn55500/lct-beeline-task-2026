@@ -1,5 +1,8 @@
 import { toast } from '@heroui/react'
 
+import { MOCK_MAP_REGIONS, PLANS } from '@/features/planning/mocks'
+import { downloadTextFile } from '@/shared/lib'
+
 import type { Ticket } from '../api'
 
 export type TicketsExportFormat = 'csv' | 'json'
@@ -53,6 +56,37 @@ function toRow(ticket: Ticket): ExportRow {
   }
 }
 
+/** Заявки мокового плана региона — для выгрузки, пока backend не отвечает. */
+export function mockTickets(regionId: number, date: string): Ticket[] {
+  const index = MOCK_MAP_REGIONS.findIndex((item) => item.id === regionId)
+  const plan = PLANS[index]
+  if (!plan || plan.date !== date) return []
+  const engineerName = new Map(plan.engineers.map((item) => [item.id, item.name]))
+  const assignee = new Map<string, string>()
+  for (const route of plan.routes) {
+    const name = engineerName.get(route.engineerId) ?? ''
+    for (const visit of route.visits) assignee.set(visit.requestId, name)
+  }
+  return plan.requests.map((request, order) => {
+    const engineer = assignee.get(request.id) ?? null
+    return {
+      id: order + 1,
+      number: request.id,
+      category: request.type,
+      reason: null,
+      engineer,
+      assigned: engineer != null,
+      window: '',
+      window_start: request.window[0],
+      window_end: request.window[1],
+      address: request.address,
+      status: engineer != null ? 'Назначена' : 'Не назначена',
+      hd: '',
+      district: '',
+    }
+  })
+}
+
 function csvCell(value: string) {
   return /[";\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
 }
@@ -85,11 +119,6 @@ export function downloadTickets(
     return
   }
   const { body, type } = serialize(tickets, format)
-  const url = URL.createObjectURL(new Blob([body], { type: `${type};charset=utf-8` }))
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `${fileName}.${format}`
-  link.click()
-  URL.revokeObjectURL(url)
+  downloadTextFile(body, type, `${fileName}.${format}`)
   toast.success(format === 'csv' ? 'CSV скачан' : 'JSON скачан')
 }

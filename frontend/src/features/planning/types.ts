@@ -9,11 +9,35 @@ export type PlanRebuildLevel = RemakeLevel
 /** Распределение: Равномерное / Эффективное. */
 export type PlanDistribution = 'even' | 'efficient'
 
+export type ComparisonLine = {
+  label: string
+  baseline: string
+  optimized: string
+  verdict: string
+}
+
+export type PlanComparison = {
+  summary: string
+  lines: ComparisonLine[]
+}
+
 export type RecalculateResult = {
   plan_id: number
   version: number
   assigned: number
   unassigned: number
+  comparison?: PlanComparison | null
+}
+
+export type PlanEventType = 'cancel_request' | 'engineer_unavailable'
+
+export type PlanEventResult = {
+  plan_id: number
+  version: number
+  assigned: number
+  unassigned: number
+  summary: string
+  warnings: string[]
 }
 
 export type PlanId = number
@@ -45,4 +69,6 @@ export type DayOverview = {
   planning_error?: string | null
   /** Примерно через сколько секунд фоновый расчёт закончится. */
   planning_eta_seconds?: number | null
+  travel_minutes?: number | null
+  distance_km?: number | null
 }

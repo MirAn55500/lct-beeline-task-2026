@@ -1,9 +1,10 @@
+import { toast } from '@heroui/react'
 import { skipToken } from '@reduxjs/toolkit/query/react'
 import { useMemo, useState } from 'react'
 
 import type { EngineerRoute, MapEngineer, RouteStop, UnassignedTicket } from '../mapTypes'
 import { buildMapDataset, getMapDataset, type MapDataset } from '../mocks'
-import { useGetPlanExportQuery } from '../planApi'
+import { useGetPlanExportQuery, useMovePlanRequestMutation } from '../planApi'
 import { isOfflineError } from './offline'
 import { straightLeg } from './routeGeometry'
 import { estimateMinutes } from './routeSteps'
@@ -39,9 +40,14 @@ function mockDatasetFor(regionId: number | null, date: string): MapBoardDataset 
  * Состояние страницы карты: выбор и наведение, маршруты и неназначенные заявки.
  * План — из `/api/planning/plan` (выбранная версия, без неё — последняя), маршруты по улицам —
  * его geometry. Без плана на день карта пустая, как «work-area - map-layout»; без backend — моки.
- * Ручное добавление заявки в маршрут пока локальное: мутации перепланирования в API ещё нет.
+ * Ручное добавление заявки сохраняется ходом планировщика. Без backend остаётся локальным.
  */
-export function usePlanMapBoard(regionId: number | null, date: string, planId: number | null = null) {
+export function usePlanMapBoard(
+  regionId: number | null,
+  date: string,
+  planId: number | null = null,
+  options?: { onSaved?: (planId: number) => void },
+) {
   const query = useGetPlanExportQuery(regionId != null ? { regionId, date, planId } : skipToken)
   const offline = isOfflineError(query.isError, query.error)
   // Пока грузится другая версия, держим прежние маршруты, а не мигаем пустой картой.
@@ -61,6 +67,7 @@ export function usePlanMapBoard(regionId: number | null, date: string, planId: n
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [activeStopId, setActiveStopId] = useState<string | null>(null)
   const [pendingDrop, setPendingDrop] = useState<PendingDrop | null>(null)
+  const [moveRequest, { isLoading: isSavingDrop }] = useMovePlanRequestMutation()
 
   // Другой регион, день или версия — другой план: сбрасываем всё прямо в рендере, без лишнего кадра со старыми данными.
   if (loadedKey !== viewKey) {
@@ -94,6 +101,33 @@ export function usePlanMapBoard(regionId: number | null, date: string, planId: n
     const { ticket, engineerId, index } = pendingDrop
     const engineer = engineers.find((item) => item.id === engineerId)
     if (!engineer) return
+    setPendingDrop(null)
+
+    if (plan && !offline) {
+      void moveRequest({
+        planId: plan.planId,
+        requestId: ticket.id,
+        engineerId,
+        position: index,
+        commit: true,
+      })
+        .unwrap()
+        .then((response) => {
+          if (!response.ok) {
+            toast.danger('Сюда не встанет', { description: response.reason })
+            return
+          }
+          if (response.planId != null) options?.onSaved?.(response.planId)
+          toast.success('Маршрут обновлён')
+        })
+        .catch((error: unknown) => {
+          const detail = (error as { data?: { detail?: unknown } } | null)?.data?.detail
+          toast.danger('Не удалось сохранить маршрут', {
+            description: typeof detail === 'string' ? detail : 'Текущий план остался без изменений',
+          })
+        })
+      return
+    }
 
     // Пока планировщик не пересчитал путь, новые участки — прямые (серый пунктир).
     setRoutes((current) =>
@@ -175,6 +209,7 @@ export function usePlanMapBoard(regionId: number | null, date: string, planId: n
     hoveredId,
     activeStopId,
     pendingDrop,
+    isSavingDrop,
     select,
     hover: setHoveredId,
     toggleStop,

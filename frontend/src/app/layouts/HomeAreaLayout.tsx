@@ -10,10 +10,15 @@ import { useSearchParams } from 'react-router'
 
 import { useGetRegionsQuery } from '@/features/catalogs'
 import {
+  MOCK_MAP_DATE,
+  MOCK_MAP_REGIONS,
+  PlanCompareDialog,
   PlanRebuildDialog,
   useDayOverview,
   useRecalculatePlanMutation,
 } from '@/features/planning'
+import { isOfflineError } from '@/features/planning/lib/offline'
+import type { PlanComparison } from '@/features/planning'
 import { TicketsUploadDialog, useTicketsExport } from '@/features/tickets'
 import { ASIDE_WIDTH_CLASS, cn } from '@/shared/lib'
 import { AppNav, AppPanel, BrandBar, ContextHeader } from '@/shared/ui'
@@ -42,15 +47,22 @@ function readDateParam(raw: string | null): CalendarDate | null {
 
 export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
   const [params, setParams] = useSearchParams()
-  const { data: regions = [], isLoading, isError } = useGetRegionsQuery()
+  const regionsQuery = useGetRegionsQuery()
+  const offline = isOfflineError(regionsQuery.isError, regionsQuery.error)
+  const regions = offline ? MOCK_MAP_REGIONS : (regionsQuery.data ?? [])
+  const isLoading = regionsQuery.isLoading
+  const isError = regionsQuery.isError && !offline
   const [regionId, setRegionId] = useState<number | null>(null)
   const [planId, setPlanId] = useState<number | null>(null)
   const [recalculatePlan, { isLoading: isRecalculating }] = useRecalculatePlanMutation()
   const exportTickets = useTicketsExport()
   const [uploadOpen, setUploadOpen] = useState(false)
   const [rebuildOpen, setRebuildOpen] = useState(false)
+  const [comparison, setComparison] = useState<PlanComparison | null>(null)
 
-  const date = readDateParam(params.get('date')) ?? today(getLocalTimeZone())
+  const date =
+    readDateParam(params.get('date')) ??
+    (offline ? parseDate(MOCK_MAP_DATE) : today(getLocalTimeZone()))
 
   const setDate = (next: CalendarDate) => {
     setPlanId(null)
@@ -141,7 +153,7 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
               ? undefined
               : (format) =>
                   exportTickets(
-                    { regionId, date: date.toString(), planId: selectedPlanId },
+                    { regionId, date: date.toString(), planId: selectedPlanId, offline },
                     format,
                     `Заявки_${regionName ?? regionId}_${date.toString()}`,
                   )
@@ -172,11 +184,15 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
               date: date.toString(),
               remakeLevel: options.level,
               distribution: options.distribution,
+              compare: options.distribution === 'efficient',
             }).unwrap()
             setPlanId(null)
-            toast.success(`План №${result.version} составлен`, {
-              description: `Назначено ${result.assigned}, без инженера: ${result.unassigned}`,
-            })
+            if (result.comparison) setComparison(result.comparison)
+            else {
+              toast.success(`План №${result.version} составлен`, {
+                description: `Назначено ${result.assigned}, без инженера: ${result.unassigned}`,
+              })
+            }
           } catch (error) {
             const description =
               error &&
@@ -192,6 +208,7 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
           }
         }}
       />
+      <PlanCompareDialog comparison={comparison} onClose={() => setComparison(null)} />
     </div>
   )
 }

@@ -15,6 +15,8 @@ from modules.planning.schemas import (
     PlanExportResponse,
     PlanSlotsResponse,
     RecalculateResponse,
+    PlanEventRequest,
+    PlanEventResponse,
     RemakeLevel,
 )
 from modules.planning.service import PlanningService
@@ -51,6 +53,7 @@ async def recalculate(
     date: Annotated[date, Query()],
     remake_level: Annotated[RemakeLevel, Query()] = RemakeLevel.FREE,
     distribution: Annotated[Distribution, Query()] = Distribution.EFFICIENT,
+    compare: Annotated[bool, Query()] = False,
 ) -> RecalculateResponse:
     """Пересчёт плана: заявки и инженеры региона на дату → `planner.plan`.
 
@@ -66,7 +69,26 @@ async def recalculate(
         date,
         remake_level=remake_level,
         distribution=distribution,
+        compare=compare,
     )
+
+
+@router.post("/event", response_model=PlanEventResponse)
+async def apply_plan_event(
+    service: PlanningServiceDep,
+    body: PlanEventRequest,
+    region_id: Annotated[int, Query(ge=1)],
+    date: Annotated[date, Query()],
+) -> PlanEventResponse:
+    """Событие дня: отмена заявки или инженер недоступен с указанного времени.
+
+    Считает остаток дня через `planner.replan` и возвращает, что изменилось.
+    Пример: `POST /api/planning/event?region_id=1&date=2026-08-17`
+    тело `{"type":"engineer_unavailable","engineer_id":6,"at":"12:00"}`.
+    """
+    if background.status(region_id, date)[0]:
+        raise ConflictError("План уже считается — дождитесь окончания")
+    return await service.apply_event(region_id, date, body)
 
 
 @router.get("/plan", response_model=PlanExportResponse)

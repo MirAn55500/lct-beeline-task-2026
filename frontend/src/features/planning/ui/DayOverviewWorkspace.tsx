@@ -123,7 +123,7 @@ export function DayOverviewWorkspace({
 
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col gap-4', className)}>
-      <AppPanel className="flex h-24 shrink-0 items-center gap-12 px-5">
+      <AppPanel className="flex min-h-24 shrink-0 items-center gap-12 px-5 py-4">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <h2 className="text-xl font-semibold leading-7 text-foreground">
             {planning
@@ -159,17 +159,27 @@ export function DayOverviewWorkspace({
           )}
         </div>
 
-        <div className="flex min-w-0 flex-1 gap-4">
-          <SummaryCounter
-            value={overview?.tickets.assigned ?? 0}
-            total={overview?.tickets.total ?? 0}
-            label="заявок назначено"
-          />
-          <SummaryCounter
-            value={overview?.engineers.engaged ?? 0}
-            total={overview?.engineers.total ?? 0}
-            label="инженеров задействовано"
-          />
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex min-w-0 gap-4">
+            <SummaryCounter
+              value={overview?.tickets.assigned ?? 0}
+              total={overview?.tickets.total ?? 0}
+              label="заявок назначено"
+            />
+            <SummaryCounter
+              value={overview?.engineers.engaged ?? 0}
+              total={overview?.engineers.total ?? 0}
+              label="инженеров задействовано"
+            />
+          </div>
+          {overview?.distance_km != null &&
+          overview.travel_minutes != null &&
+          (overview.tickets.assigned ?? 0) > 0 ? (
+            <p className="truncate text-sm leading-6 text-muted">
+              В пути {Math.round(overview.travel_minutes)} мин · {overview.distance_km.toFixed(1)} км ·{' '}
+              {(overview.distance_km / (overview.tickets.assigned || 1)).toFixed(1)} км на заявку
+            </p>
+          ) : null}
         </div>
       </AppPanel>
 

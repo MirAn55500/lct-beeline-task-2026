@@ -103,11 +103,19 @@ export function usePlanContext() {
     }
     if (regionId == null) return
     try {
-      const result = await recalculatePlan({ regionId, date: date.toString(), ...options }).unwrap()
+      const result = await recalculatePlan({
+        regionId,
+        date: date.toString(),
+        ...options,
+        compare: options.distribution === 'efficient',
+      }).unwrap()
       update({ plan: String(result.plan_id) })
-      toast.success(`План №${result.version} составлен`, {
-        description: `Назначено ${result.assigned}, без инженера: ${result.unassigned}`,
-      })
+      if (!result.comparison) {
+        toast.success(`План №${result.version} составлен`, {
+          description: `Назначено ${result.assigned}, без инженера: ${result.unassigned}`,
+        })
+      }
+      return result
     } catch (error) {
       // Причину backend (например, «в этот день бригада не работает») показываем как есть
       const detail = (error as { data?: { detail?: unknown } } | null)?.data?.detail

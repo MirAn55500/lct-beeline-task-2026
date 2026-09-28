@@ -59,6 +59,7 @@ type RouteDetailsPanelProps = {
   onAddTicket: () => void
   /** «Изменить параметры маршрута» — окно с транспортом и вариантами маршрута. */
   onEditParams: () => void
+  onCancelStop?: (requestId: string) => void
   /** Позиция вставки при перетаскивании заявки, null — не тащат. */
   dropIndex: number | null
   /** Список для хит-теста перетаскивания: элементы с data-stop-index. */
@@ -72,10 +73,12 @@ export function RouteDetailsPanel({
   onToggleStop,
   onAddTicket,
   onEditParams,
+  onCancelStop,
   dropIndex,
   listRef,
 }: RouteDetailsPanelProps) {
   const stops = route.stops
+  const distanceKm = stops.reduce((sum, stop) => sum + (stop.distanceKm ?? 0), 0)
 
   return (
     <div
@@ -93,6 +96,9 @@ export function RouteDetailsPanel({
               с {engineer.routeFrom} по {engineer.routeTo}
             </span>
           </h2>
+          {distanceKm > 0 ? (
+            <p className="text-sm leading-5 text-muted">{distanceKm.toFixed(1)} км по маршруту</p>
+          ) : null}
           <button
             type="button"
             onClick={onEditParams}
@@ -167,6 +173,11 @@ export function RouteDetailsPanel({
                   {expanded ? (
                     <span className="flex flex-col gap-2">
                       <TicketTags ticket={stop} />
+                      {stop.distanceKm != null ? (
+                        <span className="text-sm leading-5 text-muted">
+                          {stop.travelMinutes} мин · {stop.distanceKm.toFixed(1)} км
+                        </span>
+                      ) : null}
                       <span
                         className="flex flex-wrap items-center gap-1"
                         title={stop.transit.join('\n') || undefined}
@@ -183,6 +194,22 @@ export function RouteDetailsPanel({
                     </span>
                   ) : null}
                 </button>
+                {expanded && (stop.explanation || onCancelStop) ? (
+                  <div className="flex flex-col gap-2 px-3 pb-3">
+                    {stop.explanation ? (
+                      <p className="text-sm leading-5 text-foreground">{stop.explanation}</p>
+                    ) : null}
+                    {onCancelStop ? (
+                      <button
+                        type="button"
+                        onClick={() => onCancelStop(stop.id)}
+                        className="w-fit cursor-pointer text-sm leading-5 font-medium text-danger"
+                      >
+                        Отменить заявку
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             )
           })}

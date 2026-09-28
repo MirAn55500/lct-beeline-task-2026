@@ -14,10 +14,6 @@ import type {
   UnassignedReason,
   UnassignedTicket,
 } from '../mapTypes'
-import annaSmirnova from './avatars/anna-smirnova.jpg'
-import ivanPetrov from './avatars/ivan-petrov.jpg'
-import pavelKozlov from './avatars/pavel-kozlov.jpg'
-import sashaBelyi from './avatars/sasha-belyi.jpg'
 import planEast from './plan-east.json'
 import planSoutheast from './plan-southeast.json'
 import planSouthcentral from './plan-southcentral.json'
@@ -64,6 +60,7 @@ export type PlanExport = {
       /** Есть в ответе backend; в старых выгрузках — нет, берём от выезда до начала работ. */
       travelMinutes?: number
       distanceKm?: number
+      explanation?: string
       transit: string[]
     }[]
   }[]
@@ -138,9 +135,6 @@ const ROUTE_COLORS = [
   '#eab308',
 ]
 
-// Фото из макета — у первых инженеров, остальным хватит инициалов.
-const AVATARS = [sashaBelyi, annaSmirnova, pavelKozlov, ivanPetrov]
-
 // В выгрузке у старта только координаты; адрес базы «Востока» — из макета.
 const START_ADDRESS: Record<string, string> = {
   east: 'ул. Юных Ленинцев, д. 83, стр. 4',
@@ -178,11 +172,8 @@ export function shortAddress(address: string) {
     .replace(/\.(?=[А-ЯЁA-Z0-9])/g, '. ')
 }
 
-/**
- * Всё для карты из одного плана — моковой выгрузки или ответа `/api/planning/plan`.
- * Фото из макета — только у моков: реальным инженерам хватит инициалов.
- */
-export function buildMapDataset(plan: PlanExport, { mock = false }: { mock?: boolean } = {}): MapDataset {
+/** Всё для карты из одного плана — моковой выгрузки или ответа `/api/planning/plan`. */
+export function buildMapDataset(plan: PlanExport): MapDataset {
   const requestById = new Map(plan.requests.map((request) => [request.id, request]))
   const routeByEngineer = new Map(plan.routes.map((route) => [route.engineerId, route]))
 
@@ -211,7 +202,6 @@ export function buildMapDataset(plan: PlanExport, { mock = false }: { mock?: boo
     return {
       id: engineer.id,
       name: engineer.name,
-      avatarUrl: mock ? AVATARS[index] : undefined,
       transport: TRANSPORT[engineer.transport],
       qualification: LEVEL_LABEL[level ?? ''] ?? 'Инженер',
       routeFrom: clock(route?.startAt ?? intervals[0]?.[0]),
@@ -236,6 +226,7 @@ export function buildMapDataset(plan: PlanExport, { mock = false }: { mock?: boo
         transit: visit.transit,
         travelMinutes: visit.travelMinutes ?? minutesBetween(visit.departureAt, visit.arrivalAt ?? visit.serviceStartAt),
         distanceKm: visit.distanceKm,
+        explanation: visit.explanation,
       })),
     }
   })
@@ -251,7 +242,7 @@ export function buildMapDataset(plan: PlanExport, { mock = false }: { mock?: boo
   return { date: plan.date, engineers, routes, unassigned }
 }
 
-const DATASETS = new Map(MOCK_MAP_REGIONS.map((region, index) => [region.id, buildMapDataset(PLANS[index]!, { mock: true })]))
+const DATASETS = new Map(MOCK_MAP_REGIONS.map((region, index) => [region.id, buildMapDataset(PLANS[index]!)]))
 
 /** План региона на моках; неизвестный регион — первый из списка. */
 export function getMapDataset(regionId: number | null): MapDataset {

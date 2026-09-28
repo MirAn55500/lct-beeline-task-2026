@@ -6,6 +6,8 @@ import type { ModuleHealth } from '@/shared/types'
 import type {
   DayOverview,
   PlanDistribution,
+  PlanEventResult,
+  PlanEventType,
   RecalculateResult,
   RemakeLevel,
 } from './types'
@@ -71,9 +73,10 @@ export const planningApi = baseApi.injectEndpoints({
         /** @deprecated используйте remakeLevel */
         level?: RemakeLevel
         distribution?: PlanDistribution
+        compare?: boolean
       }
     >({
-      query: ({ regionId, date, remakeLevel, level, distribution }) => ({
+      query: ({ regionId, date, remakeLevel, level, distribution, compare }) => ({
         url: '/api/planning/recalculate',
         method: 'POST',
         params: {
@@ -83,6 +86,31 @@ export const planningApi = baseApi.injectEndpoints({
             ? { remake_level: remakeLevel ?? level }
             : {}),
           ...(distribution != null ? { distribution } : {}),
+          ...(compare ? { compare: true } : {}),
+        },
+      }),
+      invalidatesTags: ['Plan', 'Ticket'],
+    }),
+    applyPlanEvent: build.mutation<
+      PlanEventResult,
+      {
+        regionId: number
+        date: string
+        type: PlanEventType
+        requestId?: number
+        engineerId?: number
+        at?: string
+      }
+    >({
+      query: ({ regionId, date, type, requestId, engineerId, at }) => ({
+        url: '/api/planning/event',
+        method: 'POST',
+        params: { region_id: regionId, date },
+        body: {
+          type,
+          ...(requestId != null ? { request_id: requestId } : {}),
+          ...(engineerId != null ? { engineer_id: engineerId } : {}),
+          ...(at != null ? { at } : {}),
         },
       }),
       invalidatesTags: ['Plan', 'Ticket'],
@@ -94,4 +122,5 @@ export const {
   useGetDayOverviewQuery,
   useGetPlanningHealthQuery,
   useRecalculatePlanMutation,
+  useApplyPlanEventMutation,
 } = planningApi

@@ -378,11 +378,18 @@ class Board:
 
         outside = False
         shift = 0.0
-        if start is None:
+        if start is None and position is None:
             self._release(request_id)
             best = target.best_insertion(request)
             if best is None or not target.insert_checked(request, best[1]):
                 return MoveOutcome(False, f"У {target.engineer.name} нет места для заявки в окне клиента")
+        elif start is None:
+            self._release(request_id)
+            if not target.insert_checked(request, position):
+                return MoveOutcome(
+                    False,
+                    f"У {target.engineer.name} нет места для заявки в этой точке маршрута",
+                )
         else:
             if position is None:
                 position = max(

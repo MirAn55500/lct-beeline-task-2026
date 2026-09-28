@@ -1,5 +1,7 @@
 import { toast } from '@heroui/react'
 
+import { downloadTextFile } from '@/shared/lib'
+
 import {
   QUALIFICATION_LABEL,
   SKILL_LABEL,
@@ -94,11 +96,6 @@ export function downloadEngineers(
     return
   }
   const { body, type } = serialize(engineers, format)
-  const url = URL.createObjectURL(new Blob([body], { type: `${type};charset=utf-8` }))
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `${fileName}.${format}`
-  link.click()
-  URL.revokeObjectURL(url)
+  downloadTextFile(body, type, `${fileName}.${format}`)
   toast.success(format === 'csv' ? 'CSV скачан' : 'JSON скачан')
 }

@@ -7,7 +7,9 @@ export {
 export type {
   AssignmentId,
   DayOverview,
+  PlanComparison,
   PlanDistribution,
+  PlanEventResult,
   PlanId,
   PlanRebuildLevel,
   PlanVersion,
@@ -16,6 +18,8 @@ export type {
 export { DayOverviewWorkspace } from './ui/DayOverviewWorkspace'
 export { RemakePlanModal } from './ui/RemakePlanModal'
 export { PlanRebuildDialog } from './ui/PlanRebuildDialog'
+export { PlanCompareDialog, PlanEventReport, UnavailableDialog } from './ui/PlanDefenseDialogs'
+export { useApplyPlanEventMutation } from './api'
 export { usePlanGanttBoard } from './lib/usePlanGanttBoard'
 export { useDayOverview } from './lib/useDayOverview'
 export { usePlanMapBoard } from './lib/usePlanMapBoard'

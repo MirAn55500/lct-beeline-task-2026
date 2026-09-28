@@ -1,7 +1,7 @@
 import asyncio
 from collections.abc import Iterable
 from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -21,6 +21,7 @@ from modules.planning.scenario_builder import (
     route_legs,
     build_scenario,
     reason_index,
+    restrict_availability,
     run_plan,
 )
 from modules.planning.schemas import (
@@ -39,14 +40,20 @@ from modules.planning.schemas import (
     DayOverviewResponse,
     Distribution,
     EngineersCounter,
+    PlanComparison,
+    ComparisonLine,
+    PlanEventRequest,
+    PlanEventResponse,
     PlanVersionResponse,
     RecalculateResponse,
     RemakeLevel,
 )
 from planner import Algorithm
 from planner.dispatch import Board, MoveOutcome, StoredVisit
-from planner.enums import ReasonCode, ReplanScope
-from planner.models import Scenario
+from planner.enums import EventType, ReasonCode, ReplanScope
+from planner.metrics import compare as compare_plans
+from planner.models import ReplanEvent, Scenario
+from planner.replan import replan
 from planner.result import PlanResult
 
 _REMAKE_TO_SCOPE = {
@@ -120,6 +127,7 @@ class PlanningService:
 
         assigned = await self._repo.count_assigned_requests(plan.plan_id, region_id)
         engaged = await self._repo.count_engaged_engineers(plan.plan_id, region_id)
+        travel_minutes, distance_km = await self._repo.travel_totals(plan.plan_id)
 
         return DayOverviewResponse(
             plan_id=plan.plan_id,
@@ -132,6 +140,8 @@ class PlanningService:
             planning=planning,
             planning_error=planning_error,
             planning_eta_seconds=planning_eta,
+            travel_minutes=round(travel_minutes, 1),
+            distance_km=round(distance_km, 1),
         )
 
     async def _scenario(self, region_id: int, day: date):
@@ -159,6 +169,7 @@ class PlanningService:
             requests=requests,
             engineers=engineers,
         )
+        scenario = restrict_availability(scenario, await self._repo.unavailable_cutoffs(day))
         if not scenario.requests:
             raise AppError("Нет открытых заявок для расчёта")
         self._rows = (requests, engineers)
@@ -172,6 +183,7 @@ class PlanningService:
         remake_level: RemakeLevel = RemakeLevel.FREE,
         distribution: Distribution = Distribution.EFFICIENT,
         fresh: Iterable[int] = (),
+        compare: bool = False,
     ) -> RecalculateResponse:
         """Новая версия плана дня.
 
@@ -192,6 +204,22 @@ class PlanningService:
             result = await self._extend(previous.plan_id or 0, day, scenario, profiles, fresh, remake_level)
         if result is None:
             result = await asyncio.to_thread(run_plan, scenario, algorithm, profiles)
+        comparison = None
+        if compare and algorithm is Algorithm.OPTIMIZED:
+            baseline = await asyncio.to_thread(run_plan, scenario, Algorithm.BASELINE, profiles)
+            comparison = _comparison(compare_plans(baseline, result))
+        plan, assigned, unassigned = await self._persist(
+            region_id, day, scenario, result, transport_by_engineer
+        )
+        return RecalculateResponse(
+            plan_id=plan.plan_id or 0,
+            version=plan.version,
+            assigned=assigned,
+            unassigned=unassigned,
+            comparison=comparison,
+        )
+
+    async def _persist(self, region_id: int, day: date, scenario, result, transport_by_engineer):
         reasons = await self._repo.ensure_unassigned_reasons()
         rows, assigned, unassigned = assignments_from_result(
             result,
@@ -199,7 +227,7 @@ class PlanningService:
             reason_by_code=reason_index(reasons),
             offset_hours=scenario.settings.timezone_offset_hours,
         )
-
+        previous = await self._repo.find_latest_plan(region_id, day)
         version = (previous.version + 1) if previous is not None else 1
         requests, engineers = self._rows
         plan = await self._repo.save_plan(
@@ -213,17 +241,79 @@ class PlanningService:
                 address_of={r.request_id: r.address_id for r in requests if r.request_id is not None},
                 office_of={
                     e.engineer_id: e.brigade.office_address_id
-                    for e in engineers if e.engineer_id is not None and e.brigade is not None
+                    for e in engineers
+                    if e.engineer_id is not None and e.brigade is not None
                 },
                 transport_of=transport_by_engineer,
                 offset_hours=scenario.settings.timezone_offset_hours,
             ),
         )
-        return RecalculateResponse(
+        if previous is not None and previous.plan_id is not None:
+            boards.drop(previous.plan_id)
+        return plan, assigned, unassigned
+
+    async def apply_event(
+        self, region_id: int, day: date, body: PlanEventRequest
+    ) -> PlanEventResponse:
+        """Отмена заявки или недоступность инженера: ремонт остатка дня и разница с прошлым планом."""
+        previous_plan = await self._repo.find_latest_plan(region_id, day)
+        if previous_plan is None or previous_plan.plan_id is None:
+            raise AppError("Сначала составьте план на этот день")
+        moment = datetime.combine(day, body.at or time(12, 0), tzinfo=timezone(timedelta(hours=3)))
+        scenario, transport_by_engineer = await self._scenario(region_id, day)
+        scenario.settings.replan_scope = ReplanScope.HIGH
+
+        if body.type == "cancel_request":
+            if body.request_id is None:
+                raise AppError("Для отмены нужна заявка")
+            if str(body.request_id) not in {request.id for request in scenario.requests}:
+                raise AppError("Этой заявки нет среди открытых на выбранный день")
+            event = ReplanEvent(
+                type=EventType.CANCEL_REQUEST,
+                at=moment,
+                request_id=str(body.request_id),
+            )
+        else:
+            if body.engineer_id is None:
+                raise AppError("Для недоступности нужен инженер")
+            if str(body.engineer_id) not in {engineer.id for engineer in scenario.engineers}:
+                raise AppError("Этого инженера нет в расчёте на выбранный день")
+            event = ReplanEvent(
+                type=EventType.ENGINEER_UNAVAILABLE,
+                at=moment,
+                engineer_id=str(body.engineer_id),
+            )
+
+        boards.drop(previous_plan.plan_id)
+        entry = await self._open_board(previous_plan.plan_id)
+        entry.scenario.settings.replan_scope = ReplanScope.HIGH
+
+        def run():
+            with entry.lock:
+                previous = entry.board.result(plan_id=str(previous_plan.plan_id))
+                repaired = replan(previous, entry.scenario, event, travel=entry.travel)
+                return finish_plan(entry.scenario, repaired, entry.routing, entry.travel)
+
+        result = await asyncio.to_thread(run)
+        if body.type == "cancel_request" and body.request_id is not None:
+            await self._repo.cancel_request(body.request_id, moment.replace(tzinfo=None))
+        await self._repo.add_replan_event(
+            event_type=body.type,
+            event_time=moment,
+            request_id=body.request_id,
+            engineer_id=body.engineer_id,
+        )
+        plan, assigned, unassigned = await self._persist(
+            region_id, day, entry.scenario, result, transport_by_engineer
+        )
+        summary = result.diff.summary if result.diff is not None else "План пересчитан"
+        return PlanEventResponse(
             plan_id=plan.plan_id or 0,
             version=plan.version,
             assigned=assigned,
             unassigned=unassigned,
+            summary=summary,
+            warnings=list(result.warnings),
         )
 
     async def _extend(
@@ -431,6 +521,7 @@ class PlanningService:
                         waitingMinutes=r.waiting_minutes or 0.0,
                         idleMinutes=r.idle_minutes or 0.0,
                         geometryRange=ranges[i] if real else None,
+                        explanation=r.explanation or "",
                         transit=[
                             leg.get("title", "")
                             for leg in (paths.get(r.assignment_id) or {}).get("transit", [])
@@ -473,6 +564,9 @@ class PlanningService:
             region_name=region.region_name if region else "",
             requests=requests,
             engineers=engineers,
+        )
+        scenario = restrict_availability(
+            scenario, await self._repo.unavailable_cutoffs(plan.date)
         )
         zone = timezone(timedelta(hours=scenario.settings.timezone_offset_hours))
         rows = await self._repo.list_assignments(plan_id)
@@ -642,3 +736,29 @@ class PlanningService:
             ],
             released=list(outcome.released),
         )
+
+
+_COMPARE_LINES = (
+    ("assigned_count", "Назначено заявок", True),
+    ("used_engineer_count", "Инженеров", True),
+    ("total_travel_minutes", "Минут в пути", True),
+    ("total_distance_km", "Пробег, км", False),
+    ("distance_per_assigned_km", "Км на заявку", False),
+)
+
+
+def _comparison(raw: dict) -> PlanComparison:
+    lines: list[ComparisonLine] = []
+    metrics = raw["metrics"]
+    for key, label, whole in _COMPARE_LINES:
+        item = metrics[key]
+        render = (lambda value: str(int(round(value)))) if whole else (lambda value: f"{value:.1f}")
+        lines.append(
+            ComparisonLine(
+                label=label,
+                baseline=render(item["baseline"]),
+                optimized=render(item["optimized"]),
+                verdict=item["verdict"],
+            )
+        )
+    return PlanComparison(summary=raw["summary"], lines=lines)

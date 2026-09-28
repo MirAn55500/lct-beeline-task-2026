@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { AppModal, FieldLabel, RebuildLevelField, SegmentedControl, buttonClass } from '@/shared/ui'
 
@@ -26,7 +26,13 @@ type PlanRebuildDialogProps = {
 /** Modal «Обновить план»: насколько можно ломать текущий план и как делить заявки. */
 export function PlanRebuildDialog({ isOpen, onClose, onConfirm }: PlanRebuildDialogProps) {
   const [level, setLevel] = useState<PlanRebuildLevel>('fix')
-  const [distribution, setDistribution] = useState<PlanDistribution>('even')
+  const [distribution, setDistribution] = useState<PlanDistribution>('efficient')
+
+  useEffect(() => {
+    if (!isOpen) return
+    setLevel('fix')
+    setDistribution('efficient')
+  }, [isOpen])
 
   return (
     <AppModal

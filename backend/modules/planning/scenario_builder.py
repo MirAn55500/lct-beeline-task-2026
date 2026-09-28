@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import sys
 import threading
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
@@ -106,8 +107,18 @@ def _transport(value: str | None) -> TransportMode | None:
     return None
 
 
+_MSK = timezone(timedelta(hours=3))
+
+
+def _aware(moment: datetime) -> datetime:
+    """Наивное местное время из БД — московское. Событие дня сравнивает моменты с поясом."""
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=_MSK)
+    return moment.astimezone(_MSK)
+
+
 def _at(day: date, clock: time) -> datetime:
-    return datetime.combine(day, clock)
+    return datetime.combine(day, clock, tzinfo=_MSK)
 
 
 def _is_closed(request: Request) -> bool:
@@ -143,8 +154,8 @@ def build_scenario(
                     lat=request.address_ref.latitude,
                     lon=request.address_ref.longitude,
                 ),
-                window_start=request.plan_start_time,
-                window_end=request.plan_end_time,
+                window_start=_aware(request.plan_start_time),
+                window_end=_aware(request.plan_end_time),
                 duration_minutes=duration,
                 required_skill=skill,
                 region_key=region_key,
@@ -211,6 +222,26 @@ def build_scenario(
         name=region_name,
     )
     return scenario, transport_by_engineer
+
+
+def restrict_availability(scenario: Scenario, cutoffs: dict[str, datetime]) -> Scenario:
+    """Обрезает смену инженеров, которые в этот день стали недоступны с указанного момента."""
+    if not cutoffs:
+        return scenario
+    engineers = []
+    for engineer in scenario.engineers:
+        raw = cutoffs.get(engineer.id)
+        if raw is None:
+            engineers.append(engineer)
+            continue
+        cutoff = _aware(raw)
+        trimmed = tuple(
+            WorkInterval(interval.start, min(interval.end, cutoff))
+            for interval in engineer.work_intervals
+            if interval.start < cutoff and min(interval.end, cutoff) > interval.start
+        )
+        engineers.append(replace(engineer, work_intervals=trimmed, active=bool(trimmed)))
+    return replace(scenario, engineers=tuple(engineers))
 
 
 logger = logging.getLogger(__name__)

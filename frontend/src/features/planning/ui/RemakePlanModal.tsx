@@ -116,13 +116,13 @@ export function RemakePlanModal({
     },
   })
   const [remakeLevel, setRemakeLevel] = useState<RemakeLevel>('fix')
-  const [distribution, setDistribution] = useState<PlanDistribution>('even')
+  const [distribution, setDistribution] = useState<PlanDistribution>('efficient')
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
     if (!isOpen) return
     setRemakeLevel('fix')
-    setDistribution('even')
+    setDistribution('efficient')
     setSubmitting(false)
   }, [isOpen])
 

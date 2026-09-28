@@ -41,7 +41,7 @@ export function SegmentedControl<T extends string>({
     <div
       role={renderOption ? undefined : 'tablist'}
       aria-label={ariaLabel}
-      className={cn('flex h-9 items-center gap-0.5 rounded-[8px] bg-surface-tertiary px-1.5 py-0.5', className)}
+      className={cn('flex h-9 items-center gap-0.5 rounded-[8px] bg-surface-tertiary p-0.5', className)}
     >
       {options.map((option, index) => {
         const active = option.id === value

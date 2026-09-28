@@ -31,6 +31,7 @@ type EngineersSidebarProps = {
   hoveredId: string | null
   onSelect: (engineerId: string) => void
   onHover: (engineerId: string | null) => void
+  onUnavailable?: (engineerId: string) => void
 }
 
 export function EngineersSidebar({
@@ -39,6 +40,7 @@ export function EngineersSidebar({
   hoveredId,
   onSelect,
   onHover,
+  onUnavailable,
 }: EngineersSidebarProps) {
   const [query, setQuery] = useState('')
   const [transports, setTransports] = useState<ReadonlySet<MapTransport>>(() => new Set())
@@ -180,6 +182,15 @@ export function EngineersSidebar({
                       </span>
                     </span>
                   </button>
+                  {selected && onUnavailable ? (
+                    <button
+                      type="button"
+                      onClick={() => onUnavailable(engineer.id)}
+                      className="w-full cursor-pointer border-b border-border bg-surface-tertiary px-3 py-2 text-left text-sm leading-5 font-medium text-foreground hover:bg-surface-hover"
+                    >
+                      Недоступен с…
+                    </button>
+                  ) : null}
                 </li>
               )
             })}

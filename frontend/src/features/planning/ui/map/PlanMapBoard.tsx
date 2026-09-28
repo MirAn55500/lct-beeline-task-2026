@@ -28,10 +28,11 @@ type DragState = {
 
 type PlanMapBoardProps = {
   board: PlanMapBoardState
+  onCancelStop?: (requestId: string) => void
 }
 
 /** Рабочая область карты: маршруты, панель выбранного маршрута и неназначенные заявки. */
-export function PlanMapBoard({ board }: PlanMapBoardProps) {
+export function PlanMapBoard({ board, onCancelStop }: PlanMapBoardProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
   const [hint, setHint] = useState(false)
@@ -130,6 +131,7 @@ export function PlanMapBoard({ board }: PlanMapBoardProps) {
             onToggleStop={board.toggleStop}
             onAddTicket={() => setHint(true)}
             onEditParams={() => setParamsOpen(true)}
+            onCancelStop={onCancelStop}
             dropIndex={drag?.index ?? null}
             listRef={listRef}
           />

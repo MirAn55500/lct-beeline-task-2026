@@ -16,7 +16,7 @@ export function MetaSeparator() {
   return <span aria-hidden className="h-3.5 w-px shrink-0 bg-separator" />
 }
 
-/** Фото или инициалы с кружком транспорта в цвете маршрута. */
+/** Инициалы с кружком транспорта в цвете маршрута. */
 export function EngineerAvatar({
   engineer,
   muted = false,
@@ -28,21 +28,12 @@ export function EngineerAvatar({
   const TransportIcon = TRANSPORT_FILL_ICON[engineer.transport]
   return (
     <div className="relative h-12 w-11 shrink-0">
-      {engineer.avatarUrl ? (
-        <img
-          src={engineer.avatarUrl}
-          alt=""
-          className="absolute top-0.5 left-0 size-11 object-cover"
-          style={{ borderRadius: 4 }}
-        />
-      ) : (
-        <span
-          className="absolute top-0.5 left-0 flex size-11 items-center justify-center bg-surface-tertiary text-xs leading-5 font-medium text-foreground"
-          style={{ borderRadius: 8 }}
-        >
-          {getInitials(engineer.name.replace(/^Бригада\s+/, ''))}
-        </span>
-      )}
+      <span
+        className="absolute top-0.5 left-0 flex size-11 items-center justify-center bg-surface-tertiary text-xs leading-5 font-medium text-foreground"
+        style={{ borderRadius: 8 }}
+      >
+        {getInitials(engineer.name.replace(/^Бригада\s+/, ''))}
+      </span>
       <span
         title={TRANSPORT_LABEL[engineer.transport]}
         className="absolute bottom-[-3px] left-[-3px] flex size-5 items-center justify-center rounded-full border-2 border-surface"

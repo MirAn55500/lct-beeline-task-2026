@@ -1,3 +1,5 @@
+import { downloadTextFile } from '@/shared/lib'
+
 /**
  * Шаблон выгрузки заявок: колонки, которые читает backend (modules/tickets/importer.py).
  * Разделитель — «;», как в выгрузках БК; BOM нужен, чтобы Excel открыл кириллицу.
@@ -18,12 +20,7 @@ export const TICKETS_TEMPLATE_NAME = 'Шаблон_заявок.csv'
 export const TICKETS_TEMPLATE_SIZE = formatFileSize(new Blob([TEMPLATE]).size)
 
 export function downloadTicketsTemplate() {
-  const url = URL.createObjectURL(new Blob([TEMPLATE], { type: 'text/csv;charset=utf-8' }))
-  const link = document.createElement('a')
-  link.href = url
-  link.download = TICKETS_TEMPLATE_NAME
-  link.click()
-  URL.revokeObjectURL(url)
+  downloadTextFile(TEMPLATE, 'text/csv', TICKETS_TEMPLATE_NAME)
 }
 
 /** 250880 → «245 КБ», как в карточке файла из макета. */

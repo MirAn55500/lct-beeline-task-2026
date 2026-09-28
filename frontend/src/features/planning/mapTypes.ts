@@ -54,12 +54,13 @@ export type RouteStop = MapTicket & {
   travelMinutes: number
   /** Путь по улицам от предыдущей точки, км; нет — оцениваем по прямой. */
   distanceKm?: number
+  /** Почему заявка досталась этому инженеру. */
+  explanation?: string
 }
 
 export type MapEngineer = {
   id: string
   name: string
-  avatarUrl?: string
   transport: MapTransport
   qualification: string
   /** Окно маршрута на день, например «9:00»–«18:00». */

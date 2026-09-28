@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { toast } from '@heroui/react'
 import { Navigate, Route, Routes, useSearchParams } from 'react-router'
 import { parseDate } from '@internationalized/date'
 
@@ -24,9 +25,13 @@ import {
 import {
   DayOverviewWorkspace,
   EngineersSidebar,
+  PlanCompareDialog,
+  PlanEventReport,
+  UnavailableDialog,
   PlanGanttBoard,
   PlanMapBoard,
   PlanRebuildDialog,
+  useApplyPlanEventMutation,
   usePlanContext,
   usePlanGanttBoard,
   usePlanMapBoard,
@@ -38,6 +43,7 @@ import {
   useTicketsExport,
   useTicketsUpload,
 } from '@/features/tickets'
+import type { PlanComparison, PlanEventResult } from '@/features/planning'
 import { routes } from '@/shared/config/routes'
 import { AppPanel, ContextHeader, PlanViewTabs } from '@/shared/ui'
 
@@ -262,6 +268,7 @@ function PersonnelPage() {
 function PlanWorkHeader({ context }: { context: PlanContext }) {
   const [uploadOpen, setUploadOpen] = useState(false)
   const [rebuildOpen, setRebuildOpen] = useState(false)
+  const [comparison, setComparison] = useState<PlanComparison | null>(null)
   const exportTickets = useTicketsExport()
   const { regionId, regions, date, planId } = context
   const regionName = regions.find((item) => item.id === regionId)?.name ?? regionId
@@ -286,10 +293,14 @@ function PlanWorkHeader({ context }: { context: PlanContext }) {
         planningSeconds={context.planningSeconds}
         onRecalculate={regionId == null ? undefined : () => setRebuildOpen(true)}
         onExport={
-          context.offline || regionId == null || planId == null
+          regionId == null
             ? undefined
             : (format) =>
-                exportTickets({ regionId, date: date.toString(), planId }, format, `Заявки_${regionName}_${date.toString()}`)
+                exportTickets(
+                  { regionId, date: date.toString(), planId, offline: context.offline },
+                  format,
+                  `Заявки_${regionName}_${date.toString()}`,
+                )
         }
         center={<PlanViewTabs />}
       />
@@ -302,14 +313,50 @@ function PlanWorkHeader({ context }: { context: PlanContext }) {
           if (result.date) context.setDate(parseDate(result.date))
         }}
       />
-      <PlanRebuildDialog isOpen={rebuildOpen} onClose={() => setRebuildOpen(false)} onConfirm={context.rebuild} />
+      <PlanRebuildDialog
+        isOpen={rebuildOpen}
+        onClose={() => setRebuildOpen(false)}
+        onConfirm={async (options) => {
+          const result = await context.rebuild(options)
+          if (result?.comparison) setComparison(result.comparison)
+        }}
+      />
+      <PlanCompareDialog comparison={comparison} onClose={() => setComparison(null)} />
     </>
   )
 }
 
 function PlanMapPage() {
   const context = usePlanContext()
-  const board = usePlanMapBoard(context.regionId, context.date.toString(), context.queryPlanId)
+  const [applyEvent] = useApplyPlanEventMutation()
+  const [eventReport, setEventReport] = useState<PlanEventResult | null>(null)
+  const [awayEngineerId, setAwayEngineerId] = useState<string | null>(null)
+  const board = usePlanMapBoard(context.regionId, context.date.toString(), context.queryPlanId, {
+    onSaved: context.setPlanId,
+  })
+
+  const runEvent = async (body: {
+    type: 'cancel_request' | 'engineer_unavailable'
+    requestId?: number
+    engineerId?: number
+    at?: string
+  }) => {
+    if (context.offline || context.regionId == null) return
+    try {
+      const result = await applyEvent({
+        regionId: context.regionId,
+        date: context.date.toString(),
+        ...body,
+      }).unwrap()
+      context.setPlanId(result.plan_id)
+      setEventReport(result)
+    } catch (error) {
+      const detail = (error as { data?: { detail?: unknown } } | null)?.data?.detail
+      toast.danger('Событие не применено', {
+        description: typeof detail === 'string' ? detail : 'Текущий план остался без изменений',
+      })
+    }
+  }
 
   return (
     <WorkAreaMapLayout
@@ -320,11 +367,36 @@ function PlanMapPage() {
           hoveredId={board.hoveredId}
           onSelect={board.select}
           onHover={board.hover}
+          onUnavailable={context.offline ? undefined : setAwayEngineerId}
         />
       }
       header={<PlanWorkHeader context={context} />}
     >
-      <PlanMapBoard board={board} />
+      <PlanMapBoard
+        board={board}
+        onCancelStop={
+          context.offline
+            ? undefined
+            : (requestId) => {
+                const id = Number(requestId)
+                if (Number.isInteger(id) && id > 0) {
+                  void runEvent({ type: 'cancel_request', requestId: id })
+                }
+              }
+        }
+      />
+      <UnavailableDialog
+        engineerId={awayEngineerId}
+        onClose={() => setAwayEngineerId(null)}
+        onConfirm={(at) => {
+          const id = Number(awayEngineerId)
+          setAwayEngineerId(null)
+          if (Number.isInteger(id) && id > 0) {
+            void runEvent({ type: 'engineer_unavailable', engineerId: id, at })
+          }
+        }}
+      />
+      <PlanEventReport result={eventReport} onClose={() => setEventReport(null)} />
     </WorkAreaMapLayout>
   )
 }
