@@ -101,13 +101,15 @@ async def get_plan(
     region_id: Annotated[int, Query(ge=1)],
     date: Annotated[date, Query()],
     plan_id: Annotated[int | None, Query(ge=1)] = None,
+    baseline: Annotated[bool, Query()] = False,
 ) -> PlanExportResponse:
     """План дня с расписанием: маршруты инженеров (выезд, прибытие, работа), неназначенные.
 
     Для карты и Ганта. `plan_id` выбирает версию, без него — последняя.
+    `baseline=true` — базовый план при этой версии (алгоритм ТЗ по тем же данным), для сравнения.
     Пример: `/api/planning/plan?region_id=1&date=2026-08-17`
     """
-    return await service.get_plan(region_id, date, plan_id)
+    return await service.get_plan(region_id, date, plan_id, baseline=baseline)
 
 
 @router.get("/plan/{plan_id}/slots", response_model=PlanSlotsResponse)

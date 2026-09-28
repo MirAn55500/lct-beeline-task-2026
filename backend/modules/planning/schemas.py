@@ -29,7 +29,7 @@ class RemakeLevel(StrEnum):
 
 
 class Distribution(StrEnum):
-    """Распределение заявок (Figma: Равномерное / Эффективное)."""
+    """Распределение заявок (Figma: Базовое / Эффективное)."""
 
     EVEN = "even"
     EFFICIENT = "efficient"

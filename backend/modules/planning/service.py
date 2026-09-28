@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import math
 from collections.abc import Iterable
 from dataclasses import replace
@@ -7,6 +8,7 @@ from typing import Literal
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from core.database import async_session_factory
 from core.exceptions import AppError
 from modules.algorithm.service import AlgorithmService
 from modules.planning import background
@@ -61,6 +63,31 @@ from planner.metrics import compare as compare_plans
 from planner.models import ReplanEvent, Scenario
 from planner.replan import rebuild_unstarted, replan
 from planner.result import PlanResult
+
+logger = logging.getLogger(__name__)
+
+# Базовые планы, которые считаются в фоне: plan_id версии → задача. Сравнение, открытое
+# сразу после «Обновить план», дожидается задачи, а не считает второй раз.
+_baseline_jobs: dict[int, asyncio.Task] = {}
+
+
+def schedule_baseline(plan: Plan) -> None:
+    """Базовый план при версии — в фоне: версия сохранена, ответ не ждёт линий по улицам."""
+    if plan.plan_id is None or plan.distribution == Distribution.EVEN.value:
+        return
+    plan_id = plan.plan_id
+
+    async def job() -> None:
+        try:
+            async with async_session_factory() as session:
+                service = PlanningService(session)
+                source = await session.get(Plan, plan_id)
+                if source is not None:
+                    await service._save_baseline(source)
+        finally:
+            _baseline_jobs.pop(plan_id, None)
+
+    _baseline_jobs[plan_id] = asyncio.create_task(job())
 
 _REMAKE_TO_SCOPE = {
     RemakeLevel.FIX: ReplanScope.LOW,
@@ -215,7 +242,7 @@ class PlanningService:
 
         «Свободный» пересобирает весь день, но сегодня не трогает начатое: визиты, к которым
         инженер уже выехал, остаются как есть (`_rebuild_unstarted`). Первый план дня,
-        прошедший или будущий день и «Равномерное» — расчёт с нуля. «Фикс» и «Инженерный» берут
+        прошедший или будущий день и «Базовое» — расчёт с нуля. «Фикс» и «Инженерный» берут
         последнюю версию и только ставят в неё заявки, которых там нет: в свободные окна
         или (Инженерный) с вытеснением внутри маршрута одного инженера, см. `Board.place_new`.
         `fresh` — id добавленных и изменённых загрузкой заявок: их прежние визиты
@@ -246,13 +273,15 @@ class PlanningService:
             transport_by_engineer,
             distribution=distribution.value,
         )
-        return RecalculateResponse(
+        response = RecalculateResponse(
             plan_id=plan.plan_id or 0,
             version=plan.version,
             assigned=assigned,
             unassigned=unassigned,
             comparison=comparison,
         )
+        schedule_baseline(plan)
+        return response
 
     async def _persist(
         self,
@@ -288,23 +317,69 @@ class PlanningService:
             rows=rows,
             lunches=lunch_rows(result, offset),
             distribution=saved_distribution,
-            legs=route_legs(
-                result,
-                address_of={r.request_id: r.address_id for r in requests if r.request_id is not None},
-                office_of={
-                    e.engineer_id: e.brigade.office_address_id
-                    for e in engineers
-                    if e.engineer_id is not None and e.brigade is not None
-                },
-                transport_of=transport_by_engineer,
-                offset_hours=offset,
-                lunch_address_of=lunch_address_ids(engineers),
-            ),
+            legs=self._legs(result, transport_by_engineer, offset),
         )
         await self._save_snapshot(plan)
         if previous is not None and previous.plan_id is not None:
             boards.drop(previous.plan_id)
         return plan, assigned, unassigned
+
+    def _legs(self, result, transport_by_engineer, offset: float) -> dict[int, dict]:
+        """Участки маршрутов для таблицы `routes` — по заявкам и инженерам последнего сценария."""
+        requests, engineers = self._rows
+        return route_legs(
+            result,
+            address_of={r.request_id: r.address_id for r in requests if r.request_id is not None},
+            office_of={
+                e.engineer_id: e.brigade.office_address_id
+                for e in engineers
+                if e.engineer_id is not None and e.brigade is not None
+            },
+            transport_of=transport_by_engineer,
+            offset_hours=offset,
+            lunch_address_of=lunch_address_ids(engineers),
+        )
+
+    async def _save_baseline(self, plan: Plan) -> Plan | None:
+        """Базовый план при версии: алгоритм ТЗ (п. 2.3) по тем же заявкам и инженерам.
+
+        Для сравнения планов — что дал бы наивный алгоритм на том же дне. Считается с нуля
+        по данным на момент версии (начатые визиты не держит). У «Базовой» версии базовый план —
+        она сама. Сбой не мешает версии: сравнение останется без базового.
+        """
+        if plan.plan_id is None or plan.distribution == Distribution.EVEN.value:
+            return None
+        plan_id, version, region_id, day = plan.plan_id, plan.version, plan.region_id, plan.date
+        try:
+            scenario, transport_by_engineer = await self._scenario(region_id, day)
+            profiles = await transit.load_profiles(self._repo.session, scenario)
+            result = await asyncio.to_thread(run_plan, scenario, Algorithm.BASELINE, profiles)
+            reasons = await self._repo.ensure_unassigned_reasons()
+            offset = scenario.settings.timezone_offset_hours
+            rows, _, _ = assignments_from_result(
+                result,
+                transport_by_engineer=transport_by_engineer,
+                reason_by_code=reason_index(reasons),
+                offset_hours=offset,
+                scenario=scenario,
+            )
+            baseline = await self._repo.save_plan(
+                region_id=region_id,
+                day=day,
+                version=version,
+                reference_plan_id=None,
+                rows=rows,
+                lunches=lunch_rows(result, offset),
+                distribution=Distribution.EVEN.value,
+                baseline_of_id=plan_id,
+                legs=self._legs(result, transport_by_engineer, offset),
+            )
+            await self._save_snapshot(baseline)
+            return baseline
+        except Exception:
+            logger.exception("Базовый план при версии %d не посчитан", plan_id)
+            await self._repo.session.rollback()
+            return None
 
     async def apply_event(
         self, region_id: int, day: date, body: PlanEventRequest
@@ -363,7 +438,7 @@ class PlanningService:
             region_id, day, entry.scenario, result, transport_by_engineer
         )
         summary = result.diff.summary if result.diff is not None else "План пересчитан"
-        return PlanEventResponse(
+        response = PlanEventResponse(
             plan_id=plan.plan_id or 0,
             version=plan.version,
             assigned=assigned,
@@ -371,6 +446,8 @@ class PlanningService:
             summary=summary,
             warnings=_dispatcher_notes(result.warnings),
         )
+        schedule_baseline(plan)
+        return response
 
     async def _extend(
         self,
@@ -488,7 +565,12 @@ class PlanningService:
         return stored_lunches(plan.lunches if plan is not None else None, scenario)
 
     async def get_plan(
-        self, region_id: int, day: date, plan_id: int | None = None
+        self,
+        region_id: int,
+        day: date,
+        plan_id: int | None = None,
+        *,
+        baseline: bool = False,
     ) -> PlanExportResponse:
         """План дня с расписанием визитов — для карты и Ганта.
 
@@ -504,7 +586,20 @@ class PlanningService:
             plan = next((item for item in plans if item.plan_id == plan_id), None)
         if plan is None or plan.plan_id is None:
             raise AppError("План не найден", status_code=404)
-        return await self._export(plan, latest=plan is plans[0])
+        latest = plan is plans[0]
+        if baseline and plan.distribution != Distribution.EVEN.value:
+            # Версии до базовых расчётов: последней досчитываем по текущим данным — они те же,
+            # а старую честно не восстановить, заявки с тех пор менялись.
+            job = _baseline_jobs.get(plan.plan_id)
+            if job is not None:
+                await asyncio.shield(job)
+            found = await self._repo.find_baseline(plan.plan_id)
+            if found is None and latest:
+                found = await self._save_baseline(plan)
+            if found is None:
+                raise AppError("Для этой версии базовый план не сохранялся", status_code=404)
+            return await self._export(found, latest=False)
+        return await self._export(plan, latest=latest)
 
     async def _export(self, plan: Plan, *, latest: bool) -> PlanExportResponse:
         """Вид версии. Старая — история: ровно такой, какой была сохранена (снимок)."""
@@ -1020,6 +1115,7 @@ class PlanningService:
         response = self._move_response(outcome)
         response.planId = saved.plan_id
         response.version = saved.version
+        schedule_baseline(saved)
         return response
 
     @staticmethod

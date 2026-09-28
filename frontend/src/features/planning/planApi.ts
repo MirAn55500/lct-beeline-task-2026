@@ -76,10 +76,19 @@ export type PlanMoveResponse = {
 
 export const planExportApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
-    getPlanExport: build.query<PlanExportResponse, { regionId: number; date: string; planId?: number | null }>({
-      query: ({ regionId, date, planId }) => ({
+    getPlanExport: build.query<
+      PlanExportResponse,
+      /** `baseline` — базовый план при версии (алгоритм ТЗ по тем же данным), для сравнения. */
+      { regionId: number; date: string; planId?: number | null; baseline?: boolean }
+    >({
+      query: ({ regionId, date, planId, baseline }) => ({
         url: '/api/planning/plan',
-        params: { region_id: regionId, date, ...(planId != null ? { plan_id: planId } : {}) },
+        params: {
+          region_id: regionId,
+          date,
+          ...(planId != null ? { plan_id: planId } : {}),
+          ...(baseline ? { baseline: true } : {}),
+        },
       }),
       providesTags: ['Plan'],
     }),

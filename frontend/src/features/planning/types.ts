@@ -6,7 +6,7 @@ export type RemakeLevel = RebuildLevel
 /** Алиас для UI-диалога перестроения плана. */
 export type PlanRebuildLevel = RemakeLevel
 
-/** Распределение: Равномерное / Эффективное. */
+/** Распределение: Базовое (алгоритм ТЗ) / Эффективное. */
 export type PlanDistribution = 'even' | 'efficient'
 
 export type ComparisonLine = {
