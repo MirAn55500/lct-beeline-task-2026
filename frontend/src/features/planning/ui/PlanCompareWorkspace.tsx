@@ -1,4 +1,3 @@
-import { ListBox, Select } from '@heroui/react'
 import {
   RiArrowDownSLine,
   RiArrowDownSFill,
@@ -6,7 +5,7 @@ import {
   RiFlashlightFill,
 } from '@remixicon/react'
 import { skipToken } from '@reduxjs/toolkit/query/react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
 
 import { cn } from '@/shared/lib/cn'
@@ -168,59 +167,87 @@ function MetricCard({
 function PlanSelect({
   plans,
   value,
+  excludeId = null,
   onChange,
 }: {
   plans: PlanVersion[]
   value: number | null
+  /** План, выбранный в другой колонке — в списке не показываем. */
+  excludeId?: number | null
   onChange: (planId: number) => void
 }) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
   const selected = plans.find((item) => item.plan_id === value)
+  const options = plans.filter((item) => item.plan_id !== excludeId)
   const label = selected ? `План №${selected.version}` : 'План'
 
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open])
+
   return (
-    <Select
-      aria-label="Версия плана"
-      className="min-w-0"
-      placeholder="План"
-      value={value ?? undefined}
-      onChange={(key) => {
-        if (key != null) onChange(key as number)
-      }}
-    >
-      <Select.Trigger className="flex cursor-pointer items-center gap-1 bg-transparent p-0 shadow-none outline-none">
-        <Select.Value className="text-base font-semibold leading-6 text-foreground">
-          {() => label}
-        </Select.Value>
-        <Select.Indicator className="shrink-0 text-foreground">
-          <RiArrowDownSLine size={18} />
-        </Select.Indicator>
-      </Select.Trigger>
-      <Select.Popover
-        className="min-w-[200px] border border-border bg-surface p-1 shadow-lg outline-none"
-        style={{ borderRadius: 16 }}
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        aria-label="Версия плана"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="inline-flex cursor-pointer items-center gap-1 text-left text-base font-semibold leading-6 text-foreground transition-colors hover:opacity-80"
       >
-        <ListBox className="outline-none">
-          {plans.map((plan) => (
-            <ListBox.Item
-              key={plan.plan_id}
-              id={plan.plan_id}
-              textValue={`План №${plan.version}`}
-              className="cursor-pointer px-3 py-2 text-sm text-foreground outline-none data-[focused]:bg-surface-hover data-[selected]:bg-surface-hover"
-              style={{ borderRadius: 8 }}
-            >
-              {`План №${plan.version}`}
-              <ListBox.ItemIndicator />
-            </ListBox.Item>
-          ))}
-        </ListBox>
-      </Select.Popover>
-    </Select>
+        <span>{label}</span>
+        <RiArrowDownSLine
+          size={20}
+          className={cn('shrink-0 transition-transform', open && 'rotate-180')}
+        />
+      </button>
+      {open ? (
+        <div
+          className="absolute top-[calc(100%+8px)] left-0 z-50 min-w-[160px] border border-border bg-surface p-1 shadow-lg"
+          style={{ borderRadius: 16 }}
+        >
+          {options.length === 0 ? (
+            <p className="px-3 py-2 text-sm text-muted">Нет других версий</p>
+          ) : (
+            options.map((plan) => (
+              <button
+                key={plan.plan_id}
+                type="button"
+                onClick={() => {
+                  onChange(plan.plan_id)
+                  setOpen(false)
+                }}
+                className={cn(
+                  'flex h-9 w-full cursor-pointer items-center rounded-lg px-3 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover',
+                  plan.plan_id === value && 'bg-surface-hover',
+                )}
+              >
+                {`План №${plan.version}`}
+              </button>
+            ))
+          )}
+        </div>
+      ) : null}
+    </div>
   )
 }
 
 function PlanColumn({
   plans,
   planId,
+  excludeId,
   onPlanIdChange,
   kind,
   metrics,
@@ -228,6 +255,7 @@ function PlanColumn({
 }: {
   plans: PlanVersion[]
   planId: number | null
+  excludeId?: number | null
   onPlanIdChange: (planId: number) => void
   kind: PlanKind
   metrics: PlanMetrics | null
@@ -261,7 +289,12 @@ function PlanColumn({
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
-        <PlanSelect plans={plans} value={planId} onChange={onPlanIdChange} />
+        <PlanSelect
+          plans={plans}
+          value={planId}
+          excludeId={excludeId}
+          onChange={onPlanIdChange}
+        />
         <PlanKindBadge kind={kind} />
       </div>
       {metrics ? (
@@ -291,6 +324,22 @@ function PlanColumn({
   )
 }
 
+/** Другая версия плана: preferred, если свободна, иначе первая отличная от exclude. */
+function pickOtherPlan(
+  plans: PlanVersion[],
+  excludeId: number | null,
+  preferred: number | null = null,
+): number | null {
+  if (
+    preferred != null &&
+    preferred !== excludeId &&
+    plans.some((item) => item.plan_id === preferred)
+  ) {
+    return preferred
+  }
+  return plans.find((item) => item.plan_id !== excludeId)?.plan_id ?? null
+}
+
 type PlanCompareWorkspaceProps = {
   regionId: number | null
   date: string
@@ -308,9 +357,8 @@ export function PlanCompareWorkspace({ regionId, date, className }: PlanCompareW
 
   const leftFromUrl = Number(params.get('left'))
   const rightFromUrl = Number(params.get('right'))
-
-  const defaultLeft = plans[0]?.plan_id ?? null
-  const defaultRight = plans[1]?.plan_id ?? plans[0]?.plan_id ?? null
+  const urlLeft = plans.some((item) => item.plan_id === leftFromUrl) ? leftFromUrl : null
+  const urlRight = plans.some((item) => item.plan_id === rightFromUrl) ? rightFromUrl : null
 
   const [leftId, setLeftId] = useState<number | null>(null)
   const [rightId, setRightId] = useState<number | null>(null)
@@ -318,22 +366,58 @@ export function PlanCompareWorkspace({ regionId, date, className }: PlanCompareW
   useEffect(() => {
     if (plans.length === 0) {
       setLeftId(null)
-      setRightId(null)
       return
     }
     setLeftId((current) => {
-      if (plans.some((item) => item.plan_id === leftFromUrl)) return leftFromUrl
+      if (urlLeft != null) return urlLeft
       if (current != null && plans.some((item) => item.plan_id === current)) return current
-      return defaultLeft
+      return plans[0]?.plan_id ?? null
     })
+  }, [plans, urlLeft])
+
+  useEffect(() => {
+    if (plans.length === 0 || leftId == null) {
+      setRightId(null)
+      return
+    }
     setRightId((current) => {
-      if (plans.some((item) => item.plan_id === rightFromUrl)) return rightFromUrl
-      if (current != null && plans.some((item) => item.plan_id === current)) return current
-      return defaultRight
+      const preferred =
+        urlRight != null && urlRight !== leftId
+          ? urlRight
+          : current != null &&
+              current !== leftId &&
+              plans.some((item) => item.plan_id === current)
+            ? current
+            : null
+      return pickOtherPlan(plans, leftId, preferred)
     })
-  }, [plans, leftFromUrl, rightFromUrl, defaultLeft, defaultRight])
+  }, [plans, leftId, urlRight])
+
+  useEffect(() => {
+    if (leftId == null) return
+    const leftParam = params.get('left')
+    const rightParam = params.get('right')
+    if (
+      leftParam === String(leftId) &&
+      (rightId == null ? rightParam == null : rightParam === String(rightId))
+    ) {
+      return
+    }
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.set('left', String(leftId))
+        if (rightId != null) next.set('right', String(rightId))
+        else next.delete('right')
+        return next
+      },
+      { replace: true },
+    )
+  }, [leftId, rightId, params, setParams])
 
   const writePair = (left: number | null, right: number | null) => {
+    setLeftId(left)
+    setRightId(right)
     setParams(
       (prev) => {
         const next = new URLSearchParams(prev)
@@ -347,12 +431,28 @@ export function PlanCompareWorkspace({ regionId, date, className }: PlanCompareW
     )
   }
 
+  const selectLeft = (id: number) => {
+    if (id === rightId) {
+      writePair(id, pickOtherPlan(plans, id, leftId))
+      return
+    }
+    writePair(id, rightId)
+  }
+
+  const selectRight = (id: number) => {
+    if (id === leftId) {
+      writePair(pickOtherPlan(plans, id, rightId), id)
+      return
+    }
+    writePair(leftId, id)
+  }
+
   const leftQuery =
     regionId != null && leftId != null
       ? { regionId, date, planId: leftId }
       : skipToken
   const rightQuery =
-    regionId != null && rightId != null
+    regionId != null && rightId != null && rightId !== leftId
       ? { regionId, date, planId: rightId }
       : skipToken
 
@@ -368,6 +468,7 @@ export function PlanCompareWorkspace({ regionId, date, className }: PlanCompareW
     [rightPlan.data, engineersTotal],
   )
   const kinds = classifyKinds(leftMetrics, rightMetrics)
+  const canCompare = leftId != null && rightId != null && leftId !== rightId
 
   return (
     <AppPanel className={cn('flex min-h-0 flex-1 flex-col gap-5 p-5', className)}>
@@ -377,29 +478,29 @@ export function PlanCompareWorkspace({ regionId, date, className }: PlanCompareW
         <p className="text-sm text-muted">Выберите регион и день в шапке.</p>
       ) : plans.length === 0 ? (
         <p className="text-sm text-muted">На этот день ещё нет версий плана.</p>
+      ) : plans.length < 2 ? (
+        <p className="text-sm text-muted">
+          Для сравнения нужны хотя бы две версии плана. Обновите план ещё раз.
+        </p>
       ) : (
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 lg:grid-cols-2">
           <PlanColumn
             plans={plans}
             planId={leftId}
-            onPlanIdChange={(id) => {
-              setLeftId(id)
-              writePair(id, rightId)
-            }}
+            excludeId={rightId}
+            onPlanIdChange={selectLeft}
             kind={kinds.left}
             metrics={leftMetrics}
-            other={rightMetrics}
+            other={canCompare ? rightMetrics : null}
           />
           <PlanColumn
             plans={plans}
             planId={rightId}
-            onPlanIdChange={(id) => {
-              setRightId(id)
-              writePair(leftId, id)
-            }}
+            excludeId={leftId}
+            onPlanIdChange={selectRight}
             kind={kinds.right}
             metrics={rightMetrics}
-            other={leftMetrics}
+            other={canCompare ? leftMetrics : null}
           />
         </div>
       )}

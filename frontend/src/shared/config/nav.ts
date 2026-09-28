@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react'
 import {
-  RiArrowLeftRightLine,
+  RiCalendarEventFill,
   RiCalendarScheduleLine,
   RiGroupLine,
   RiHome5Line,
@@ -34,7 +34,7 @@ export const navPrimaryItems: NavItem[] = [
   {
     to: routes.compare,
     label: 'Сравнение планов',
-    icon: RiArrowLeftRightLine,
+    icon: RiCalendarEventFill,
   },
   {
     to: routes.personnel,
