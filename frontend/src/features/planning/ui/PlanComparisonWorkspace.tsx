@@ -93,12 +93,12 @@ function PlanColumn({
             if (key != null) onChange(Number(key))
           }}
           aria-label={`${label}: версия плана`}
-          className="w-auto min-w-0"
+          className="inline-flex w-auto min-w-0"
         >
-          <Select.Trigger className="flex cursor-pointer items-center gap-1 bg-transparent text-left text-base font-semibold leading-6 text-foreground outline-none transition-colors hover:opacity-80">
+          <Select.Trigger className="flex h-6 cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-left text-base font-semibold leading-6 text-foreground shadow-none outline-none">
             <Select.Value className="min-w-0 truncate" />
             <Select.Indicator className="shrink-0 text-foreground">
-              <RiArrowDownSLine size={20} />
+              <RiArrowDownSLine size={16} />
             </Select.Indicator>
           </Select.Trigger>
           <Select.Popover
