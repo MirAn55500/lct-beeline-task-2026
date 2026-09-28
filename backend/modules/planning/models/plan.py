@@ -29,6 +29,8 @@ class Plan(BaseTable, table=True):
     # потом меняются — переносятся на другой день, отменяются, правятся, — а старая версия
     # плана остаётся историей. Пусто у планов до миграции 0016: их собирают по текущим данным.
     snapshot: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSONB, nullable=True))
+    # Обеды версии: по инженеру — когда, где и дорога к месту обеда (`service._lunch_rows`)
+    lunches: Optional[list[dict[str, Any]]] = Field(default=None, sa_column=Column(JSONB, nullable=True))
 
     region: Optional["Region"] = Relationship(back_populates="plans")
 

@@ -25,7 +25,6 @@ import {
 import {
   DayOverviewWorkspace,
   EngineersSidebar,
-  PlanCompareDialog,
   PlanEventReport,
   UnavailableDialog,
   PlanGanttBoard,
@@ -43,7 +42,7 @@ import {
   useTicketsExport,
   useTicketsUpload,
 } from '@/features/tickets'
-import type { PlanComparison, PlanEventResult } from '@/features/planning'
+import type { PlanEventResult } from '@/features/planning'
 import { routes } from '@/shared/config/routes'
 import { AppPanel, ContextHeader, PlanViewTabs } from '@/shared/ui'
 
@@ -268,7 +267,6 @@ function PersonnelPage() {
 function PlanWorkHeader({ context }: { context: PlanContext }) {
   const [uploadOpen, setUploadOpen] = useState(false)
   const [rebuildOpen, setRebuildOpen] = useState(false)
-  const [comparison, setComparison] = useState<PlanComparison | null>(null)
   const exportTickets = useTicketsExport()
   const { regionId, regions, date, planId } = context
   const regionName = regions.find((item) => item.id === regionId)?.name ?? regionId
@@ -316,12 +314,8 @@ function PlanWorkHeader({ context }: { context: PlanContext }) {
       <PlanRebuildDialog
         isOpen={rebuildOpen}
         onClose={() => setRebuildOpen(false)}
-        onConfirm={async (options) => {
-          const result = await context.rebuild(options)
-          if (result?.comparison) setComparison(result.comparison)
-        }}
+        onConfirm={(options) => void context.rebuild(options)}
       />
-      <PlanCompareDialog comparison={comparison} onClose={() => setComparison(null)} />
     </>
   )
 }

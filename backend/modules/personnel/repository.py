@@ -28,6 +28,7 @@ class PersonnelRepository:
             select(Brigade)
             .options(
                 selectinload(Brigade.office_address),
+                selectinload(Brigade.lunch_address),
                 selectinload(Brigade.areas),
                 selectinload(Brigade.engineers).selectinload(Engineer.transport),
                 selectinload(Brigade.engineers)
@@ -42,7 +43,13 @@ class PersonnelRepository:
         return list(result.all())
 
     async def get_brigade(self, brigade_id: int) -> Brigade | None:
-        return await self._session.get(Brigade, brigade_id)
+        """Бригада с офисом и местом обеда — от них считаются настройки инженера."""
+        result = await self._session.exec(
+            select(Brigade)
+            .where(Brigade.brigade_id == brigade_id)
+            .options(selectinload(Brigade.office_address), selectinload(Brigade.lunch_address))
+        )
+        return result.first()
 
     async def get_brigade_full(self, brigade_id: int) -> Brigade | None:
         """Бригада со всем, что показывает карточка: офис, районы, состав."""
@@ -51,6 +58,7 @@ class PersonnelRepository:
             .where(Brigade.brigade_id == brigade_id)
             .options(
                 selectinload(Brigade.office_address).selectinload(Address.area_ref),
+                selectinload(Brigade.lunch_address),
                 selectinload(Brigade.areas),
                 selectinload(Brigade.engineers),
             )
@@ -82,9 +90,15 @@ class PersonnelRepository:
         return result.first()
 
     async def address_in_use(self, address_id: int) -> bool:
-        """На адрес ссылаются бригады, заявки или маршруты."""
+        """На адрес ссылаются бригады (офис, обед), инженеры (обед), заявки или маршруты."""
         for statement in (
-            select(func.count()).select_from(Brigade).where(Brigade.office_address_id == address_id),
+            select(func.count())
+            .select_from(Brigade)
+            .where(
+                (Brigade.office_address_id == address_id)
+                | (Brigade.lunch_address_id == address_id)
+            ),
+            select(func.count()).select_from(Engineer).where(Engineer.lunch_address_id == address_id),
             select(func.count()).select_from(Request).where(Request.address_id == address_id),
             select(func.count())
             .select_from(Route)
@@ -114,7 +128,8 @@ class PersonnelRepository:
             .options(
                 selectinload(Engineer.transport),
                 selectinload(Engineer.skills).selectinload(EngineerSkill.skill),
-                selectinload(Engineer.brigade),
+                selectinload(Engineer.brigade).selectinload(Brigade.lunch_address),
+                selectinload(Engineer.lunch_address),
             )
             .order_by(col(Engineer.is_lead).desc(), Engineer.name)
         )
@@ -136,7 +151,8 @@ class PersonnelRepository:
                 selectinload(Engineer.transport),
                 selectinload(Engineer.skills).selectinload(EngineerSkill.skill),
                 selectinload(Engineer.equipment),
-                selectinload(Engineer.brigade),
+                selectinload(Engineer.brigade).selectinload(Brigade.lunch_address),
+                selectinload(Engineer.lunch_address),
             )
             # Сессия не сбрасывает объекты при коммите — иначе после правки старые навыки
             .execution_options(populate_existing=True)

@@ -28,19 +28,27 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 from .context import PlanContext, RequestTiming
 from .enums import Algorithm, ReasonCode, ReplanScope
 from .feasibility import check_static
-from .models import Scenario
+from .models import Request, Scenario
 from .result import PlanResult
 from .route import RouteState
 from .solution import Solution
 from .travel import TravelModel
 
-__all__ = ["Board", "MoveOutcome", "RequestSlots", "Slot", "StoredVisit", "VisitTimes"]
+__all__ = [
+    "Board",
+    "MoveOutcome",
+    "RequestSlots",
+    "Slot",
+    "StoredLunch",
+    "StoredVisit",
+    "VisitTimes",
+]
 
 _FAR = 1e6
 """«Окна нет» в минутах: ±два года от полуночи дня плана — конечные числа безопаснее inf."""
@@ -61,6 +69,21 @@ class StoredVisit:
     travel_minutes: float = 0.0
     distance_km: float = 0.0
     waiting_minutes: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class StoredLunch:
+    """Обед сохранённого плана: начатый обед при восстановлении остаётся на месте."""
+
+    engineer_id: str
+    departure_at: datetime
+    arrival_at: datetime
+    start_at: datetime
+    end_at: datetime
+    travel_minutes: float = 0.0
+    distance_km: float = 0.0
+    after_position: int | None = None
+    """После скольких визитов обед стоит в плане: не начатый доска ставит туда же."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +123,18 @@ class VisitTimes:
 
 
 @dataclass(frozen=True, slots=True)
+class LunchTimes:
+    """Обед после хода — для превью на ленте. Минуты от полуночи дня плана."""
+
+    engineer_id: str
+    after_position: int
+    departure: float
+    arrival: float
+    start: float
+    end: float
+
+
+@dataclass(frozen=True, slots=True)
 class MoveOutcome:
     ok: bool
     reason: str = ""
@@ -113,6 +148,8 @@ class MoveOutcome:
     """Инженеры, чьи маршруты изменились (в том числе ставшие пустыми)."""
     released: tuple[str, ...] = ()
     """Заявки, снятые с маршрутов, чтобы освободить место."""
+    lunches: tuple[LunchTimes, ...] = ()
+    """Обеды изменившихся маршрутов; у кого из `engineers` здесь нет — обеда нет."""
 
 
 def _clock(minutes: float) -> str:
@@ -131,6 +168,7 @@ class Board:
         unassigned: Mapping[str, ReasonCode] | None = None,
         travel: TravelModel | None = None,
         now: datetime | None = None,
+        lunches: Iterable[StoredLunch] = (),
     ) -> None:
         self.ctx = ctx = PlanContext(scenario, travel)
         self._by_id = scenario.request_by_id
@@ -140,6 +178,13 @@ class Board:
         self.floor = -_FAR if now is None else ctx.to_minutes(now)
         self.solution = Solution(ctx)
         self.frozen_routes: set[str] = set()
+        # Варианты маршрутов с обедом на других местах — для окон постановки (`_variants_of`)
+        self._variants: dict[str, tuple[tuple, list[tuple[RouteState, bool]]]] = {}
+        # Заявки, которые не встали в свой сохранённый маршрут при восстановлении (`_restore`)
+        self._dropped_on_restore: dict[str, str] = {}
+        # Обеды, с которыми сохранённый маршрут не сошёлся (обед поменяли в карточке):
+        # версия восстановлена без них, вернёт их пересчёт (`place_new`)
+        self._lunch_dropped: dict[str, object] = {}
         for state in self.solution.routes.values():
             state.floor_m = self.floor
 
@@ -147,40 +192,112 @@ class Board:
         for visit in visits:
             if visit.request_id in self._by_id:
                 by_engineer.setdefault(visit.engineer_id, []).append(visit)
+        lunch_of = {lunch.engineer_id: lunch for lunch in lunches}
         for engineer_id, items in by_engineer.items():
             items.sort(key=lambda v: (v.position, v.service_start_at))
             state = self.solution.routes.get(engineer_id)
             if state is None:
                 continue  # инженер выбыл — его заявки уйдут в неназначенные ниже
-            self._restore(state, items)
+            self._restore(state, items, lunch_of.get(engineer_id))
+        # Заявок нет, а обед уже начат — он остаётся фактом и для будущих заявок
+        for engineer_id, lunch in lunch_of.items():
+            state = self.solution.routes.get(engineer_id)
+            if state is None or engineer_id in by_engineer or state.lunch is None:
+                continue
+            if ctx.to_minutes(lunch.departure_at) <= self.floor:
+                state.adopt([], 0, (), self._lunch_fact(lunch))
 
         assigned = self.solution.assigned_ids()
         reasons = unassigned or {}
         for request in scenario.planning_requests():
             if request.id not in assigned:
-                self.solution.mark_unassigned(request, reasons.get(request.id, ReasonCode.NOT_FOUND))
+                name = self._dropped_on_restore.get(request.id)
+                if name is not None:
+                    self.solution.mark_unassigned(request, ReasonCode.TIME_CONFLICT, [
+                        f"Не помещается в маршрут {name}: время в версии плана расходится с обедом или начатой работой"
+                    ])
+                else:
+                    self.solution.mark_unassigned(request, reasons.get(request.id, ReasonCode.NOT_FOUND))
 
     # ------------------------------------------------------------------ восстановление
 
-    def _restore(self, state: RouteState, items: list[StoredVisit]) -> None:
+    def _restore(
+        self, state: RouteState, items: list[StoredVisit], lunch: StoredLunch | None = None
+    ) -> None:
         ctx = self.ctx
         stops = [self._by_id[v.request_id] for v in items]
+        # Обед, который ещё идёт, держит инженера: к визиту после него он не мог выехать,
+        # что бы ни говорило сохранённое время выезда
+        lunch_busy = (
+            lunch is not None and ctx.to_minutes(lunch.end_at) > self.floor
+        )
         locked = 0
         while locked < len(items) and ctx.to_minutes(items[locked].departure_at) <= self.floor:
+            if lunch_busy and items[locked].service_start_at >= lunch.start_at:
+                break
             locked += 1
         frozen = [self._frozen(v) for v in items[:locked]]
+        # Обед, на который инженер уже ушёл, — факт; остальные обеды расставит пересчёт.
+        fact = None
+        if lunch is not None and ctx.to_minutes(lunch.departure_at) <= self.floor:
+            fact = self._lunch_fact(lunch)
+        # Место обеда — после тех же визитов, что и в плане (позиции визитов с 1); выпавшие
+        # из плана заявки (отменённые) место не сдвигают
+        gap = None
+        if lunch is not None and fact is None and lunch.after_position is not None:
+            gap = sum(1 for v in items if v.position <= lunch.after_position)
         for visit in items[locked:]:
             self._hold(visit.request_id, ctx.to_minutes(visit.service_start_at))
-        if state.adopt(stops, locked, frozen):
+        if state.adopt(stops, locked, frozen, fact, gap):
             return
+        # Обед поменяли после расчёта версии (другое окно, другое место): сохранённый
+        # маршрут с ним не сходится. Версия остаётся какой была — без этого обеда, а
+        # поставит его пересчёт. Иначе маршрут замораживался бы целиком, и пересчёт
+        # принимал бы весь оставшийся день за уже начатый.
+        lunch_now = state.lunch
+        if lunch_now is not None and fact is None:
+            state.lunch = None
+            if state.adopt(stops, locked, frozen):
+                self._lunch_dropped[state.engineer.id] = lunch_now
+                return
+            state.lunch = lunch_now
         # План считали на другой модели поездок (кэш обновился): без удержаний маршрут
         # ещё может сойтись, а если нет — остаётся ровно как сохранён, без правок внутри.
         for visit in items[locked:]:
             self._release(visit.request_id)
-        if state.adopt(stops, locked, frozen):
+        if state.adopt(stops, locked, frozen, fact, gap):
             return
-        state.adopt(stops, len(stops), [self._frozen(v) for v in items])
+        if lunch_now is not None and fact is None:
+            state.lunch = None
+            if state.adopt(stops, locked, frozen):
+                self._lunch_dropped[state.engineer.id] = lunch_now
+                return
+            state.lunch = lunch_now
+        # Сохранённый маршрут не сходится и так (накладка в версии, обед начат раньше, чем
+        # версия его ждала): начатое остаётся, остальное встаёт по одному, что не встало —
+        # в неназначенные, место ему ищет пересчёт или диспетчер. Иначе маршрут
+        # замораживался бы целиком вместе с накладкой, и поправить её было бы нельзя.
+        if state.adopt(stops[:locked], locked, frozen, fact):
+            for request in stops[locked:]:
+                if not state.insert_checked(request, state.size):
+                    self._dropped_on_restore[request.id] = state.engineer.name
+            return
+        whole = self._lunch_fact(lunch) if lunch is not None else None
+        if not state.adopt(stops, len(stops), [self._frozen(v) for v in items], whole):
+            state.adopt(stops, len(stops), [self._frozen(v) for v in items])
         self.frozen_routes.add(state.engineer.id)
+
+    def _lunch_fact(self, lunch: StoredLunch) -> tuple[float, float, float, float, float, float, float]:
+        m = self.ctx.to_minutes
+        return (
+            m(lunch.departure_at),
+            m(lunch.arrival_at),
+            m(lunch.start_at),
+            m(lunch.end_at),
+            0.0,
+            lunch.travel_minutes,
+            lunch.distance_km,
+        )
 
     def _frozen(self, visit: StoredVisit) -> tuple[float, float, float, float, float, float, float]:
         m = self.ctx.to_minutes
@@ -259,15 +376,13 @@ class Board:
                 if not static.ok:
                     refusals[state.engineer.id] = static.detail
                     continue
-                route = state
                 if state is current:
                     route = state.clone()
                     route.remove_request(request_id)
-                found = []
-                for position in range(route.locked_count, route.size + 1):
-                    window = route.insertion_window(request, position)
-                    if window is not None:
-                        found.append(Slot(position, *window))
+                    variants = self._lunch_variants(route)
+                else:
+                    variants = self._variants_of(state)
+                found = self._windows(variants, request)
                 if found:
                     slots[state.engineer.id] = found
                 else:
@@ -278,6 +393,69 @@ class Board:
         finally:
             self._set_timing(request_id, saved)
         return RequestSlots(request_id, True, slots=slots, refusals=refusals)
+
+    def _variants_of(self, state: RouteState) -> list[tuple[RouteState, bool]]:
+        """Варианты маршрута с обедом на разных местах — один раз на маршрут и его расписание."""
+        key = self._schedule(state) + (state.floor_m, id(state))
+        cached = self._variants.get(state.engineer.id)
+        if cached is None or cached[0] != key:
+            cached = (key, self._lunch_variants(state))
+            self._variants[state.engineer.id] = cached
+        return cached[1]
+
+    @staticmethod
+    def _lunch_variants(route: RouteState) -> list[tuple[RouteState, bool]]:
+        """Варианты маршрута для окон постановки: (маршрут, без обеда ли — см. `without_lunch`)."""
+        variants = [(state, False) for state in Board._gap_variants(route)]
+        free = route.without_lunch()
+        return variants + [(free, True)] if free is not None else variants
+
+    @staticmethod
+    def _gap_variants(route: RouteState) -> list[RouteState]:
+        """Маршрут как есть и он же с обедом на каждом другом месте, где обед сходится.
+
+        Диспетчер ставит заявку на время обеда — обед, если его есть куда подвинуть,
+        уезжает сам: ход пересчитывает маршрут и выбирает обеду место. Окна постановки
+        поэтому считаются по всем таким вариантам, иначе время обеда не светилось бы
+        свободным, хотя заявка туда встаёт. Заявки так сами не переезжают: их время
+        меняется только с подтверждения диспетчера.
+        """
+        variants = [route]
+        if route.lunch is None or route.lunch_fact is not None or route.lunch_gap is None:
+            return variants
+        for gap in range(route.locked_count, route.size + 1):
+            if gap == route.lunch_gap:
+                continue
+            other = route.clone()
+            if other.recompute(gap) and other.lunch_gap == gap:
+                variants.append(other)
+        return variants
+
+    @staticmethod
+    def _windows(variants: Sequence[tuple[RouteState, bool]], request: Request) -> list[Slot]:
+        """Окна постановки по всем вариантам маршрута, слитые по позициям."""
+        route = variants[0][0]
+        found: list[Slot] = []
+        for position in range(route.locked_count, route.size + 1):
+            options = []
+            for state, free in variants:
+                if free:
+                    # Маршрут без обеда: заявка, а сразу после неё — обед
+                    window = state.window_lunch_after(request, position)
+                    options.extend([window] if window is not None else [])
+                else:
+                    options.extend(state.insertion_windows(request, position))
+            windows = sorted(options, key=lambda w: w.earliest)
+            merged: list[Slot] = []
+            for w in windows:
+                last = merged[-1] if merged else None
+                if last is not None and w.earliest <= last.latest + _EPS:
+                    if w.latest > last.latest:
+                        merged[-1] = replace(last, latest=w.latest)
+                    continue
+                merged.append(Slot(position, *w))
+            found.extend(merged)
+        return found
 
     # ------------------------------------------------------------------ ход
 
@@ -306,6 +484,14 @@ class Board:
         before = {state.engineer.id: self._schedule(state) for state in solution}
         try:
             outcome = self._apply(solution, request_id, engineer_id, start, position, release)
+            if outcome.ok:
+                broken = next((s for s in solution if not s.feasible), None)
+                if broken is not None:
+                    outcome = MoveOutcome(
+                        False,
+                        f"Без этой заявки у {broken.engineer.name} не встаёт обед: "
+                        f"не успеть пообедать в его окне и доехать до следующих заявок",
+                    )
         except Exception:
             self.ctx._timings = timings  # noqa: SLF001
             raise
@@ -322,8 +508,17 @@ class Board:
                     client.available_from,
                 )
             for state in solution:
-                for index in range(state.locked_count, state.size):
-                    self._hold(state.stops[index].id, state.schedule_at(index)[2])
+                held = [
+                    (state.stops[index].id, state.schedule_at(index)[2])
+                    for index in range(state.locked_count, state.size)
+                ]
+                for held_id, held_start in held:
+                    self._hold(held_id, held_start)
+                # Запас визитов (окна Ганта) считался, пока заявка была прибита к одной точке
+                if held and state.engineer.id not in self.frozen_routes and not state.recompute(state.lunch_gap):
+                    for held_id, held_start in held:
+                        self._pin_at(held_id, held_start)
+                    state.recompute(state.lunch_gap)
         if not outcome.ok:
             return outcome
         changed = [s for s in solution if self._schedule(s) != before.get(s.engineer.id)]
@@ -334,6 +529,9 @@ class Board:
             visits=tuple(visit for state in changed for visit in self._visits(state)),
             engineers=tuple(state.engineer.id for state in changed),
             released=outcome.released,
+            lunches=tuple(
+                lunch for state in changed if (lunch := self._lunch_times(state)) is not None
+            ),
         )
 
     def _apply(
@@ -392,9 +590,16 @@ class Board:
                 )
         else:
             if position is None:
+                # По времени визитов; если снятие заявок сломало маршрут (обед), расписания у
+                # него нет — берём время визитов до хода
+                if target.feasible:
+                    starts = {target.stops[i].id: target.schedule_at(i)[2] for i in range(target.size)}
+                else:
+                    before = self.solution.routes[engineer_id]
+                    starts = {before.stops[i].id: before.schedule_at(i)[2] for i in range(before.size)}
                 position = max(
                     target.locked_count,
-                    sum(1 for i in range(target.size) if target.schedule_at(i)[2] < start),
+                    sum(1 for r in target.stops if starts.get(r.id, _FAR) < start),
                 )
             self._set_timing(request_id, self._pinned(request_id, start))
             if not target.insert_checked(request, position):
@@ -413,14 +618,45 @@ class Board:
         if start < self.floor - _EPS:
             return "Это время уже прошло"
         self._set_timing(request_id, self._open(request_id))
-        window = route.insertion_window(self._by_id[request_id], position)
-        if window is None:
+        lunch = self._lunch_conflict(route, request_id, start)
+        if lunch is not None:
+            return lunch
+        options = [
+            slot
+            for slot in self._windows(self._lunch_variants(route), self._by_id[request_id])
+            if slot.position == position
+        ]
+        if not options:
             return f"У {name} здесь нет времени: не успеть доехать и выполнить работу"
-        if start < window.earliest - _EPS:
-            return f"{name} не успеет доехать: начать можно не раньше {_clock(window.earliest)}"
-        if start > window.latest + _EPS:
-            return f"Следующие заявки {name} не успеют: начать нужно не позже {_clock(window.latest)}"
+        if start < options[0].earliest - _EPS:
+            return f"{name} не успеет доехать: начать можно не раньше {_clock(options[0].earliest)}"
+        if start > options[-1].latest + _EPS:
+            return f"Следующие заявки {name} не успеют: начать нужно не позже {_clock(options[-1].latest)}"
+        # Время между окнами: заявка сорвала бы обязательный обед, а подвинуть его некуда
+        for before, after in zip(options, options[1:]):
+            if before.latest + _EPS < start < after.earliest - _EPS:
+                return (
+                    f"У {name} в это время обед: до обеда начать можно не позже "
+                    f"{_clock(before.latest)}, после обеда — не раньше {_clock(after.earliest)}"
+                )
         return f"Заявка не помещается в маршрут {name} на {_clock(start)}"
+
+    def _lunch_conflict(self, route: RouteState, request_id: str, start: float) -> str | None:
+        """Заявку бросили на обед, а обеду некуда уехать — так и говорим, с его окном."""
+        taken = route.lunch_schedule()
+        if taken is None or route.lunch is None:
+            return None
+        _, leg, _ = taken
+        end = start + self._client[request_id].duration
+        if not (start < leg[3] - _EPS and leg[0] < end - _EPS):
+            return None
+        timing = route.lunch.timing
+        road = f", а до места обеда {round(leg[6])} мин дороги" if leg[6] >= 1 else ""
+        return (
+            f"В это время у {route.engineer.name} обед {_clock(leg[2])}–{_clock(leg[3])}. "
+            f"Сдвинуть его некуда: начать обед нужно с {_clock(timing.window_start)} до "
+            f"{_clock(timing.window_end)}{road}, и соседние заявки не успеют в свои окна"
+        )
 
     # ------------------------------------------------------------------ новые заявки
 
@@ -454,9 +690,14 @@ class Board:
                         self._hold(request_id, start)
                     state.recompute()
 
+        ejected = self._restore_lunches(eject=scope.allows_ejection)
         assigned = solution.assigned_ids()
         pending = sorted(
-            {i: self._by_id[i] for i in request_ids if i in self._by_id and i not in assigned}.values(),
+            {
+                i: self._by_id[i]
+                for i in [*request_ids, *ejected, *self._dropped_on_restore]
+                if i in self._by_id and i not in assigned
+            }.values(),
             key=lambda r: (-r.priority.rank, r.input_order, r.id),
         )
         placed: list[str] = []
@@ -467,6 +708,57 @@ class Board:
             if found is not None:
                 placed.append(request.id)
         return placed
+
+    def _restore_lunches(self, *, eject: bool) -> list[str]:
+        """Обеды, не влезшие в сохранённый маршрут, — обратно в маршруты. Возвращает снятые заявки.
+
+        Обед поменяли в карточке, и маршрут версии с ним не сходится. «Фикс» заявки не
+        двигает: обед встаёт, только если помещается как есть. «Инженерный» может сдвинуть
+        заявки в пределах окон клиентов, а если и так не выходит — снимает по одной менее
+        важные, пока обед не встанет; снятые ищут место заново, как новые.
+        """
+        ejected: list[str] = []
+        for engineer_id, lunch in list(self._lunch_dropped.items()):
+            state = self.solution.routes.get(engineer_id)
+            if state is None or engineer_id in self.frozen_routes:
+                continue
+            state.lunch = lunch
+            if state.recompute():
+                del self._lunch_dropped[engineer_id]
+                continue
+            if not eject:
+                state.lunch = None
+                state.recompute()
+                continue
+            for index in range(state.locked_count, state.size):
+                self._release(state.stops[index].id)
+            while not state.recompute():
+                movable = list(range(state.locked_count, state.size))
+                if not movable:
+                    break
+                timing = self.ctx.timing
+                order = sorted(
+                    movable,
+                    key=lambda i: (state.stops[i].priority.rank, -timing(state.stops[i]).duration),
+                )
+                chosen = next((i for i in order if self._fits_without(state, i)), order[0])
+                request = state.stops.pop(chosen)
+                self.solution.mark_unassigned(request, ReasonCode.TIME_CONFLICT, [
+                    f"Снята, чтобы у {state.engineer.name} встал обед"
+                ])
+                ejected.append(request.id)
+            if state.feasible:
+                del self._lunch_dropped[engineer_id]
+            else:
+                state.lunch = None
+                state.recompute()
+        return ejected
+
+    @staticmethod
+    def _fits_without(state: RouteState, index: int) -> bool:
+        trial = state.clone()
+        trial.stops.pop(index)
+        return trial.recompute()
 
     def _pin_at(self, request_id: str, start: float) -> None:
         """Визит ровно в `start`: «Фикс» не переносит клиентам время."""
@@ -485,9 +777,19 @@ class Board:
 
     @staticmethod
     def _schedule(state: RouteState) -> tuple:
+        taken = state.lunch_schedule()
+        lunch = None if taken is None else (taken[0], round(taken[1][2], 3))
         return tuple(
             (state.stops[i].id, round(state.schedule_at(i)[2], 3)) for i in range(state.size)
-        )
+        ) + (lunch,)
+
+    @staticmethod
+    def _lunch_times(state: RouteState) -> LunchTimes | None:
+        taken = state.lunch_schedule()
+        if taken is None:
+            return None
+        gap, leg, _ = taken
+        return LunchTimes(state.engineer.id, gap, leg[0], leg[1], leg[2], leg[3])
 
     @staticmethod
     def _visits(state: RouteState) -> list[VisitTimes]:

@@ -1,3 +1,4 @@
+import time
 from datetime import date
 from typing import Annotated
 
@@ -64,13 +65,16 @@ async def recalculate(
     if background.status(region_id, date)[0]:
         # Иначе два расчёта одного дня разом: лишняя нагрузка и две версии с одним номером
         raise ConflictError("План уже считается после загрузки заявок — дождитесь окончания")
-    return await service.recalculate(
+    started = time.monotonic()
+    result = await service.recalculate(
         region_id,
         date,
         remake_level=remake_level,
         distribution=distribution,
         compare=compare,
     )
+    background.learn_rebuild(time.monotonic() - started)
+    return result
 
 
 @router.post("/event", response_model=PlanEventResponse)

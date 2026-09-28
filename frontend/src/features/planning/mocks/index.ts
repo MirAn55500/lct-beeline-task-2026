@@ -4,7 +4,7 @@
  * Заменить на API плана, когда карта пойдёт в бэк.
  */
 
-import { planRouteLegs } from '../lib/routeGeometry'
+import { planLunchLeg, planRouteLegs } from '../lib/routeGeometry'
 import type {
   EngineerRoute,
   LngLat,
@@ -63,8 +63,42 @@ export type PlanExport = {
       explanation?: string
       transit: string[]
     }[]
+    /** Обед: есть в ответе backend, в старых выгрузках — нет. */
+    lunch?: PlanLunchExport | null
   }[]
   unassigned: { requestId: string; reason: UnassignedReason; explanation: string }[]
+}
+
+export type PlanLunchExport = {
+  /** После скольких визитов обед: 0 — до первого. */
+  afterPosition: number
+  departureAt: string
+  arrivalAt: string
+  startAt: string
+  endAt: string
+  travelMinutes: number
+  distanceKm: number
+  /** last_request — у последней заявки, office — в офисе, point — в своей точке. */
+  place: 'last_request' | 'office' | 'point'
+  address: string
+  point: LngLat
+  /** К месту обеда своя дорога — у неё свой срез geometry. */
+  detour: boolean
+  locked: boolean
+  geometryRange: [number, number] | null
+  transit: string[]
+}
+
+const LUNCH_PLACE_LABEL: Record<PlanLunchExport['place'], string> = {
+  last_request: 'У последней заявки',
+  office: 'В офисе',
+  point: 'Своё место',
+}
+
+/** Где обед — подписью: у своего места — его адрес. */
+export function lunchPlaceLabel(lunch: Pick<PlanLunchExport, 'place' | 'address'>) {
+  if (lunch.place === 'point' && lunch.address) return shortAddress(lunch.address)
+  return LUNCH_PLACE_LABEL[lunch.place] ?? 'Обед'
 }
 
 export const PLANS = [planEast, planSoutheast, planSouthcentral] as unknown as PlanExport[]
@@ -218,8 +252,21 @@ export function buildMapDataset(plan: PlanExport): MapDataset {
 
   const routes = plan.routes.map((route): EngineerRoute => {
     const legs = planRouteLegs(route)
+    const lunch = route.lunch
     return {
       engineerId: route.engineerId,
+      lunch: lunch
+        ? {
+            afterPosition: lunch.afterPosition,
+            from: clock(lunch.startAt),
+            to: clock(lunch.endAt),
+            place: lunchPlaceLabel(lunch),
+            coord: lunch.point,
+            leg: planLunchLeg(route),
+            travelMinutes: Math.round(lunch.travelMinutes),
+            distanceKm: lunch.distanceKm ?? 0,
+          }
+        : null,
       stops: route.visits.map((visit, index) => ({
         ...toTicket(visit.requestId),
         leg: legs[index]!,

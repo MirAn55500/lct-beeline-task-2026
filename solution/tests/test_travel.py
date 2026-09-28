@@ -101,6 +101,24 @@ def test_travel_minutes_matches_formula():
         ), f"время в пути не совпало с формулой для {mode}"
 
 
+def test_public_transport_out_of_town_goes_by_suburban_train():
+    """Регрессия: Москва → Кашира (~100 км по прямой) без расписания выходила в 7 ч 50 мин.
+
+    По городской скорости 18 км/ч далёкие аварии не вставали ни к одному инженеру на
+    общественном транспорте. Электричкой это около трёх часов; соседний дом — как раньше.
+    """
+    cfg = settings()
+    tm = travel(cfg)
+    kashira = gp((54.840443, 38.240141))
+    start = gp((55.65, 37.61))
+    minutes = tm.travel_minutes(start, kashira, TransportMode.PUBLIC_TRANSPORT)
+    assert 150 < minutes < 210, f"до Каширы {minutes:.0f} мин"
+    near = gp((55.652, 37.612))
+    straight = oracle_haversine_km(start, near) * cfg.detour_factor[TransportMode.PUBLIC_TRANSPORT]
+    city = straight / cfg.speed_kmh[TransportMode.PUBLIC_TRANSPORT] * 60 + cfg.overhead_minutes[TransportMode.PUBLIC_TRANSPORT]
+    assert tm.travel_minutes(start, near, TransportMode.PUBLIC_TRANSPORT) == pytest.approx(city)
+
+
 def test_overhead_is_added_once_per_leg():
     """Вклад overhead выделяется как свободный член: время минус ходовая часть."""
     cfg = settings()

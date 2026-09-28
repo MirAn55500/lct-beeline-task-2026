@@ -96,6 +96,12 @@ def _validate_transport_settings(settings: Settings) -> None:
                 )
 
 
+def _suburban(straight: float, settings: Settings) -> tuple[float, float]:
+    """Поездка общественным транспортом за город — электричкой: (км, минуты)."""
+    distance = straight * settings.suburban_detour_factor
+    return distance, distance / settings.suburban_speed_kmh * 60.0 + settings.suburban_overhead_minutes
+
+
 class HaversineTravelModel:
     """Расчёт по координатам с кэшированием.
 
@@ -127,6 +133,8 @@ class HaversineTravelModel:
             speed = self._settings.speed_kmh[mode]
             minutes = distance / speed * 60.0 + self._settings.overhead_minutes[mode]
             result = (distance, minutes)
+            if mode is TransportMode.PUBLIC_TRANSPORT:
+                result = min(result, _suburban(straight, self._settings), key=lambda pair: pair[1])
 
         self._cache[key] = result
         return result

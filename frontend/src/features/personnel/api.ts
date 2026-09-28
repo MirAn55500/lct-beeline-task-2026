@@ -8,6 +8,7 @@ import type {
   Engineer,
   EngineerBody,
   EngineersListArgs,
+  LunchPlace,
   PersonnelBrigade,
   PersonnelEngineer,
   PersonnelFilterOptions,
@@ -33,6 +34,12 @@ type ApiBrigade = {
   end_work: string | null
   work_days: number[]
   area_ids: number[]
+  lunch_start?: string | null
+  lunch_end?: string | null
+  lunch_place?: LunchPlace
+  lunch_address?: string | null
+  lunch_lat?: number | null
+  lunch_lon?: number | null
 }
 
 type ApiUpdateBrigadeResult = ApiBrigade & {
@@ -59,7 +66,19 @@ type ApiEngineer = {
   own_schedule?: boolean
   work_days?: number[]
   own_work_days?: boolean
+  lunch_start?: string | null
+  lunch_end?: string | null
+  own_lunch_time?: boolean
+  lunch_place?: LunchPlace
+  own_lunch_place?: boolean
+  lunch_address?: string | null
+  lunch_lat?: number | null
+  lunch_lon?: number | null
   home_address?: string | null
+}
+
+function lunchPoint(item: { lunch_lat?: number | null; lunch_lon?: number | null }): [number, number] | null {
+  return item.lunch_lat != null && item.lunch_lon != null ? [item.lunch_lon, item.lunch_lat] : null
 }
 
 function mapBrigade(item: ApiBrigade): PersonnelBrigade {
@@ -78,6 +97,11 @@ function mapBrigade(item: ApiBrigade): PersonnelBrigade {
     endWork: item.end_work,
     workDays: item.work_days ?? [],
     areaIds: item.area_ids ?? [],
+    lunchStart: item.lunch_start ?? null,
+    lunchEnd: item.lunch_end ?? null,
+    lunchPlace: item.lunch_place ?? 'last_request',
+    lunchAddress: item.lunch_address ?? null,
+    lunchPoint: lunchPoint(item),
   }
 }
 
@@ -99,6 +123,13 @@ function mapPersonnelEngineer(item: ApiEngineer): PersonnelEngineer {
     ownSchedule: item.own_schedule ?? false,
     workDays: item.work_days ?? [],
     ownWorkDays: item.own_work_days ?? false,
+    lunchStart: item.lunch_start ?? null,
+    lunchEnd: item.lunch_end ?? null,
+    ownLunchTime: item.own_lunch_time ?? false,
+    lunchPlace: item.lunch_place ?? 'last_request',
+    ownLunchPlace: item.own_lunch_place ?? false,
+    lunchAddress: item.lunch_address ?? null,
+    lunchPoint: lunchPoint(item),
     homeAddress: item.home_address ?? null,
   }
 }

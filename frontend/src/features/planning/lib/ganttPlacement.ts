@@ -1,4 +1,5 @@
-import type { GanttEngineer, GanttTask, GanttTicket } from '../ganttTypes'
+import type { GanttEngineer, GanttLunch, GanttTask, GanttTicket } from '../ganttTypes'
+import type { PlanMoveResponse } from '../planApi'
 
 /** Шаг, к которому прилипает время при перетаскивании. */
 export const SNAP_MINUTES = 10
@@ -110,10 +111,22 @@ export function evaluatePlacement({
 }
 
 /**
- * Часовые ячейки, где инженер свободен и подходит заявке, — зелёные в макете.
- * Ключ — `${engineerId}:${час}`, значение — начало в этом часе: внутри окна клиента, если получается,
- * иначе самое раннее свободное (тогда при постановке спросим согласование с клиентом).
+ * Зелёные ячейки по 10 минут: инженер → начало ячейки (минуты дня) → когда начать работу в ней.
+ * Начало — внутри окна клиента, если получается, иначе самое раннее (тогда при постановке
+ * спросим согласование с клиентом).
  */
+export type FreeCells = Map<string, Map<number, number>>
+
+function setCell(cells: FreeCells, engineerId: string, cell: number, start: number) {
+  let row = cells.get(engineerId)
+  if (!row) {
+    row = new Map()
+    cells.set(engineerId, row)
+  }
+  row.set(cell, start)
+}
+
+/** Приблизительные зелёные ячейки — без окон планировщика, по пересечениям на ленте. */
 export function findFreeCells({
   ticket,
   engineers,
@@ -131,18 +144,11 @@ export function findFreeCells({
   fromHour: number
   toHour: number
 }) {
-  const cells = new Map<string, number>()
+  const cells: FreeCells = new Map()
   for (const engineer of engineers) {
-    for (let hour = fromHour; hour < toHour; hour += 1) {
-      for (let start = hour * 60; start < (hour + 1) * 60; start += SNAP_MINUTES) {
-        const placement = evaluatePlacement({ ticket, engineer, start, tasks, now, movingId })
-        const key = `${engineer.id}:${hour}`
-        if (placement.state === 'ok') {
-          cells.set(key, start)
-          break
-        }
-        if (placement.state === 'approval' && !cells.has(key)) cells.set(key, start)
-      }
+    for (let start = fromHour * 60; start < toHour * 60; start += SNAP_MINUTES) {
+      const placement = evaluatePlacement({ ticket, engineer, start, tasks, now, movingId })
+      if (placement.state === 'ok' || placement.state === 'approval') setCell(cells, engineer.id, start, start)
     }
   }
   return cells
@@ -257,13 +263,55 @@ export function evaluateBySlots({
   if (overlaps.some((task) => !isMovable(task))) return invalid('Пересекается с начатой заявкой')
   if (overlaps.length > 0) return { ...base, displaced: overlaps, outsideWindow, state: 'swap' }
 
-  const near = list.find((item) => item.position === implied)
-  if (!near) return invalid('Здесь не успеть доехать и выполнить работу')
-  if (start < near.earliest) return invalid(`Не успеет доехать: начать можно не раньше ${formatClock(near.earliest)}`)
-  return invalid(`Следующие заявки не успеют: начать нужно не позже ${formatClock(near.latest)}`)
+  // Бросили на обед, а окна здесь нет: обеду некуда уехать (было бы куда — окно бы было)
+  const lunch = engineer.lunch
+  if (lunch && start < lunch.end && lunch.departure < end) {
+    return invalid(`В это время обед ${formatRange(lunch.start, lunch.end)} — сдвинуть его некуда: соседние заявки не успеют`)
+  }
+
+  // На месте обеда окон два — до обеда и после; между ними обед подвинуть некуда
+  const near = list.filter((item) => item.position === implied).sort((a, b) => a.earliest - b.earliest)
+  if (near.length === 0) return invalid('Здесь не успеть доехать и выполнить работу')
+  const first = near[0]!
+  const last = near[near.length - 1]!
+  if (start < first.earliest) return invalid(`Не успеет доехать: начать можно не раньше ${formatClock(first.earliest)}`)
+  if (start > last.latest) return invalid(`Следующие заявки не успеют: начать нужно не позже ${formatClock(last.latest)}`)
+  const after = near.find((item) => item.earliest > start) ?? last
+  const before = [...near].reverse().find((item) => item.latest < start) ?? first
+  return invalid(
+    `В это время обед: до обеда начать можно не позже ${formatClock(before.latest)}, после — не раньше ${formatClock(after.earliest)}`,
+  )
 }
 
-/** Зелёные ячейки по окнам планировщика: в окне клиента, если получается, иначе самое раннее. */
+/** Обеды после хода по ответу backend: инженер → новый обед, null — обеда больше нет. */
+export type LunchPatch = Map<string, Omit<GanttLunch, 'place'> | null>
+
+export function lunchesOf(response: PlanMoveResponse | null | undefined): LunchPatch | undefined {
+  if (!response?.ok || !response.lunches) return undefined
+  const patch: LunchPatch = new Map(response.engineers.map((id) => [id, null]))
+  for (const lunch of response.lunches) {
+    patch.set(lunch.engineerId, {
+      departure: lunch.departure,
+      arrival: lunch.arrival,
+      start: lunch.start,
+      end: lunch.end,
+    })
+  }
+  return patch
+}
+
+/** Обед на ленте — там, куда он уедет после хода; место обеда то же. */
+export function withLunches(engineers: GanttEngineer[], patch: LunchPatch | undefined) {
+  if (!patch || patch.size === 0) return engineers
+  return engineers.map((engineer) => {
+    if (!patch.has(engineer.id)) return engineer
+    const next = patch.get(engineer.id)
+    const place = engineer.lunch?.place ?? ''
+    return { ...engineer, lunch: next ? { ...next, place } : null }
+  })
+}
+
+/** Зелёные 10-минутные ячейки по окнам планировщика: ячейка зелёная, если начать в ней можно. */
 export function findFreeCellsBySlots({
   ticket,
   engineers,
@@ -279,17 +327,17 @@ export function findFreeCellsBySlots({
   toHour: number
   slots: TicketSlots
 }) {
-  const cells = new Map<string, number>()
+  const cells: FreeCells = new Map()
   if (!slots.movable) return cells
   const pick = (low: number, high: number) => (Math.ceil(low) <= high ? Math.ceil(low) : low)
   for (const engineer of engineers) {
     const list = slots.byEngineer.get(engineer.id)
     if (!list) continue
-    for (let hour = fromHour; hour < toHour; hour += 1) {
+    for (let cell = fromHour * 60; cell < toHour * 60; cell += SNAP_MINUTES) {
       let fallback: number | null = null
       for (const slot of list) {
-        const low = Math.max(hour * 60, slot.earliest, now)
-        const high = Math.min(hour * 60 + 59, slot.latest)
+        const low = Math.max(cell, slot.earliest, now)
+        const high = Math.min(cell + SNAP_MINUTES - 1, slot.latest)
         if (low > high) continue
         const inLow = Math.max(low, ticket.windowFrom)
         const inHigh = Math.min(high, ticket.windowTo)
@@ -299,7 +347,7 @@ export function findFreeCellsBySlots({
         }
         fallback ??= pick(low, high)
       }
-      if (fallback != null) cells.set(`${engineer.id}:${hour}`, fallback)
+      if (fallback != null) setCell(cells, engineer.id, cell, fallback)
     }
   }
   return cells

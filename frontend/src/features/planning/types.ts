@@ -69,6 +69,8 @@ export type DayOverview = {
   planning_error?: string | null
   /** Примерно через сколько секунд фоновый расчёт закончится. */
   planning_eta_seconds?: number | null
+  /** Примерно сколько секунд займёт «Обновить план». */
+  rebuild_eta_seconds?: number | null
   travel_minutes?: number | null
   distance_km?: number | null
 }

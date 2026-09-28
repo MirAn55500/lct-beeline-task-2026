@@ -4,6 +4,8 @@ export type BrigadeId = number
 export type SkillCode = 'connection' | 'local' | 'emergency'
 export type TransportCode = 'car' | 'public' | 'bike' | 'walking'
 export type QualificationCode = 'master' | 'worker' | 'novice'
+/** Где обедают: у последней заявки, в офисе или в своей точке. */
+export type LunchPlace = 'last_request' | 'office' | 'point'
 
 /** Компактная карточка обзора дня. */
 export type Engineer = {
@@ -34,6 +36,13 @@ export type PersonnelBrigade = {
   /** ISO-номера рабочих дней: 1 — понедельник, 7 — воскресенье. */
   workDays: number[]
   areaIds: number[]
+  /** Окно обеда, «HH:MM:SS»: час внутри него, когда именно — решает планировщик. */
+  lunchStart: string | null
+  lunchEnd: string | null
+  lunchPlace: LunchPlace
+  /** Место обеда «в своей точке»: адрес и точка [lng, lat]. */
+  lunchAddress: string | null
+  lunchPoint: [number, number] | null
 }
 
 export type AddressSuggestion = {
@@ -58,6 +67,13 @@ export type UpdateBrigadeBody = {
   work_days: number[]
   start_work: string
   end_work: string
+  lunch_start: string
+  lunch_end: string
+  lunch_place: LunchPlace
+  /** Только для «в своей точке». */
+  lunch_address?: string
+  lunch_lat?: number
+  lunch_lon?: number
 }
 
 export type UpdateBrigadeResult = PersonnelBrigade & {
@@ -88,6 +104,15 @@ export type PersonnelEngineer = {
   workDays: number[]
   /** Свой график; без него дни идут за бригадой. */
   ownWorkDays: boolean
+  /** Окно обеда: своё или бригады. */
+  lunchStart: string | null
+  lunchEnd: string | null
+  ownLunchTime: boolean
+  /** Место обеда: своё или бригады. */
+  lunchPlace: LunchPlace
+  ownLunchPlace: boolean
+  lunchAddress: string | null
+  lunchPoint: [number, number] | null
   homeAddress: string | null
 }
 
@@ -110,6 +135,13 @@ export type EngineerBody = {
   end_work?: string
   /** Без дней — рабочие дни бригады. */
   work_days?: number[]
+  /** Без окна обеда — окно бригады, без места — место бригады. */
+  lunch_start?: string
+  lunch_end?: string
+  lunch_place?: LunchPlace
+  lunch_address?: string
+  lunch_lat?: number
+  lunch_lon?: number
 }
 
 export type CreateEngineerBody = EngineerBody & {

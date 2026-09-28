@@ -6,10 +6,19 @@ import { cn } from '@/shared/lib/cn'
 import { useAsideWidth } from '@/shared/lib/layout'
 
 import type { GanttTask, GanttTicket, GanttUnassigned } from '../../ganttTypes'
-import { formatClock, formatRange, isMovable, snapMinutes, type Placement } from '../../lib/ganttPlacement'
+import {
+  formatClock,
+  formatRange,
+  isMovable,
+  lunchesOf,
+  snapMinutes,
+  withLunches,
+  type Placement,
+} from '../../lib/ganttPlacement'
 import type { PlanGanttBoard as PlanGanttBoardState } from '../../lib/usePlanGanttBoard'
 import type { PlanMoveResponse } from '../../planApi'
 import { getClientContact } from '../../mocks/gantt'
+import { PlanLoadingBadge } from '../PlanLoadingBadge'
 import { GanttTaskCard, GanttTicketCard } from './cards'
 import { ClientApprovalDialog } from './ClientApprovalDialog'
 import {
@@ -129,6 +138,8 @@ export function PlanGanttBoard({ board, viewKey }: PlanGanttBoardProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dragKey])
   const currentPreview = preview && preview.key === dragKey ? preview.response : null
+  // Заявку держат на времени обеда — обед уже стоит там, куда уедет после хода
+  const previewLunches = drag ? lunchesOf(currentPreview) : undefined
 
   // Как в макете, лента открывается вокруг текущего времени.
   useLayoutEffect(() => {
@@ -257,7 +268,12 @@ export function PlanGanttBoard({ board, viewKey }: PlanGanttBoardProps) {
         checked?.key === placementKey(ticket.id, placement)
           ? checked.response?.visits.find((item) => item.requestId === ticket.id)
           : undefined
-      board.place(ticket.id, source, visit ? { ...placement, travel: Math.round(visit.travelMinutes) } : placement)
+      board.place(
+        ticket.id,
+        source,
+        visit ? { ...placement, travel: Math.round(visit.travelMinutes) } : placement,
+        checked?.key === placementKey(ticket.id, placement) ? checked.response : null,
+      )
     }
     const onUp = () => finish(false)
     const onCancel = () => finish(true)
@@ -270,8 +286,8 @@ export function PlanGanttBoard({ board, viewKey }: PlanGanttBoardProps) {
   const target: GanttTarget | null = drag?.placement
     ? {
         engineerId: drag.placement.engineerId,
-        fromHour: Math.max(fromHour, Math.floor(drag.placement.start / 60)),
-        toHour: Math.min(toHour, Math.floor((drag.placement.end - 1) / 60) + 1),
+        from: Math.max(fromHour * 60, drag.placement.start),
+        to: Math.min(toHour * 60, drag.placement.end),
         snapStart: drag.placement.start,
         tone: drag.placement.state === 'ok' || drag.placement.state === 'approval' ? 'target' : 'danger',
       }
@@ -280,10 +296,11 @@ export function PlanGanttBoard({ board, viewKey }: PlanGanttBoardProps) {
 
   return (
     <div className="flex min-h-0 flex-1 gap-4">
-      <div className="flex min-w-0 flex-1 flex-col gap-4">
+      <div className="relative flex min-w-0 flex-1 flex-col gap-4">
+        <PlanLoadingBadge active={board.isLoading} />
         <GanttTimeline
           column={column}
-          engineers={engineers}
+          engineers={previewLunches ? withLunches(engineers, previewLunches) : engineers}
           tasks={tasks}
           fromHour={fromHour}
           toHour={toHour}

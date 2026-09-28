@@ -47,6 +47,16 @@ export type PlanMoveVisit = {
   travelMinutes: number
 }
 
+/** Обед после хода: заявку поставили на его время — обед уехал сам. */
+export type PlanMoveLunch = {
+  engineerId: string
+  afterPosition: number
+  departure: number
+  arrival: number
+  start: number
+  end: number
+}
+
 export type PlanMoveResponse = {
   ok: boolean
   reason: string
@@ -57,6 +67,8 @@ export type PlanMoveResponse = {
   engineers: string[]
   visits: PlanMoveVisit[]
   released: string[]
+  /** Обеды изменившихся маршрутов; инженер из `engineers` без обеда здесь — обеда нет. */
+  lunches?: PlanMoveLunch[]
   /** Сохранённая версия плана — только при commit. */
   planId: number | null
   version: number | null

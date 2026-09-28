@@ -10,6 +10,7 @@ import { WORK_TYPE_OPTIONS } from '@/features/tickets'
 import { getInitials } from '@/shared/lib/text'
 import { AppPanel } from '@/shared/ui'
 
+import { LUNCH_PLACES } from '../lib/lunch'
 import { describeWeekdays } from '../lib/weekdays'
 import { TRANSPORT_ICON } from './transportIcons'
 
@@ -62,6 +63,11 @@ type EngineerCardPanelProps = {
 export function EngineerCardPanel({ engineer, onClose, onEdit }: EngineerCardPanelProps) {
   const TransportIcon = TRANSPORT_ICON[engineer.transport]
   const workDay = formatWorkDay(engineer.startWork, engineer.endWork)
+  const lunchWindow = formatWorkDay(engineer.lunchStart, engineer.lunchEnd)
+  const lunchPlace =
+    engineer.lunchPlace === 'point' && engineer.lunchAddress
+      ? engineer.lunchAddress
+      : LUNCH_PLACES.find((place) => place.id === engineer.lunchPlace)?.label.toLowerCase()
   const schedule = describeWeekdays(engineer.workDays)
   const workTypes = WORK_TYPE_OPTIONS.filter((type) =>
     (engineer.skills as string[]).includes(WORK_TYPE_SKILL[type]!),
@@ -130,6 +136,24 @@ export function EngineerCardPanel({ engineer, onClose, onEdit }: EngineerCardPan
         <>
           {workDay}
           <Note>{engineer.ownSchedule ? 'Своя смена' : 'Как у бригады'}</Note>
+        </>
+      ) : (
+        '—'
+      ),
+    },
+    {
+      label: 'Обед',
+      value: lunchWindow ? (
+        <>
+          Час в окне {lunchWindow}
+          <Note>
+            {[
+              lunchPlace,
+              engineer.ownLunchTime || engineer.ownLunchPlace ? 'свой обед' : 'как у бригады',
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </Note>
         </>
       ) : (
         '—'

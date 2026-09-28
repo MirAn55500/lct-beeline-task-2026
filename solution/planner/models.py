@@ -19,6 +19,7 @@ __all__ = [
     "MSK",
     "GeoPoint",
     "WorkInterval",
+    "Lunch",
     "Engineer",
     "Request",
     "Settings",
@@ -114,6 +115,58 @@ def _normalize_intervals(intervals: Iterable[WorkInterval]) -> tuple[WorkInterva
     return ordered
 
 
+@dataclass(frozen=True, slots=True)
+class Lunch:
+    """Обед инженера: `minutes` подряд где-то внутри окна [`window_start`, `window_end`].
+
+    Когда именно обедать, решает планировщик: обед стоит в маршруте между заявками там,
+    где он меньше всего мешает. Работу обед не прерывает — это отдельная остановка.
+
+    `point` — где обедать. `None` — там, где инженер окажется: у последней заявки
+    (до первой — в точке старта), без лишней дороги. Точка (офис, кафе) — к ней
+    нужно доехать и от неё ехать дальше, и эту дорогу планировщик тоже учитывает.
+    `place` и `address` — только подписи для интерфейса.
+    """
+
+    window_start: datetime
+    window_end: datetime
+    minutes: int = 60
+    point: GeoPoint | None = None
+    place: str = "last_request"
+    """`last_request` — у последней заявки, `office` — в офисе, `point` — в своей точке."""
+    address: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "window_start", _parse_dt(self.window_start))
+        object.__setattr__(self, "window_end", _parse_dt(self.window_end))
+        if self.minutes <= 0:
+            raise ValueError("Обед должен длиться больше нуля минут")
+        if self.window_end <= self.window_start:
+            raise ValueError(f"Окно обеда пусто или вывернуто: {self.window_start} .. {self.window_end}")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "window_start": self.window_start.isoformat(),
+            "window_end": self.window_end.isoformat(),
+            "minutes": self.minutes,
+            "point": self.point.to_dict() if self.point is not None else None,
+            "place": self.place,
+            "address": self.address,
+        }
+
+    @classmethod
+    def from_dict(cls, raw: Mapping[str, Any]) -> "Lunch":
+        point = raw.get("point")
+        return cls(
+            window_start=_parse_dt(raw["window_start"]),
+            window_end=_parse_dt(raw["window_end"]),
+            minutes=int(raw.get("minutes", 60)),
+            point=GeoPoint.from_dict(point) if point else None,
+            place=str(raw.get("place", "last_request")),
+            address=str(raw.get("address", "")),
+        )
+
+
 # --------------------------------------------------------------------------------------
 # Исполнитель
 # --------------------------------------------------------------------------------------
@@ -151,6 +204,8 @@ class Engineer:
     Комплект оборудования к моменту такого старта считается уже выданным;
     логистика выдачи в маршрут не включается.
     """
+    lunch: Lunch | None = None
+    """Обед в течение смены; `None` — обед не планируется."""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "work_intervals", _normalize_intervals(self.work_intervals))
@@ -194,6 +249,7 @@ class Engineer:
             "active": self.active,
             "input_order": self.input_order,
             "home_start": self.home_start,
+            "lunch": self.lunch.to_dict() if self.lunch is not None else None,
         }
 
     @classmethod
@@ -211,6 +267,7 @@ class Engineer:
             active=bool(raw.get("active", True)),
             input_order=int(raw.get("input_order", 0)),
             home_start=bool(raw.get("home_start", False)),
+            lunch=Lunch.from_dict(raw["lunch"]) if raw.get("lunch") else None,
         )
 
 
@@ -398,6 +455,19 @@ class Settings:
     speed_kmh: dict[TransportMode, float] = field(default_factory=_default_speed)
     overhead_minutes: dict[TransportMode, float] = field(default_factory=_default_overhead)
     detour_factor: dict[TransportMode, float] = field(default_factory=_default_detour)
+    suburban_speed_kmh: float = 45.0
+    """Общественный транспорт за городом — электричка: средняя скорость, км/ч.
+
+    Расписание (GTFS) есть только по городу, и поездка вне него (Кашира, Ступино)
+    считается по координатам. По городской скорости 100 км выходили в 7–8 часов, хотя
+    электричкой это 2,5–3 часа, и далёкие аварии не вставали ни к кому. Для поездки по
+    координатам берётся меньшее из городского и пригородного времени: короткие поездки
+    считаются как раньше, длинные — как электричкой.
+    """
+    suburban_detour_factor: float = 1.2
+    """Извилистость пригородной поездки: железная дорога прямее улиц."""
+    suburban_overhead_minutes: float = 30.0
+    """Дорога до станции и от неё, ожидание электрички, минуты."""
 
     # --- жёсткие ограничения ---
     check_region: bool = True
@@ -439,6 +509,9 @@ class Settings:
             speed_kmh=dict(self.speed_kmh),
             overhead_minutes=dict(self.overhead_minutes),
             detour_factor=dict(self.detour_factor),
+            suburban_speed_kmh=self.suburban_speed_kmh,
+            suburban_detour_factor=self.suburban_detour_factor,
+            suburban_overhead_minutes=self.suburban_overhead_minutes,
             check_region=self.check_region,
             check_equipment=self.check_equipment,
             service_must_start_within_window=self.service_must_start_within_window,
@@ -460,6 +533,9 @@ class Settings:
             "speed_kmh": {k.value: v for k, v in self.speed_kmh.items()},
             "overhead_minutes": {k.value: v for k, v in self.overhead_minutes.items()},
             "detour_factor": {k.value: v for k, v in self.detour_factor.items()},
+            "suburban_speed_kmh": self.suburban_speed_kmh,
+            "suburban_detour_factor": self.suburban_detour_factor,
+            "suburban_overhead_minutes": self.suburban_overhead_minutes,
             "check_region": self.check_region,
             "check_equipment": self.check_equipment,
             "service_must_start_within_window": self.service_must_start_within_window,

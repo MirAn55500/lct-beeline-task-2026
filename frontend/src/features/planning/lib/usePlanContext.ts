@@ -16,6 +16,7 @@ import {
 } from '../mocks'
 import type { PlanDistribution, PlanRebuildLevel } from '../types'
 import { isOfflineError } from './offline'
+import { useCountdown } from './useCountdown'
 import { useDayOverview } from './useDayOverview'
 
 // Без backend версии плана «пересчитываются» на моках — общие для Ганта и карты до перезагрузки страницы.
@@ -69,6 +70,7 @@ export function usePlanContext() {
   )
   // Версии — только этого дня; дни с планом в календаре можно показывать и от прошлого ответа.
   const overview = overviewQuery.currentData
+  const rebuildSeconds = useCountdown(isRebuilding, overview?.rebuild_eta_seconds ?? null)
 
   const plans: MapPlan[] = offline
     ? allMockPlans
@@ -107,14 +109,11 @@ export function usePlanContext() {
         regionId,
         date: date.toString(),
         ...options,
-        compare: options.distribution === 'efficient',
       }).unwrap()
       update({ plan: String(result.plan_id) })
-      if (!result.comparison) {
-        toast.success(`План №${result.version} составлен`, {
-          description: `Назначено ${result.assigned}, без инженера: ${result.unassigned}`,
-        })
-      }
+      toast.success(`План №${result.version} составлен`, {
+        description: `Назначено ${result.assigned}, без инженера: ${result.unassigned}`,
+      })
       return result
     } catch (error) {
       // Причину backend (например, «в этот день бригада не работает») показываем как есть
@@ -144,7 +143,7 @@ export function usePlanContext() {
     rebuild,
     /** План дня считается в фоне после загрузки заявок и примерно сколько секунд осталось. */
     isPlanning: overview?.planning ?? false,
-    planningSeconds: overview?.planning_eta_seconds ?? null,
+    planningSeconds: isRebuilding ? rebuildSeconds : (overview?.planning_eta_seconds ?? null),
     // Другой регион или день — другие версии плана: выбор версии сбрасываем.
     setRegionId: (id: number) => update({ region: String(id), plan: null }),
     setDate: (value: CalendarDate) => update({ date: value.toString(), plan: null }),

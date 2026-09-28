@@ -83,6 +83,13 @@ export function createUploadBatch(
     transport,
     workDays: [],
     ownWorkDays: false,
+    lunchStart: null,
+    lunchEnd: null,
+    ownLunchTime: false,
+    lunchPlace: 'last_request',
+    ownLunchPlace: false,
+    lunchAddress: null,
+    lunchPoint: null,
     homeAddress: null,
   }))
 }

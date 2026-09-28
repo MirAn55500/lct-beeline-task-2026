@@ -159,7 +159,12 @@ export function usePlanMapBoard(
           }
         }
         stops.splice(index, 0, added)
-        return { ...route, stops }
+        // Обед остаётся между теми же заявками: вставка до него сдвигает его на одну
+        const lunch =
+          route.lunch && index < route.lunch.afterPosition
+            ? { ...route.lunch, afterPosition: route.lunch.afterPosition + 1 }
+            : route.lunch
+        return { ...route, stops, lunch }
       }),
     )
     setUnassigned((current) => current.filter((item) => item.id !== ticket.id))
@@ -200,7 +205,8 @@ export function usePlanMapBoard(
     regionId,
     viewKey,
     hasPlan,
-    isLoading: query.isFetching && !plan,
+    /** Грузится версия плана — в том числе другая, пока на экране прежняя. */
+    isLoading: query.isFetching,
     engineers,
     routes,
     unassigned,

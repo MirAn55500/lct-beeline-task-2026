@@ -12,13 +12,12 @@ import { useGetRegionsQuery } from '@/features/catalogs'
 import {
   MOCK_MAP_DATE,
   MOCK_MAP_REGIONS,
-  PlanCompareDialog,
   PlanRebuildDialog,
+  useCountdown,
   useDayOverview,
   useRecalculatePlanMutation,
 } from '@/features/planning'
 import { isOfflineError } from '@/features/planning/lib/offline'
-import type { PlanComparison } from '@/features/planning'
 import { TicketsUploadDialog, useTicketsExport } from '@/features/tickets'
 import { ASIDE_WIDTH_CLASS, cn } from '@/shared/lib'
 import { AppNav, AppPanel, BrandBar, ContextHeader } from '@/shared/ui'
@@ -58,7 +57,6 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
   const exportTickets = useTicketsExport()
   const [uploadOpen, setUploadOpen] = useState(false)
   const [rebuildOpen, setRebuildOpen] = useState(false)
-  const [comparison, setComparison] = useState<PlanComparison | null>(null)
 
   const date =
     readDateParam(params.get('date')) ??
@@ -81,6 +79,7 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
     { regionId: regionId ?? 0, date: date.toString(), planId },
     { skip: regionId == null },
   )
+  const rebuildSeconds = useCountdown(isRecalculating, overview?.rebuild_eta_seconds ?? null)
 
   useEffect(() => {
     if (regions.length === 0) {
@@ -144,7 +143,9 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
           onUploadClick={() => setUploadOpen(true)}
           isRecalculating={isRecalculating}
           isPlanning={overview?.planning ?? false}
-          planningSeconds={overview?.planning_eta_seconds ?? null}
+          planningSeconds={
+            isRecalculating ? rebuildSeconds : (overview?.planning_eta_seconds ?? null)
+          }
           onRecalculate={
             regionId == null ? undefined : () => setRebuildOpen(true)
           }
@@ -184,15 +185,11 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
               date: date.toString(),
               remakeLevel: options.level,
               distribution: options.distribution,
-              compare: options.distribution === 'efficient',
             }).unwrap()
             setPlanId(null)
-            if (result.comparison) setComparison(result.comparison)
-            else {
-              toast.success(`План №${result.version} составлен`, {
-                description: `Назначено ${result.assigned}, без инженера: ${result.unassigned}`,
-              })
-            }
+            toast.success(`План №${result.version} составлен`, {
+              description: `Назначено ${result.assigned}, без инженера: ${result.unassigned}`,
+            })
           } catch (error) {
             const description =
               error &&
@@ -208,7 +205,6 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
           }
         }}
       />
-      <PlanCompareDialog comparison={comparison} onClose={() => setComparison(null)} />
     </div>
   )
 }

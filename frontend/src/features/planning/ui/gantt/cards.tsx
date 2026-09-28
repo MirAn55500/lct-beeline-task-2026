@@ -113,7 +113,8 @@ const TRANSPORT_ICON: Record<MapTransport, Icon> = {
 }
 
 type RoadPartProps = {
-  task: GanttTask
+  /** Визит или обед: статус красит дорогу, минуты — подпись. */
+  task: Pick<GanttTask, 'status' | 'travel'>
   transport: MapTransport
   /** Ширина участка, px: узкий — только значок, совсем узкий — пустой; минуты есть в раскрытой карточке. */
   width: number

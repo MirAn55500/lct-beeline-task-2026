@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState, type SetStateAction } from 'react'
 import { ListBox, ScrollShadow, Select, toast } from '@heroui/react'
 import { Time } from '@internationalized/date'
 import { RiArrowDownSLine } from '@remixicon/react'
@@ -13,6 +13,7 @@ import {
 } from '@/features/personnel/mocks'
 import type {
   EngineerBody,
+  LunchPlace,
   PersonnelBrigade,
   PersonnelEngineer,
   QualificationCode,
@@ -22,9 +23,12 @@ import { cn } from '@/shared/lib/cn'
 import { AppPanel } from '@/shared/ui'
 
 import { errorReason } from '../lib/errors'
+import { lunchPlaceNote, lunchSpotMissing, lunchTimeError, type LunchDraft } from '../lib/lunch'
 import { formatTime, parseTime } from '../lib/time'
 import { WEEKDAYS, sameDays } from '../lib/weekdays'
+import type { AddressPoint } from './AddressPointField'
 import { FieldLabel, Hint, TextInput, ToggleChip, WorkTimeField } from './formParts'
+import { LunchFields } from './LunchFields'
 import { TRANSPORT_ICON } from './transportIcons'
 
 const TRANSPORT_ORDER: TransportCode[] = ['car', 'public', 'bike', 'walking']
@@ -106,14 +110,25 @@ function toggleIn<T>(list: T[], item: T): T[] {
   return list.includes(item) ? list.filter((entry) => entry !== item) : [...list, item]
 }
 
-/** Рабочий день и дни бригады — смена и график инженера по умолчанию. */
+/** Рабочий день, дни и обед бригады — смена, график и обед инженера по умолчанию. */
 function brigadeSchedule(brigades: PersonnelBrigade[], brigadeId: number | null) {
   const brigade = brigades.find((item) => item.id === brigadeId)
   return {
     timeFrom: parseTime(brigade?.startWork) ?? new Time(9, 0),
     timeTo: parseTime(brigade?.endWork) ?? new Time(18, 0),
     workDays: brigade?.workDays.length ? brigade.workDays : [1, 2, 3, 4, 5, 6, 7],
+    lunchFrom: parseTime(brigade?.lunchStart) ?? new Time(13, 0),
+    lunchTo: parseTime(brigade?.lunchEnd) ?? new Time(14, 0),
+    lunchPlace: brigade?.lunchPlace ?? ('last_request' as LunchPlace),
+    lunchSpot: spotOf(brigade?.lunchAddress, brigade?.lunchPoint),
   }
+}
+
+function spotOf(
+  address: string | null | undefined,
+  point: [number, number] | null | undefined,
+): AddressPoint {
+  return { address: address ?? '', point: point ?? null, confirmed: point != null }
 }
 
 type Draft = {
@@ -127,6 +142,10 @@ type Draft = {
   timeFrom: Time | null
   timeTo: Time | null
   workDays: number[]
+  lunchFrom: Time | null
+  lunchTo: Time | null
+  lunchPlace: LunchPlace
+  lunchSpot: AddressPoint
 }
 
 function initialDraft(engineer: PersonnelEngineer | undefined): Draft {
@@ -141,6 +160,10 @@ function initialDraft(engineer: PersonnelEngineer | undefined): Draft {
       timeFrom: null,
       timeTo: null,
       workDays: [],
+      lunchFrom: null,
+      lunchTo: null,
+      lunchPlace: 'last_request',
+      lunchSpot: spotOf(null, null),
     }
   }
   return {
@@ -153,6 +176,23 @@ function initialDraft(engineer: PersonnelEngineer | undefined): Draft {
     timeFrom: parseTime(engineer.startWork),
     timeTo: parseTime(engineer.endWork),
     workDays: engineer.workDays,
+    lunchFrom: parseTime(engineer.lunchStart),
+    lunchTo: parseTime(engineer.lunchEnd),
+    lunchPlace: engineer.lunchPlace,
+    lunchSpot: spotOf(engineer.lunchAddress, engineer.lunchPoint),
+  }
+}
+
+/** Место обеда для тела запроса: своя точка — с адресом и координатами. */
+function lunchPlaceBody(snapshot: Draft): Partial<EngineerBody> {
+  if (snapshot.lunchPlace !== 'point') return { lunch_place: snapshot.lunchPlace }
+  const point = snapshot.lunchSpot.point
+  if (point == null) return {}
+  return {
+    lunch_place: 'point',
+    lunch_address: snapshot.lunchSpot.address.trim(),
+    lunch_lon: point[0],
+    lunch_lat: point[1],
   }
 }
 
@@ -184,6 +224,11 @@ export function EngineerFormPanel({
   // у сохранённого — если у него не своя смена или не свой график
   const [hoursTouched, setHoursTouched] = useState(engineer?.ownSchedule ?? false)
   const [daysTouched, setDaysTouched] = useState(engineer?.ownWorkDays ?? false)
+  // Обед тоже идёт за бригадой — окно и место по отдельности, как часы и дни
+  const [lunchTimeTouched, setLunchTimeTouched] = useState(engineer?.ownLunchTime ?? false)
+  const [lunchPlaceTouched, setLunchPlaceTouched] = useState(engineer?.ownLunchPlace ?? false)
+  // Своя точка обеда уже в черновике: адрес по точке приходит позже, из старого замыкания
+  const lunchSpotSeeded = useRef(engineer?.ownLunchPlace ?? false)
 
   const brigadeId = draft.brigadeId ?? defaultBrigadeId
   const brigadeDefaults = brigadeSchedule(brigades, brigadeId)
@@ -194,7 +239,32 @@ export function EngineerFormPanel({
       ? {}
       : { timeFrom: brigadeDefaults.timeFrom, timeTo: brigadeDefaults.timeTo }),
     workDays: daysTouched ? draft.workDays : brigadeDefaults.workDays,
+    ...(lunchTimeTouched
+      ? {}
+      : { lunchFrom: brigadeDefaults.lunchFrom, lunchTo: brigadeDefaults.lunchTo }),
+    ...(lunchPlaceTouched
+      ? {}
+      : { lunchPlace: brigadeDefaults.lunchPlace, lunchSpot: brigadeDefaults.lunchSpot }),
   }
+  const ownLunchTime =
+    lunchTimeTouched &&
+    (form.lunchFrom?.compare(brigadeDefaults.lunchFrom) !== 0 ||
+      form.lunchTo?.compare(brigadeDefaults.lunchTo) !== 0)
+  const ownLunchPlace =
+    lunchPlaceTouched &&
+    (form.lunchPlace !== brigadeDefaults.lunchPlace ||
+      (form.lunchPlace === 'point' &&
+        (form.lunchSpot.point?.join() !== brigadeDefaults.lunchSpot.point?.join() ||
+          form.lunchSpot.address.trim() !== brigadeDefaults.lunchSpot.address.trim())))
+  const lunch: LunchDraft = {
+    timeFrom: form.lunchFrom,
+    timeTo: form.lunchTo,
+    place: form.lunchPlace,
+    spot: form.lunchSpot,
+  }
+  // Своё окно обязано помещаться в смену; окно бригады, которое в неё не помещается,
+  // сохранить не мешает — в такой день инженер просто без обеда
+  const lunchProblem = lunchTimeError(lunch, form.timeFrom, form.timeTo)
   const ownSchedule =
     hoursTouched &&
     (form.timeFrom?.compare(brigadeDefaults.timeFrom) !== 0 ||
@@ -205,6 +275,32 @@ export function EngineerFormPanel({
   const setHours = (next: Partial<Pick<Draft, 'timeFrom' | 'timeTo'>>) => {
     setHoursTouched(true)
     setDraft((prev) => ({ ...prev, timeFrom: form.timeFrom, timeTo: form.timeTo, ...next }))
+  }
+  const setLunchTime = (next: Partial<Pick<LunchDraft, 'timeFrom' | 'timeTo'>>) => {
+    setLunchTimeTouched(true)
+    setDraft((prev) => ({
+      ...prev,
+      lunchFrom: 'timeFrom' in next ? (next.timeFrom ?? null) : form.lunchFrom,
+      lunchTo: 'timeTo' in next ? (next.timeTo ?? null) : form.lunchTo,
+    }))
+  }
+  const setLunchPlace = (lunchPlace: LunchPlace) => {
+    setLunchPlaceTouched(true)
+    const seeded = lunchSpotSeeded.current
+    lunchSpotSeeded.current = true
+    const brigadeSpot = form.lunchSpot
+    setDraft((prev) => ({ ...prev, lunchPlace, lunchSpot: seeded ? prev.lunchSpot : brigadeSpot }))
+  }
+  // Адрес по точке приходит позже — обновление функциональное
+  const setLunchSpot = (action: SetStateAction<AddressPoint>) => {
+    setLunchPlaceTouched(true)
+    const seeded = lunchSpotSeeded.current
+    lunchSpotSeeded.current = true
+    const brigadeSpot = form.lunchSpot
+    setDraft((prev) => {
+      const base = seeded ? prev.lunchSpot : brigadeSpot
+      return { ...prev, lunchSpot: typeof action === 'function' ? action(base) : action }
+    })
   }
   const toggleDay = (day: number) => {
     setDaysTouched(true)
@@ -221,9 +317,15 @@ export function EngineerFormPanel({
     form.workTypes.length > 0 &&
     form.brigadeId != null &&
     form.workDays.length > 0 &&
-    hoursValid
+    hoursValid &&
+    (!ownLunchTime || lunchProblem == null) &&
+    (form.lunchFrom != null && form.lunchTo != null) &&
+    !(lunchPlaceTouched && lunchSpotMissing(lunch))
 
-  const bodyOf = (snapshot: Draft, own: { hours: boolean; days: boolean }): EngineerBody | null => {
+  const bodyOf = (
+    snapshot: Draft,
+    own: { hours: boolean; days: boolean; lunchTime: boolean; lunchPlace: boolean },
+  ): EngineerBody | null => {
     if (
       snapshot.brigadeId == null ||
       snapshot.transport == null ||
@@ -244,10 +346,20 @@ export function EngineerFormPanel({
         ? { start_work: formatTime(snapshot.timeFrom), end_work: formatTime(snapshot.timeTo) }
         : {}),
       ...(own.days ? { work_days: snapshot.workDays } : {}),
+      // Обед бригады тоже не передаём — тогда он меняется вместе с ней
+      ...(own.lunchTime && snapshot.lunchFrom && snapshot.lunchTo
+        ? { lunch_start: formatTime(snapshot.lunchFrom), lunch_end: formatTime(snapshot.lunchTo) }
+        : {}),
+      ...(own.lunchPlace ? lunchPlaceBody(snapshot) : {}),
     }
   }
 
-  const own = { hours: ownSchedule, days: ownDays }
+  const own = {
+    hours: ownSchedule,
+    days: ownDays,
+    lunchTime: ownLunchTime,
+    lunchPlace: ownLunchPlace,
+  }
   const body = bodyOf(form, own)
   // Сохранять нечего, пока карточка совпадает с тем, что пришло с сервера
   const [initialBody] = useState(() => JSON.stringify(body))
@@ -467,6 +579,53 @@ export function EngineerFormPanel({
               </Hint>
             )}
           </div>
+
+          <LunchFields
+            value={lunch}
+            timeError={
+              ownLunchTime || form.lunchFrom == null || form.lunchTo == null ? lunchProblem : null
+            }
+            onTime={setLunchTime}
+            onPlace={setLunchPlace}
+            onSpot={setLunchSpot}
+            timeHint={
+              ownLunchTime ? (
+                <>
+                  Свой обед — не меняется вместе с бригадой.{' '}
+                  <button
+                    type="button"
+                    className="cursor-pointer text-accent hover:underline"
+                    onClick={() => setLunchTimeTouched(false)}
+                  >
+                    Как у бригады
+                  </button>
+                </>
+              ) : lunchProblem ? (
+                'Обед бригады не помещается в эту смену — в такой день без обеда'
+              ) : (
+                'Как у бригады — час внутри окна поставит план'
+              )
+            }
+            placeHint={
+              ownLunchPlace ? (
+                <>
+                  {lunchPlaceNote(form.lunchPlace) ?? 'Своё место'} — не меняется вместе с бригадой.{' '}
+                  <button
+                    type="button"
+                    className="cursor-pointer text-accent hover:underline"
+                    onClick={() => {
+                      setLunchPlaceTouched(false)
+                      lunchSpotSeeded.current = false
+                    }}
+                  >
+                    Как у бригады
+                  </button>
+                </>
+              ) : (
+                `Как у бригады${form.lunchPlace === 'point' ? '' : ` — ${lunchPlaceNote(form.lunchPlace)?.toLowerCase()}`}`
+              )
+            }
+          />
         </div>
       </ScrollShadow>
 

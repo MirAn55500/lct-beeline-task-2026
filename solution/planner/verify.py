@@ -110,7 +110,65 @@ def _check_route(
     travel_sum = 0.0
     previous_end: datetime | None = None
 
-    for visit in route.visits:
+    lunch = route.lunch
+    window = _lunch_window(engineer, calendar)
+    if lunch is None and window is not None and route.visits and not_before is None:
+        problems.append(f"Инженер {engineer.id}: в маршруте нет обеда")
+    if lunch is not None and window is None:
+        problems.append(f"Инженер {engineer.id}: обед в маршруте, хотя в смене его нет")
+        lunch = None
+
+    def take_lunch(cursor, point, previous_end):
+        """Сверяет обед маршрута; возвращает, когда и где инженер после него свободен."""
+        mistakes: list[str] = []
+        target = engineer.lunch.point if engineer.lunch.point is not None else point
+        if not lunch.point.is_same_as(target):
+            mistakes.append(f"Инженер {engineer.id}: обед не там, где задан")
+        if previous_end is not None and lunch.departure_at < previous_end - timedelta(seconds=1):
+            mistakes.append(f"Инженер {engineer.id}: обед начинается раньше, чем кончилась работа")
+        if lunch.locked:
+            return mistakes, lunch.end_at, lunch.point, lunch.distance_km, lunch.travel_minutes
+        low, high, minutes_needed = window
+        if not_before is not None and cursor is not None and cursor < not_before:
+            cursor = not_before
+        departure = calendar.first_moment_at_or_after(cursor) if cursor is not None else None
+        if departure is None:
+            mistakes.append(f"Инженер {engineer.id}: на обед не остаётся рабочего времени")
+            return mistakes, lunch.end_at, lunch.point, lunch.distance_km, lunch.travel_minutes
+        mode = engineer.transport_mode
+        timed = travel if getattr(travel, "is_timed", None) and travel.is_timed(mode) else None
+        if lunch.is_detour:
+            km = travel.distance_km(point, target, mode)
+            if timed is None:
+                minutes = travel.travel_minutes(point, target, mode)
+            else:
+                minutes = timed.minutes_at(point, target, mode, calendar.to_minutes(departure))
+        else:
+            km = minutes = 0.0
+        arrival = calendar.add(departure, minutes)
+        start = calendar.first_moment_at_or_after(max(arrival, low)) if arrival else None
+        if start is None or start + timedelta(minutes=minutes_needed) > high + timedelta(seconds=1):
+            mistakes.append(
+                f"Инженер {engineer.id}: обед {lunch.start_at:%H:%M}–{lunch.end_at:%H:%M} "
+                f"не помещается в окно {low:%H:%M}–{high:%H:%M}"
+            )
+            return mistakes, lunch.end_at, lunch.point, lunch.distance_km, lunch.travel_minutes
+        end = calendar.add(start, minutes_needed)
+        mistakes += _compare_moment("обед", "начало", lunch.start_at, start)
+        mistakes += _compare_moment("обед", "окончание", lunch.end_at, end)
+        if timed is None and abs(lunch.travel_minutes - minutes) > _TOL_MINUTES:
+            mistakes.append(f"Инженер {engineer.id}: дорога к обеду не сходится с расчётной")
+        if abs(lunch.distance_km - km) > _TOL_KM:
+            mistakes.append(f"Инженер {engineer.id}: расстояние до места обеда не сходится с расчётным")
+        return mistakes, end, target, km, lunch.travel_minutes
+
+    for index, visit in enumerate(route.visits):
+        if lunch is not None and lunch.after_position == index:
+            found, cursor, point, km, minutes = take_lunch(cursor, point, previous_end)
+            problems += found
+            distance_sum += km
+            travel_sum += minutes
+            previous_end = cursor
         request = requests.get(visit.request_id)
         if request is None:
             problems.append(f"Визит ссылается на неизвестную заявку {visit.request_id}")
@@ -250,6 +308,12 @@ def _check_route(
         cursor = service_end
         point = request.point
 
+    if lunch is not None and lunch.after_position >= len(route.visits):
+        found, cursor, point, km, minutes = take_lunch(cursor, point, previous_end)
+        problems += found
+        distance_sum += km
+        travel_sum += minutes
+
     if abs(route.distance_km - distance_sum) > 1e-6:
         problems.append(
             f"Маршрут {engineer.id}: сумма участков {distance_sum:.4f} км "
@@ -259,6 +323,18 @@ def _check_route(
         problems.append(f"Маршрут {engineer.id}: заявленное время в пути не сходится с расчётным")
 
     return problems
+
+
+def _lunch_window(engineer, calendar: WorkCalendar):
+    """Окно обеда, обрезанное сменой, и его длительность; None — обеда в смене нет."""
+    lunch = engineer.lunch
+    if lunch is None or calendar.is_empty:
+        return None
+    low = max(lunch.window_start, calendar.shift_start)
+    high = min(lunch.window_end, calendar.shift_end)
+    if (high - low).total_seconds() / 60.0 < lunch.minutes - 1e-6:
+        return None
+    return low, high, lunch.minutes
 
 
 def _compare_moment(request_id: str, label: str, declared, computed) -> list[str]:

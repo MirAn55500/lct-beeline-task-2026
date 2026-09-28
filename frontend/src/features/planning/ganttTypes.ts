@@ -53,12 +53,26 @@ export type GanttUnassigned = GanttTicket & {
   needsApproval?: boolean
 }
 
+/** Обед на ленте инженера — минуты от полуночи дня плана. */
+export type GanttLunch = {
+  /** Выезд к месту обеда; совпадает с началом, если обедают у последней заявки. */
+  departure: number
+  /** Приехал к месту обеда; до начала обеда — ожидание на месте. */
+  arrival: number
+  start: number
+  end: number
+  /** «У последней заявки», «В офисе» или адрес своего места. */
+  place: string
+}
+
 export type GanttEngineer = MapEngineer & {
   skills: string[]
   /** Снаряжение из профиля: router, set_top_box. */
   equipment: string[]
   /** Рабочие интервалы смены, между ними — перерыв. */
   shifts: [number, number][]
+  /** Обед, который поставил планировщик; нет — обеда в этот день нет. */
+  lunch?: GanttLunch | null
 }
 
 /** Контакт клиента для согласования нового времени. */

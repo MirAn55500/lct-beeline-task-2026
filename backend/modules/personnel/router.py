@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, status
 
 from modules.personnel.dependencies import get_personnel_service
+from modules.planning import board as plan_boards
 from modules.personnel.schemas import (
     AddressSuggestionResponse,
     AreaResponse,
@@ -53,7 +54,10 @@ async def update_brigade(
     body: UpdateBrigadeRequest,
 ) -> UpdateBrigadeResponse:
     """Карточка «Управление бригадой»: офис, районы, рабочие дни и часы."""
-    return await service.update_brigade(brigade_id, body)
+    response = await service.update_brigade(brigade_id, body)
+    # Доски ручной правки держат смены и обеды в памяти — окна Ганта считались бы по старым
+    plan_boards.clear()
+    return response
 
 
 @router.get("/address-suggest", response_model=list[AddressSuggestionResponse])
@@ -119,7 +123,9 @@ async def create_engineer(
     service: PersonnelServiceDep,
     body: CreateEngineerRequest,
 ) -> EngineerResponse:
-    return await service.create_engineer(body)
+    response = await service.create_engineer(body)
+    plan_boards.clear()
+    return response
 
 
 @router.patch("/engineers/{engineer_id}", response_model=EngineerResponse)
@@ -129,7 +135,9 @@ async def update_engineer(
     body: UpdateEngineerRequest,
 ) -> EngineerResponse:
     """Карточка инженера: не переданные часы и рабочие дни — как у бригады."""
-    return await service.update_engineer(engineer_id, body)
+    response = await service.update_engineer(engineer_id, body)
+    plan_boards.clear()
+    return response
 
 
 @router.delete("/engineers/{engineer_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -138,3 +146,4 @@ async def delete_engineer(
     engineer_id: int,
 ) -> None:
     await service.delete_engineer(engineer_id)
+    plan_boards.clear()

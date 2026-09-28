@@ -31,6 +31,7 @@ from .fleet import minimize_fleet
 from .improve import local_search
 from .models import Request, Scenario
 from .result import (
+    LunchStop,
     Assignment,
     EngineerMetrics,
     PlanDiff,
@@ -147,8 +148,11 @@ def build_result(
     routes: list[RouteResult] = []
     assignments: dict[str, Assignment] = {}
 
+    idle_lunches: list[tuple[str, LunchStop]] = []
     for state in solution:
         if state.is_empty:
+            if state.lunch_fact is not None and state.lunch is not None:
+                idle_lunches.append((state.engineer.id, _fact_lunch(ctx, state)))
             continue
         route, route_assignments = _build_route(ctx, state, alternatives)
         routes.append(route)
@@ -187,6 +191,7 @@ def build_result(
         diff=diff,
         name=scenario.name,
         created_at=created_at,
+        idle_lunches=tuple(idle_lunches),
     )
 
 
@@ -245,7 +250,7 @@ def _build_route(
 
     for index, request in enumerate(state.stops):
         dep, arr, start, end, wait, idle, leg_minutes, leg_km = state.schedule_at(index)
-        from_point = engineer.start_point if index == 0 else state.stops[index - 1].point
+        from_point = state.point_before(index)
 
         visit = Visit(
             request_id=request.id,
@@ -296,6 +301,11 @@ def _build_route(
             incremental_distance_km=added,
         )
 
+    lunch = _build_lunch(ctx, state)
+    capacity = state.cal.capacity_minutes
+    if lunch is not None:
+        # Обеденный час — не рабочее время: загрузка считается от того, что осталось.
+        capacity = max(0.0, capacity - lunch.minutes)
     route = RouteResult(
         engineer_id=engineer.id,
         engineer_name=engineer.name,
@@ -308,10 +318,54 @@ def _build_route(
         travel_minutes=state.travel_minutes,
         service_minutes=state.service_minutes,
         waiting_minutes=state.waiting_minutes,
-        capacity_minutes=state.cal.capacity_minutes,
+        capacity_minutes=capacity,
         region_key=engineer.region_key,
+        lunch=lunch,
     )
     return _replace(route, explanation=explain_route(route)), assignments
+
+
+def _build_lunch(ctx: PlanContext, state: RouteState) -> LunchStop | None:
+    placed = state.lunch_schedule()
+    if placed is None:
+        return None
+    gap, (dep, arr, start, end, _wait, _idle, minutes, km), point = placed
+    source = state.engineer.lunch
+    return LunchStop(
+        after_position=gap,
+        departure_at=ctx.to_datetime(dep),
+        arrival_at=ctx.to_datetime(arr),
+        start_at=ctx.to_datetime(start),
+        end_at=ctx.to_datetime(end),
+        travel_minutes=minutes,
+        distance_km=km,
+        from_point=state.stops[gap - 1].point if gap > 0 else state.engineer.start_point,
+        point=point,
+        place=source.place if source is not None else "last_request",
+        address=source.address if source is not None else "",
+        locked=state.lunch_fact is not None,
+    )
+
+
+def _fact_lunch(ctx: PlanContext, state: RouteState) -> LunchStop:
+    """Начатый обед инженера без заявок — как есть, до первой (будущей) заявки."""
+    dep, arr, start, end, _wait, minutes, km = state.lunch_fact
+    source = state.engineer.lunch
+    point = state.lunch.point or state.engineer.start_point
+    return LunchStop(
+        after_position=0,
+        departure_at=ctx.to_datetime(dep),
+        arrival_at=ctx.to_datetime(arr),
+        start_at=ctx.to_datetime(start),
+        end_at=ctx.to_datetime(end),
+        travel_minutes=minutes,
+        distance_km=km,
+        from_point=state.engineer.start_point,
+        point=point,
+        place=source.place if source is not None else "last_request",
+        address=source.address if source is not None else "",
+        locked=True,
+    )
 
 
 def _incremental_distance(ctx: PlanContext, state: RouteState, index: int) -> float:

@@ -111,7 +111,14 @@ class TimedTransitModel:
         profile = self._profile(a, b, mode)
         if profile is None or not (self._first <= depart <= self._last):
             return self.base.travel_minutes(a, b, mode)
-        return profile.seconds_at(depart * 60) / 60 + self._overhead
+        moment = depart * 60
+        seconds = profile.seconds_at(moment)
+        if seconds < profile.walk:
+            # Профиль считает от момента, округлённого до секунды: время в пути — от настоящего
+            # выезда, иначе приезд выходил на доли секунды позже самого рейса, и строгое окно
+            # (обед, начатый в последнюю секунду окна) отказывало там, где рейс успевает.
+            seconds += round(moment) - moment
+        return seconds / 60 + self._overhead
 
     def depart_by(self, a: GeoPoint, b: GeoPoint, mode: TransportMode, arrive_by: float) -> float:
         """Самый поздний выезд, чтобы прибыть не позже `arrive_by` (минуты)."""

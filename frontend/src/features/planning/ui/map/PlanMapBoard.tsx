@@ -5,6 +5,7 @@ import { cn } from '@/shared/lib/cn'
 
 import type { PlanMapBoard as PlanMapBoardState } from '../../lib/usePlanMapBoard'
 import type { UnassignedTicket } from '../../mapTypes'
+import { PlanLoadingBadge } from '../PlanLoadingBadge'
 import { PlanMap } from '../PlanMap'
 import { ReplanDialog } from './ReplanDialog'
 import { RouteParamsDialog } from './RouteParamsDialog'
@@ -112,7 +113,8 @@ export function PlanMapBoard({ board, onCancelStop, readOnly = false }: PlanMapB
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="relative flex min-h-0 flex-1 flex-col gap-4">
+      <PlanLoadingBadge active={board.isLoading} />
       <PlanMap
         engineers={board.engineers}
         routes={board.routes}

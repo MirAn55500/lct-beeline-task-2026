@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type SetStateAction } from 'react'
 import { ScrollShadow, Tooltip, toast } from '@heroui/react'
-import type { Time } from '@internationalized/date'
+import { Time } from '@internationalized/date'
 import { RiInformationLine, RiMapPinLine } from '@remixicon/react'
 
 import {
@@ -9,6 +9,7 @@ import {
   useUpdateBrigadeMutation,
 } from '@/features/personnel/api'
 import type {
+  LunchPlace,
   PersonnelBrigade,
   PersonnelEngineer,
   UpdateBrigadeResult,
@@ -18,12 +19,15 @@ import { AppPanel, AppTooltipContent } from '@/shared/ui'
 import { MultiSelectField } from '@/shared/ui/MultiSelectField'
 
 import { errorReason } from '../lib/errors'
+import { lunchPlaceNote, lunchSpotMissing, lunchTimeError } from '../lib/lunch'
 import { formatTime, parseTime } from '../lib/time'
 import { WEEKDAYS } from '../lib/weekdays'
 
 import { BrigadeMap } from './BrigadeMap'
 import { AddressField } from './AddressField'
+import type { AddressPoint } from './AddressPointField'
 import { FieldLabel, Hint, ToggleChip, WorkTimeField } from './formParts'
+import { LunchFields } from './LunchFields'
 
 type Draft = {
   officeAddress: string
@@ -36,6 +40,11 @@ type Draft = {
   workDays: number[]
   timeFrom: Time | null
   timeTo: Time | null
+  /** Окно обеда: час внутри него ставит планировщик. */
+  lunchFrom: Time | null
+  lunchTo: Time | null
+  lunchPlace: LunchPlace
+  lunchSpot: AddressPoint
 }
 
 function draftOf(brigade: PersonnelBrigade, areaName: Map<number, string>): Draft {
@@ -47,6 +56,14 @@ function draftOf(brigade: PersonnelBrigade, areaName: Map<number, string>): Draf
     workDays: [...brigade.workDays].sort(),
     timeFrom: parseTime(brigade.startWork),
     timeTo: parseTime(brigade.endWork),
+    lunchFrom: parseTime(brigade.lunchStart) ?? new Time(13, 0),
+    lunchTo: parseTime(brigade.lunchEnd) ?? new Time(14, 0),
+    lunchPlace: brigade.lunchPlace,
+    lunchSpot: {
+      address: brigade.lunchAddress ?? '',
+      point: brigade.lunchPoint,
+      confirmed: brigade.lunchPoint != null,
+    },
   }
 }
 
@@ -58,11 +75,50 @@ function sameDraft(a: Draft, b: Draft) {
     [...a.areas].sort().join('|') === [...b.areas].sort().join('|') &&
     [...a.workDays].sort().join() === [...b.workDays].sort().join() &&
     time(a.timeFrom) === time(b.timeFrom) &&
-    time(a.timeTo) === time(b.timeTo)
+    time(a.timeTo) === time(b.timeTo) &&
+    sameLunch(a, b)
   )
 }
 
-/** Текст ошибки backend: FastAPI кладёт его в detail. */
+function sameLunch(a: Draft, b: Draft) {
+  const time = (value: Time | null) => (value ? formatTime(value) : '')
+  const spot = (draft: Draft) =>
+    draft.lunchPlace === 'point' ? `${draft.lunchSpot.address}|${draft.lunchSpot.point?.join()}` : ''
+  return (
+    time(a.lunchFrom) === time(b.lunchFrom) &&
+    time(a.lunchTo) === time(b.lunchTo) &&
+    a.lunchPlace === b.lunchPlace &&
+    spot(a) === spot(b)
+  )
+}
+
+/** Поля обеда для PATCH; null — обед заполнен не до конца. */
+function lunchOf(draft: Draft) {
+  const lunch = {
+    timeFrom: draft.lunchFrom,
+    timeTo: draft.lunchTo,
+    place: draft.lunchPlace,
+    spot: draft.lunchSpot,
+  }
+  if (
+    draft.lunchFrom == null ||
+    draft.lunchTo == null ||
+    lunchTimeError(lunch, draft.timeFrom, draft.timeTo) != null ||
+    lunchSpotMissing(lunch)
+  ) {
+    return null
+  }
+  const point = draft.lunchPlace === 'point' ? draft.lunchSpot.point : null
+  return {
+    lunch_start: formatTime(draft.lunchFrom),
+    lunch_end: formatTime(draft.lunchTo),
+    lunch_place: draft.lunchPlace,
+    ...(point
+      ? { lunch_address: draft.lunchSpot.address.trim(), lunch_lon: point[0], lunch_lat: point[1] }
+      : {}),
+  }
+}
+
 /** Что изменилось для плана — подпись тоста после сохранения. */
 function savedNote(result: UpdateBrigadeResult, before: Draft, after: Draft) {
   const notes: string[] = []
@@ -75,7 +131,8 @@ function savedNote(result: UpdateBrigadeResult, before: Draft, after: Draft) {
   const planning =
     result.officeMoved ||
     result.rescheduledEngineers > 0 ||
-    before.workDays.join() !== after.workDays.join()
+    before.workDays.join() !== after.workDays.join() ||
+    !sameLunch(before, after)
   if (planning) notes.push('План учтёт это при следующем пересчёте')
   return notes.length > 0 ? notes.join('. ') : undefined
 }
@@ -128,6 +185,13 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
   const draft = edit ?? saved
   // Функциональное обновление: адрес по точке приходит позже, другие правки не затираются
   const patch = (next: Partial<Draft>) => setEdit((prev) => ({ ...(prev ?? saved), ...next }))
+  // Адрес места обеда по точке приходит позже — обновление функциональное, как у офиса
+  const setLunchSpot = (action: SetStateAction<AddressPoint>) =>
+    setEdit((prev) => {
+      const base = prev ?? saved
+      const lunchSpot = typeof action === 'function' ? action(base.lunchSpot) : action
+      return { ...base, lunchSpot }
+    })
   // Только что сохранённая правка: пока список бригад не перезагрузился, она и есть сохранённое
   const [justSaved, setJustSaved] = useState<Draft | null>(null)
   const dirty = edit != null && edit !== justSaved && !sameDraft(edit, saved)
@@ -201,10 +265,12 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
     draft.workDays.length > 0 &&
     draft.timeFrom != null &&
     draft.timeTo != null &&
-    !timeError
+    !timeError &&
+    lunchOf(draft) != null
 
   const save = async (snapshot: Draft) => {
-    if (snapshot.timeFrom == null || snapshot.timeTo == null) return
+    const lunch = lunchOf(snapshot)
+    if (snapshot.timeFrom == null || snapshot.timeTo == null || lunch == null) return
     const id = ++attempt.current
     try {
       const result = await updateBrigade({
@@ -221,6 +287,7 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
           work_days: [...snapshot.workDays].sort(),
           start_work: formatTime(snapshot.timeFrom),
           end_work: formatTime(snapshot.timeTo),
+          ...lunch,
         },
       }).unwrap()
       // Правку, сделанную во время сохранения, не трогаем; сохранённую держим, пока список
@@ -263,7 +330,9 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
       <AppPanel className="flex min-h-0 w-[346px] shrink-0 flex-col">
         <div className="flex shrink-0 flex-col gap-1 px-5 pt-5">
           <h2 className="text-xl font-semibold leading-7 text-foreground">Управление бригадой</h2>
-          <p className="text-sm leading-6 text-muted">Адрес офиса и рабочий день инженеров</p>
+          <p className="text-sm leading-6 text-muted">
+            Адрес офиса, рабочий день и обед инженеров
+          </p>
         </div>
 
         <ScrollShadow hideScrollBar size={40} className="min-h-0 flex-1" orientation="vertical">
@@ -382,6 +451,29 @@ export function BrigadeInfo({ brigade, engineers }: BrigadeInfoProps) {
                 <p className="text-xs leading-5 text-danger">Укажите начало и конец рабочего дня</p>
               ) : null}
             </div>
+
+            <LunchFields
+              value={{
+                timeFrom: draft.lunchFrom,
+                timeTo: draft.lunchTo,
+                place: draft.lunchPlace,
+                spot: draft.lunchSpot,
+              }}
+              timeError={lunchTimeError(
+                { timeFrom: draft.lunchFrom, timeTo: draft.lunchTo, place: draft.lunchPlace, spot: draft.lunchSpot },
+                draft.timeFrom,
+                draft.timeTo,
+              )}
+              onTime={(next) =>
+                patch({
+                  ...('timeFrom' in next ? { lunchFrom: next.timeFrom ?? null } : {}),
+                  ...('timeTo' in next ? { lunchTo: next.timeTo ?? null } : {}),
+                })
+              }
+              onPlace={(lunchPlace) => patch({ lunchPlace })}
+              onSpot={setLunchSpot}
+              placeHint={lunchPlaceNote(draft.lunchPlace)}
+            />
 
           </div>
         </ScrollShadow>

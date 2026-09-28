@@ -40,7 +40,9 @@ class InsertionWindow(NamedTuple):
     """Дорога от предыдущей точки маршрута при самом раннем начале."""
 
 
-_EPS = 1e-9
+_EPS = 1e-6
+"""Допуск сравнения минут: больше, чем дают минуты↔время с микросекундами в БД (1.7e-8),
+иначе визит на самом краю окна после перезагрузки плана «выпадал» из него."""
 _SECOND = 1 / 60
 """Допуск для времени по профилю rRAPTOR: он хранит целые секунды, а расписание — минуты."""
 _NEG_INF = -math.inf
@@ -174,6 +176,12 @@ class RouteState:
         "_latest",
         "_frozen",
         "_static",
+        "lunch",
+        "lunch_fact",
+        "lunch_gap",
+        "_lunch",
+        "_lunch_point",
+        "_lunch_latest",
         "feasible",
         "distance_km",
         "travel_minutes",
@@ -205,6 +213,11 @@ class RouteState:
         """
         self._frozen: list[tuple[float, float, float, float, float, float, float]] = []
         self._static: dict[str, bool] = {}
+        self.lunch = ctx.lunch(engineer)
+        """Обед инженера (окно начала в минутах и где обедать) или None."""
+        self.lunch_fact: tuple[float, float, float, float, float, float, float] | None = None
+        """Обед, который уже начался: (выезд, прибытие, начало, конец, ожидание, минуты
+        в пути, км). Как и начатые визиты, он факт и не пересчитывается."""
         self.recompute()
 
     # ------------------------------------------------------------------ допуск инженера
@@ -246,6 +259,12 @@ class RouteState:
         copy._latest = list(self._latest)
         copy._frozen = list(self._frozen)
         copy._static = dict(self._static)
+        copy.lunch = self.lunch
+        copy.lunch_fact = self.lunch_fact
+        copy.lunch_gap = self.lunch_gap
+        copy._lunch = self._lunch
+        copy._lunch_point = self._lunch_point
+        copy._lunch_latest = self._lunch_latest
         copy.feasible = self.feasible
         copy.distance_km = self.distance_km
         copy.travel_minutes = self.travel_minutes
@@ -285,59 +304,145 @@ class RouteState:
 
     # ------------------------------------------------------------------ прямой проход
 
-    def recompute(self) -> bool:
-        """Пересчитывает расписание с нуля. Возвращает допустимость маршрута."""
+    def recompute(self, lunch_gap: int | None = None) -> bool:
+        """Пересчитывает расписание с нуля. Возвращает допустимость маршрута.
+
+        Обед — не заявка и в `stops` не входит: операторы поиска его не видят и увезти
+        к другому инженеру не могут. Место обеда выбирается здесь, при каждом пересчёте:
+        между какими визитами он меньше всего удлиняет день, при равенстве — где визиты
+        раньше. Поэтому любая перестановка заявок сама переносит обед туда, где ему
+        теперь лучше. `lunch_gap` — место обеда из сохранённого плана: если он там ещё
+        сходится, он там и остаётся.
+        """
+        n = len(self.stops)
+        self.lunch_gap = None
+        self._lunch = None
+        self._lunch_point = None
+        self._lunch_latest = _NEG_INF
+        self._store([])
+        if n == 0:
+            self.feasible = True
+            return True
+
+        shift_start = self.cal.start_m
+        if shift_start is None:
+            self.feasible = False
+            return False
+        start_point = self.engineer.start_point
+
+        lunch = self.lunch
+        if lunch is not None and self.lunch_fact is None:
+            base = self._forward(0, shift_start, start_point, None)
+            if base is None:
+                # Без обеда не сходится — с обедом, который только отнимает время, тоже.
+                self.feasible = False
+                return False
+            gaps = self._lunch_gaps(base[0], shift_start)
+            if gaps is None:
+                # Окно обеда прошло раньше, чем инженер освободился от начатого: обед
+                # уже не поставить, а прошлое из-за него не переписывается.
+                self._store(base[0])
+                self._recompute_slack()
+                self.feasible = True
+                return True
+            chosen = None
+            # Сохранённое место — первым и вне конкурса: иначе при равных вариантах версия
+            # плана восстанавливалась бы с обедом в другом месте и визитами в другое время
+            order = [[lunch_gap]] if lunch_gap is not None and any(lunch_gap in g for g in gaps) else []
+            for group in order + gaps:
+                for gap in group:
+                    cursor = base[0][gap - 1][3] if gap > 0 else shift_start
+                    point = self.stops[gap - 1].point if gap > 0 else start_point
+                    tail = self._forward(gap, cursor, point, gap)
+                    if tail is None:
+                        continue
+                    legs = base[0][:gap] + tail[0]
+                    lunch_leg = tail[1]
+                    finish = max(legs[-1][3], lunch_leg[3])
+                    score = (
+                        sum(leg[6] for leg in legs) + lunch_leg[6],
+                        finish,
+                        sum(leg[2] for leg in legs),
+                    )
+                    if chosen is None or score < chosen[0]:
+                        chosen = (score, gap, legs, lunch_leg, tail[2])
+                if chosen is not None:
+                    break
+            if chosen is None:
+                self.feasible = False
+                return False
+            _, gap, legs, lunch_leg, lunch_point = chosen
+        else:
+            gap = self._fact_gap() if lunch is not None else None
+            run = self._forward(0, shift_start, start_point, gap)
+            if run is None:
+                self.feasible = False
+                return False
+            legs, lunch_leg, lunch_point = run
+
+        self._store(legs)
+        if lunch_leg is not None:
+            self.lunch_gap = gap
+            self._lunch = lunch_leg
+            self._lunch_point = lunch_point
+            self.distance_km += lunch_leg[7]
+            self.travel_minutes += lunch_leg[6]
+            self.waiting_minutes += lunch_leg[4]
+        self._recompute_slack()
+        self.feasible = True
+        return True
+
+    def _store(self, legs) -> None:
+        """Расписание визитов — в массивы маршрута, и итоги по нему."""
+        self._dep = [leg[0] for leg in legs]
+        self._arr = [leg[1] for leg in legs]
+        self._start = [leg[2] for leg in legs]
+        self._end = [leg[3] for leg in legs]
+        self._wait = [leg[4] for leg in legs]
+        self._idle = [leg[5] for leg in legs]
+        self._leg_minutes = [leg[6] for leg in legs]
+        self._leg_km = [leg[7] for leg in legs]
+        self._latest = [_NEG_INF] * len(legs)
+        self.distance_km = sum(self._leg_km)
+        self.travel_minutes = sum(self._leg_minutes)
+        self.waiting_minutes = sum(self._wait)
+        timing = self.ctx.timing
+        self.service_minutes = sum(timing(r).duration for r in self.stops[: len(legs)])
+
+    def _forward(self, begin: int, cursor: float, point: GeoPoint, lunch_gap: int | None):
+        """Прямой проход с визита `begin`: инженер свободен с `cursor` в точке `point`.
+
+        `lunch_gap` — перед каким визитом обедать (`len(stops)` — после последнего).
+        Возвращает (расписания визитов с `begin`, расписание обеда, где обедал) или None,
+        если маршрут недопустим. Расписание визита — (выезд, прибытие, начало, конец,
+        ожидание, простой до выезда, минуты в пути, км).
+        """
         cal = self.cal
         ctx = self.ctx
         travel = ctx.travel
         mode = self.mode
         strict = ctx.settings.service_must_start_within_window
+        stops = self.stops
+        n = len(stops)
+        legs: list[tuple[float, float, float, float, float, float, float, float]] = []
+        lunch_leg = None
+        lunch_point = None
 
-        n = len(self.stops)
-        self._dep = [0.0] * n
-        self._arr = [0.0] * n
-        self._start = [0.0] * n
-        self._end = [0.0] * n
-        self._wait = [0.0] * n
-        self._idle = [0.0] * n
-        self._leg_minutes = [0.0] * n
-        self._leg_km = [0.0] * n
-        self._latest = [_NEG_INF] * n
-        self.distance_km = 0.0
-        self.travel_minutes = 0.0
-        self.service_minutes = 0.0
-        self.waiting_minutes = 0.0
-
-        if n == 0:
-            self.feasible = True
-            return True
-
-        shift_start = cal.start_m
-        if shift_start is None:
-            self.feasible = False
-            return False
-
-        point = self.engineer.start_point
-        cursor = shift_start
-
-        for i, request in enumerate(self.stops):
+        for i in range(begin, n):
+            if i == lunch_gap:
+                taken = self._lunch_leg(cursor, point)
+                if taken is None:
+                    return None
+                lunch_leg, lunch_point = taken
+                cursor = lunch_leg[3]
+                point = lunch_point
+            request = stops[i]
             if i < self.locked_count and i < len(self._frozen):
                 # Начатая работа — это факт, а не решение планировщика: её время не
                 # пересчитывается. Иначе исчезновение более раннего визита сдвигало бы
                 # прошлое назад, и план утверждал бы, что работа шла не тогда, когда шла.
                 dep, arr, start, end, wait, minutes, km = self._frozen[i]
-                self._dep[i] = dep
-                self._arr[i] = arr
-                self._start[i] = start
-                self._end[i] = end
-                self._wait[i] = wait
-                self._idle[i] = 0.0
-                self._leg_minutes[i] = minutes
-                self._leg_km[i] = km
-                self.distance_km += km
-                self.travel_minutes += minutes
-                self.service_minutes += ctx.timing(request).duration
-                self.waiting_minutes += wait
+                legs.append((dep, arr, start, end, wait, 0.0, minutes, km))
                 cursor = end
                 point = request.point
                 continue
@@ -354,32 +459,100 @@ class RouteState:
                     cal, timing, free_from, self.timed, point, request.point, mode, strict
                 )
             if leg is None:
-                self.feasible = False
-                return False
-            departure, arrival, service_start, service_end, waiting, idle = leg[:6]
+                return None
             if self.timed is not None:
                 minutes = leg[6]
-
-            self._dep[i] = departure
-            self._arr[i] = arrival
-            self._start[i] = service_start
-            self._end[i] = service_end
-            self._wait[i] = waiting
-            self._idle[i] = idle
-            self._leg_minutes[i] = minutes
-            self._leg_km[i] = km
-
-            self.distance_km += km
-            self.travel_minutes += minutes
-            self.service_minutes += timing.duration
-            self.waiting_minutes += self._wait[i]
-
-            cursor = service_end
+            legs.append((leg[0], leg[1], leg[2], leg[3], leg[4], leg[5], minutes, km))
+            cursor = leg[3]
             point = request.point
 
-        self._recompute_slack()
-        self.feasible = True
-        return True
+        if lunch_gap == n:
+            taken = self._lunch_leg(cursor, point)
+            if taken is None:
+                return None
+            lunch_leg, lunch_point = taken
+        return legs, lunch_leg, lunch_point
+
+    def _lunch_leg(self, cursor: float, point: GeoPoint):
+        """Обед, когда инженер свободен с `cursor` в точке `point`: (расписание, где обедал).
+
+        Расписание — как у визита: (выезд, прибытие, начало, конец, ожидание, простой до
+        выезда, минуты в пути, км). Обед начинается как можно раньше в своём окне —
+        так остаток дня свободнее всего. None — обед здесь не помещается.
+        """
+        lunch = self.lunch
+        assert lunch is not None
+        target = lunch.point if lunch.point is not None else point
+        if self.lunch_fact is not None:
+            dep, arr, start, end, wait, minutes, km = self.lunch_fact
+            return (dep, arr, start, end, wait, 0.0, minutes, km), target
+        cal = self.cal
+        free_from = cursor if cursor > self.floor_m else self.floor_m
+        if lunch.point is None:
+            km = minutes = 0.0
+            leg = schedule_leg(cal, lunch.timing, free_from, 0.0, True)
+        elif self.timed is None:
+            km, minutes = self.ctx.travel.both(point, target, self.mode)
+            leg = schedule_leg(cal, lunch.timing, free_from, minutes, True)
+        else:
+            km = self.ctx.travel.distance_km(point, target, self.mode)
+            leg = schedule_leg_timed(
+                cal, lunch.timing, free_from, self.timed, point, target, self.mode, True
+            )
+            if leg is not None:
+                minutes = leg[6]
+        if leg is None:
+            return None
+        return (leg[0], leg[1], leg[2], leg[3], leg[4], leg[5], minutes, km), target
+
+    def _lunch_gaps(self, base, shift_start: float) -> list[list[int]] | None:
+        """Где пробовать обед: сначала места, перекрывающие окно обеда, затем остальные.
+
+        `base` — расписание без обеда. Место перед визитом, который целиком кончается до
+        открытия окна обеда, заведомо не лучше места после него: обед начнётся в то же
+        время, а визит будет сделан раньше. Такие места — запасные. Места, где инженер
+        освобождается уже после последнего допустимого начала обеда, не годятся вовсе.
+
+        None — обед уже не поставить: инженер освобождается от начатого слишком поздно.
+        """
+        timing = self.lunch.timing
+        n = len(self.stops)
+        low = min(self.locked_count, n)
+
+        def free(gap: int) -> float:
+            moment = base[gap - 1][3] if gap > 0 else shift_start
+            return moment if moment > self.floor_m else self.floor_m
+
+        if free(low) > timing.window_end + _EPS:
+            return None
+        primary: list[int] = []
+        spare: list[int] = []
+        for gap in range(low, n + 1):
+            if free(gap) > timing.window_end + _EPS:
+                break
+            if gap < n and base[gap][3] <= timing.window_start + _EPS:
+                spare.append(gap)
+            else:
+                primary.append(gap)
+        return [primary, spare]
+
+    def _fact_gap(self) -> int:
+        """Место начатого обеда: после начатых визитов, работа по которым началась раньше обеда.
+
+        По началу работ, а не по концу визита и выезду на обед: времена в БД хранятся с
+        разной точностью (выезд на обед — до секунды, конец визита — с долями), и визит,
+        кончившийся в 17:04:31.32, оказывался «после» обеда с выездом в 17:04:31. Обед
+        тогда вставал перед этим визитом, а следующая заявка — поверх начатого обеда.
+        """
+        fact = self.lunch_fact
+        assert fact is not None
+        gap = 0
+        for i in range(min(self.locked_count, len(self._frozen), len(self.stops))):
+            if self._frozen[i][2] < fact[2]:
+                gap = i + 1
+            else:
+                break
+        return gap
 
     # ------------------------------------------------------------------ обратный проход
 
@@ -393,6 +566,10 @@ class RouteState:
         if n == 0 or shift_end is None:
             return
 
+        # Обед, который ещё не начался, держит визит перед собой: после визита нужно успеть
+        # доехать до места обеда, начать обед в его окне и после обеда успеть к следующему
+        # визиту. Начатый обед — факт, визиты до него заморожены.
+        gap = self.lunch_gap if self._lunch is not None and self.lunch_fact is None else None
         latest = self._latest
         for i in range(n - 1, -1, -1):
             request = self.stops[i]
@@ -401,7 +578,14 @@ class RouteState:
                 # Начатую работу задержать уже нельзя: запас по определению нулевой.
                 latest[i] = self._start[i]
                 continue
-            if i == n - 1:
+            if gap is not None and i == gap - 1:
+                self._lunch_latest = self._lunch_latest_start(gap)
+                depart = self._latest_departure_to_lunch(request.point, self._lunch_latest)
+                bound = None if depart is None else cal.sub_m(depart, timing.duration)
+                if bound is not None and i == n - 1:
+                    last = cal.sub_m(shift_end, timing.duration)
+                    bound = None if last is None else min(bound, last)
+            elif i == n - 1:
                 bound = cal.sub_m(shift_end, timing.duration)
             else:
                 nxt = self.stops[i + 1]
@@ -419,6 +603,43 @@ class RouteState:
                 latest[i] = _NEG_INF
             else:
                 latest[i] = bound if bound < timing.window_end else timing.window_end
+        if gap is not None:
+            # И когда визит перед обедом уже начат (цикл его пропустил): иначе окна
+            # «до обеда» пропадали бы, хотя успеть что-то до обеда ещё можно
+            self._lunch_latest = self._lunch_latest_start(gap)
+
+    def _lunch_latest_start(self, gap: int) -> float:
+        """Самое позднее начало обеда перед визитом `gap`, при котором хвост ещё сходится."""
+        cal = self.cal
+        timing = self.lunch.timing
+        if gap >= len(self.stops):
+            bound = cal.sub_m(cal.end_m, timing.duration) if cal.end_m is not None else None
+        else:
+            latest_next = self._latest[gap]
+            if latest_next == _NEG_INF:
+                return _NEG_INF
+            here, nxt = self._lunch_point, self.stops[gap].point
+            if self.timed is None:
+                minutes = self.ctx.travel.travel_minutes(here, nxt, self.mode)
+                depart = cal.sub_m(latest_next, minutes)
+            else:
+                depart = latest_departure_timed(cal, self.timed, here, nxt, self.mode, latest_next)
+            bound = None if depart is None else cal.sub_m(depart, timing.duration)
+        if bound is None:
+            return _NEG_INF
+        return bound if bound < timing.window_end else timing.window_end
+
+    def _latest_departure_to_lunch(self, origin: GeoPoint, lunch_latest: float) -> float | None:
+        """Самый поздний выезд из `origin`, чтобы начать обед не позже `lunch_latest`."""
+        if lunch_latest == _NEG_INF:
+            return None
+        target = self.lunch.point
+        if target is None:
+            return lunch_latest
+        if self.timed is None:
+            minutes = self.ctx.travel.travel_minutes(origin, target, self.mode)
+            return self.cal.sub_m(lunch_latest, minutes)
+        return latest_departure_timed(self.cal, self.timed, origin, target, self.mode, lunch_latest)
 
     # ------------------------------------------------------------------ оценка вставки
 
@@ -428,12 +649,25 @@ class RouteState:
         Возвращает стоимость либо `None`, если вставка недопустима. Проверка
         оптимистична на границах перерывов, поэтому фактическая вставка всегда
         подтверждается полным пересчётом (`insert_checked`).
+
+        Рядом с обедом (и в пустом маршруте, где обеда ещё нет) быстрой оценки нет:
+        заявка может встать и до обеда, и после, а обед — переехать на другое место.
+        Там маршрут пересчитывается честно, это одна позиция из всех.
         """
         if position < self.locked_count or position > len(self.stops):
             return None
         if not self.feasible or not self.accepts(request):
             return None
+        if self.lunch is not None and (self.is_empty or position == self.lunch_gap):
+            return self._evaluate_exact(request, position)
+        return self._evaluate_between(
+            request, position, self._point_before(position), self._time_before(position)
+        )
 
+    def _evaluate_between(
+        self, request: Request, position: int, prev_point: GeoPoint, cursor: float
+    ) -> InsertionCost | None:
+        """Вставка перед визитом `position`, если инженер свободен с `cursor` в `prev_point`."""
         cal = self.cal
         ctx = self.ctx
         travel = ctx.travel
@@ -441,8 +675,6 @@ class RouteState:
         strict = ctx.settings.service_must_start_within_window
         timing = ctx.timing(request)
 
-        prev_point = self._point_before(position)
-        cursor = self._time_before(position)
         if cursor == _NEG_INF:
             return None
 
@@ -492,6 +724,46 @@ class RouteState:
             delta_waiting_minutes=delta_wait,
         )
 
+    def _evaluate_exact(self, request: Request, position: int) -> InsertionCost | None:
+        """Оценка вставки полным пересчётом; маршрут после неё остаётся ровно прежним."""
+        saved = self._save()
+        opens = 1 if self.is_empty else 0
+        travel_before, km_before, wait_before = (
+            self.travel_minutes, self.distance_km, self.waiting_minutes
+        )
+        self.stops.insert(position, request)
+        try:
+            ok = self.recompute()
+            after = (self.travel_minutes, self.distance_km, self.waiting_minutes)
+        finally:
+            self.stops.pop(position)
+            self._restore(saved)
+        if not ok:
+            return None
+        return InsertionCost(
+            opens_new_engineer=opens,
+            delta_travel_minutes=after[0] - travel_before,
+            delta_distance_km=after[1] - km_before,
+            delta_waiting_minutes=after[2] - wait_before,
+        )
+
+    def _save(self) -> tuple:
+        # `recompute` заводит новые списки, а не правит старые, — хватает ссылок.
+        return (
+            self._dep, self._arr, self._start, self._end, self._wait, self._idle,
+            self._leg_minutes, self._leg_km, self._latest, self.feasible,
+            self.distance_km, self.travel_minutes, self.service_minutes, self.waiting_minutes,
+            self.lunch_gap, self._lunch, self._lunch_point, self._lunch_latest,
+        )
+
+    def _restore(self, saved: tuple) -> None:
+        (
+            self._dep, self._arr, self._start, self._end, self._wait, self._idle,
+            self._leg_minutes, self._leg_km, self._latest, self.feasible,
+            self.distance_km, self.travel_minutes, self.service_minutes, self.waiting_minutes,
+            self.lunch_gap, self._lunch, self._lunch_point, self._lunch_latest,
+        ) = saved
+
     def best_insertion(self, request: Request) -> tuple[InsertionCost, int] | None:
         """Лучшая по стоимости допустимая позиция. Ничья разрешается меньшей позицией."""
         best: tuple[InsertionCost, int] | None = None
@@ -514,35 +786,130 @@ class RouteState:
         сорвётся хвост маршрута (следующие окна, смена) или окно самой заявки.
         Следующие визиты при этом могут сдвинуться позже в пределах своего запаса.
 
+        Одним окном — от самого раннего из вариантов до самого позднего; сами варианты
+        (до обеда и после) отдаёт `insertion_windows`.
+
         Как и `evaluate_insertion`, оценка оптимистична на границах перерывов:
         окончательно ход подтверждает `insert_checked`.
         """
+        options = self.insertion_windows(request, position)
+        if not options:
+            return None
+        first = min(options, key=lambda w: w.earliest)
+        return InsertionWindow(
+            first.earliest, max(w.latest for w in options), first.departure, first.travel_minutes
+        )
+
+    def insertion_windows(self, request: Request, position: int) -> list[InsertionWindow]:
+        """Окна начала работ при вставке перед визитом `position` — по вариантам.
+
+        На месте обеда (и в пустом маршруте, где обед встанет вместе с первой заявкой)
+        заявка встаёт либо до обеда, либо после него — это два отдельных окна. Слить их
+        в одно нельзя: между ними время, в которое заявка не встанет никак, а Гант
+        подсвечивал бы его как свободное.
+        """
+        if position < self.locked_count or position > len(self.stops):
+            return []
+        if not self.feasible or not self.accepts(request):
+            return []
+        if self.lunch is not None and self.is_empty:
+            shift_start = self.cal.start_m
+            if shift_start is None:
+                return []
+            if self.lunch_fact is not None:
+                # Обед уже идёт: заявка — только после него
+                leg, where = self._lunch_leg(shift_start, self.engineer.start_point)
+                after = self._window_from(request, position, where, max(leg[3], self.floor_m))
+                return [after] if after is not None else []
+            if max(shift_start, self.floor_m) > self.lunch.timing.window_end + _EPS:
+                # Окно обеда прошло, а заявок не было: обеда в этот день уже не будет
+                window = self._window_from(
+                    request, position, self.engineer.start_point, self._time_before(position)
+                )
+                return [window] if window is not None else []
+            after = None
+            taken = self._lunch_leg(shift_start, self.engineer.start_point)
+            if taken is not None:
+                leg, where = taken
+                after = self._window_from(request, position, where, max(leg[3], self.floor_m))
+            before = self._window_before_lunch(request, position)
+            return [w for w in (before, after) if w is not None]
+        if self._lunch is None or position != self.lunch_gap:
+            window = self._window_from(
+                request, position, self._point_before(position), self._time_before(position)
+            )
+            return [window] if window is not None else []
+
+        lunch_end = self._lunch[3]
+        after = self._window_from(
+            request, position, self._lunch_point,
+            lunch_end if lunch_end > self.floor_m else self.floor_m,
+        )
+        before = None if self.lunch_fact is not None else self._window_before_lunch(request, position)
+        return [w for w in (before, after) if w is not None]
+
+    def without_lunch(self) -> "RouteState | None":
+        """Тот же маршрут, расписанный без обеда, — для окон «обед сразу после новой заявки».
+
+        Обед у последней заявки переезжает к новой заявке, а в своё место (офис, точка)
+        едут прямо от неё: такого места обеда в маршруте до вставки ещё нет, и ни один
+        вариант с обедом между прежними визитами его не покажет. None — обеда нет или он
+        уже начат (тогда он остаётся где есть).
+        """
+        if self.lunch is None or self.lunch_fact is not None or self.is_empty:
+            return None
+        free = self.clone()
+        lunch = free.lunch
+        free.lunch = None
+        feasible = free.recompute()
+        free.lunch = lunch
+        if not feasible:
+            return None
+        free._lunch_point = lunch.point
+        return free
+
+    def window_lunch_after(self, request: Request, position: int) -> InsertionWindow | None:
+        """Окно заявки перед визитом `position`, если обед — сразу после неё.
+
+        Вызывается у маршрута из `without_lunch`: визиты до заявки идут без обеда, после
+        заявки — обед, за ним остальные визиты со своим запасом.
+        """
         if position < self.locked_count or position > len(self.stops):
             return None
-        if not self.feasible or not self.accepts(request):
+        if not self.feasible or not self.accepts(request) or self.lunch is None:
             return None
+        if self.lunch.point is not None:
+            self._lunch_latest = self._lunch_latest_start(position)
+        return self._window_before_lunch(request, position)
 
-        cal = self.cal
-        travel = self.ctx.travel
-        mode = self.mode
-        strict = self.ctx.settings.service_must_start_within_window
-        timing = self.ctx.timing(request)
-
-        prev_point = self._point_before(position)
-        cursor = self._time_before(position)
+    def _arrival(self, request: Request, prev_point: GeoPoint, cursor: float):
+        """(выезд, самое раннее начало работ, минуты в пути) от `prev_point` с `cursor`."""
         if cursor == _NEG_INF:
             return None
-        timed = self.timed
-        if timed is None:
-            minutes = travel.travel_minutes(prev_point, request.point, mode)
-            leg = schedule_leg(cal, timing, cursor, minutes, strict)
+        strict = self.ctx.settings.service_must_start_within_window
+        timing = self.ctx.timing(request)
+        if self.timed is None:
+            minutes = self.ctx.travel.travel_minutes(prev_point, request.point, self.mode)
+            leg = schedule_leg(self.cal, timing, cursor, minutes, strict)
         else:
-            leg = schedule_leg_timed(cal, timing, cursor, timed, prev_point, request.point, mode, strict)
+            leg = schedule_leg_timed(
+                self.cal, timing, cursor, self.timed, prev_point, request.point, self.mode, strict
+            )
         if leg is None:
             return None
-        departure, earliest = leg[0], leg[2]
-        if timed is not None:
+        if self.timed is not None:
             minutes = leg[6]
+        return leg[0], leg[2], minutes
+
+    def _window_from(
+        self, request: Request, position: int, prev_point: GeoPoint, cursor: float
+    ) -> InsertionWindow | None:
+        arrival = self._arrival(request, prev_point, cursor)
+        if arrival is None:
+            return None
+        departure, earliest, minutes = arrival
+        cal = self.cal
+        timing = self.ctx.timing(request)
 
         if position == len(self.stops):
             shift_end = cal.end_m
@@ -552,14 +919,60 @@ class RouteState:
             if latest_next == _NEG_INF:
                 return None
             nxt = self.stops[position]
-            if timed is None:
-                out = travel.travel_minutes(request.point, nxt.point, mode)
+            if self.timed is None:
+                out = self.ctx.travel.travel_minutes(request.point, nxt.point, self.mode)
                 latest_departure = cal.sub_m(latest_next, out)
             else:
                 latest_departure = latest_departure_timed(
-                    cal, timed, request.point, nxt.point, mode, latest_next
+                    cal, self.timed, request.point, nxt.point, self.mode, latest_next
                 )
             bound = None if latest_departure is None else cal.sub_m(latest_departure, timing.duration)
+        if bound is None:
+            return None
+        latest = bound if bound < timing.window_end else timing.window_end
+        if latest < earliest - _EPS:
+            return None
+        return InsertionWindow(earliest, latest, departure, minutes)
+
+    def _window_before_lunch(self, request: Request, position: int) -> InsertionWindow | None:
+        """Заявка перед обедом: после неё ещё нужно успеть пообедать и доехать дальше."""
+        arrival = self._arrival(request, self._point_before(position), self._time_before(position))
+        if arrival is None:
+            return None
+        departure, earliest, minutes = arrival
+        cal = self.cal
+        lunch = self.lunch
+        timing = self.ctx.timing(request)
+        if lunch.point is None:
+            # Обед переедет к этой заявке — и дорога после обеда начнётся отсюда же.
+            if position == len(self.stops):
+                end = cal.end_m
+                lunch_latest = None if end is None else cal.sub_m(end, lunch.timing.duration)
+            else:
+                latest_next = self._latest[position]
+                nxt = self.stops[position].point
+                if latest_next == _NEG_INF:
+                    depart = None
+                elif self.timed is None:
+                    out = self.ctx.travel.travel_minutes(request.point, nxt, self.mode)
+                    depart = cal.sub_m(latest_next, out)
+                else:
+                    depart = latest_departure_timed(
+                        cal, self.timed, request.point, nxt, self.mode, latest_next
+                    )
+                lunch_latest = None if depart is None else cal.sub_m(depart, lunch.timing.duration)
+            if lunch_latest is None:
+                return None
+            lunch_latest = min(lunch_latest, lunch.timing.window_end)
+        else:
+            # В пустом маршруте обеда ещё нет: после заявки — только конец смены
+            lunch_latest = self._lunch_latest if not self.is_empty else self._lunch_latest_start(0)
+        # Раньше своего окна обед не начнётся, как рано ни кончи заявку: если к открытию
+        # окна уже поздно — после обеда хвост не успеть
+        if lunch_latest < lunch.timing.window_start - _EPS:
+            return None
+        depart = self._latest_departure_to_lunch(request.point, lunch_latest)
+        bound = None if depart is None else cal.sub_m(depart, timing.duration)
         if bound is None:
             return None
         latest = bound if bound < timing.window_end else timing.window_end
@@ -611,21 +1024,26 @@ class RouteState:
         stops: Sequence[Request],
         locked_count: int,
         frozen: Sequence[tuple[float, float, float, float, float, float, float]] = (),
+        lunch_fact: tuple[float, float, float, float, float, float, float] | None = None,
+        lunch_gap: int | None = None,
     ) -> bool:
         """Принимает состав маршрута из готового плана вместе с фактами по начатым визитам.
 
         `frozen` — расписание locked-префикса в минутах от `ctx.origin`, взятое из
         предыдущего плана. Оно подставляется как есть: работа, которая уже идёт,
         не может «переехать» из-за того, что событие изменило остальной день.
+        `lunch_fact` — так же подставляемый обед, если он уже начался (см. `lunch_fact`).
+        `lunch_gap` — место ещё не начатого обеда в плане (см. `recompute`).
         При недопустимости состава изменение откатывается целиком.
         """
-        snapshot = (self.stops[:], self.locked_count, list(self._frozen))
+        snapshot = (self.stops[:], self.locked_count, list(self._frozen), self.lunch_fact)
         self.stops = list(stops)
         self.locked_count = max(0, min(locked_count, len(self.stops)))
         self._frozen = list(frozen)[: self.locked_count]
-        if self.recompute():
+        self.lunch_fact = lunch_fact if self.lunch is not None else None
+        if self.recompute(lunch_gap):
             return True
-        self.stops, self.locked_count, self._frozen = snapshot
+        self.stops, self.locked_count, self._frozen, self.lunch_fact = snapshot
         self.recompute()
         return False
 
@@ -779,11 +1197,35 @@ class RouteState:
 
     @property
     def start_m(self) -> float | None:
-        return self._dep[0] if self.stops else None
+        if not self.stops:
+            return None
+        if self._lunch is not None and self.lunch_gap == 0:
+            return min(self._lunch[0], self._dep[0])
+        return self._dep[0]
 
     @property
     def end_m(self) -> float | None:
-        return self._end[-1] if self.stops else None
+        if not self.stops:
+            return None
+        if self._lunch is not None and self.lunch_gap == len(self.stops):
+            return max(self._lunch[3], self._end[-1])
+        return self._end[-1]
+
+    def lunch_schedule(self):
+        """Обед маршрута: (перед каким визитом, расписание, где обедает) или None.
+
+        Расписание — как у визита в `schedule_at`: выезд, прибытие, начало, конец,
+        ожидание, простой до выезда, минуты в пути, км.
+        """
+        if self._lunch is None or self.lunch_gap is None:
+            return None
+        return self.lunch_gap, self._lunch, self._lunch_point
+
+    def point_before(self, index: int) -> GeoPoint:
+        """Откуда инженер едет к визиту `index`: с прошлого адреса или с места обеда."""
+        if self._lunch is not None and self.lunch_gap == index and self._lunch_point is not None:
+            return self._lunch_point
+        return self._point_before(index)
 
     @property
     def busy_minutes(self) -> float:

@@ -321,7 +321,7 @@ export function ContextHeader({
       {center}
 
       <div className="flex items-center justify-end gap-2">
-        {isPlanning ? (
+        {isPlanning || isRecalculating ? (
           // Рядом с версией плана места мало — там только время, остальное в подсказке
           <Tooltip delay={200}>
             <Tooltip.Trigger
@@ -335,7 +335,7 @@ export function ContextHeader({
               ) : null}
             </Tooltip.Trigger>
             <AppTooltipContent className="max-w-[280px] text-left break-normal">
-              Заявки загружены, считаем новый план
+              {isPlanning ? 'Заявки загружены, считаем новый план' : 'Считаем новый план'}
               {planningSeconds != null ? ` — осталось ${formatWait(planningSeconds)}` : ''}. Он откроется сам
             </AppTooltipContent>
           </Tooltip>

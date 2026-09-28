@@ -95,6 +95,8 @@ class PlanningRepository:
             .options(
                 selectinload(Engineer.transport),
                 selectinload(Engineer.brigade).selectinload(Brigade.office_address),
+                selectinload(Engineer.brigade).selectinload(Brigade.lunch_address),
+                selectinload(Engineer.lunch_address),
                 selectinload(Engineer.skills).selectinload(EngineerSkill.skill),
                 selectinload(Engineer.equipment).selectinload(EngineerEquipment.item),
             )
@@ -267,6 +269,7 @@ class PlanningRepository:
         reference_plan_id: int | None,
         rows: list[Assignment],
         legs: dict[int, dict] | None = None,
+        lunches: list[dict] | None = None,
     ) -> Plan:
         plan = Plan(
             version=version,
@@ -274,6 +277,7 @@ class PlanningRepository:
             region_id=region_id,
             created_at=datetime.now(),
             reference_plan_id=reference_plan_id,
+            lunches=lunches,
         )
         self._session.add(plan)
         await self._session.flush()
