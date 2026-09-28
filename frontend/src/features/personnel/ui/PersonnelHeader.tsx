@@ -3,7 +3,6 @@ import {
   RiAddCircleLine,
   RiArrowDownSLine,
   RiDownload2Line,
-  RiFileDownloadLine,
   RiFileTextLine,
 } from '@remixicon/react'
 import { Separator } from 'react-aria-components'
@@ -27,7 +26,7 @@ type PersonnelHeaderProps = {
   title: string
   tab: PersonnelTab
   onTabChange: (tab: PersonnelTab) => void
-  /** Жёлтая кнопка и «Импорт» — зона загрузки файла. */
+  /** Жёлтая кнопка — зона загрузки файла. */
   onAddEngineer: () => void
   /** Пункт «Добавить» — форма одного инженера. */
   onAddSingleEngineer: () => void
@@ -90,20 +89,10 @@ export function PersonnelHeader({
                 aria-label="Действия с инженерами"
                 className="flex flex-col outline-none"
                 onAction={(key) => {
-                  if (key === 'import') onAddEngineer()
-                  else if (key === 'add') onAddSingleEngineer()
+                  if (key === 'add') onAddSingleEngineer()
                   else if (key === 'csv' || key === 'json') onExport(key)
                 }}
               >
-                <Dropdown.Item
-                  id="import"
-                  textValue="Импорт csv / json"
-                  className={MENU_ITEM}
-                  style={{ borderRadius: 8 }}
-                >
-                  <RiFileDownloadLine size={16} className="shrink-0 text-muted" />
-                  Импорт csv / json
-                </Dropdown.Item>
                 <Dropdown.Item
                   id="csv"
                   textValue="Экспорт csv"
