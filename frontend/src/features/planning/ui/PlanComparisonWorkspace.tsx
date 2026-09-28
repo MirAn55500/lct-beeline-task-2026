@@ -1,5 +1,12 @@
 import { useMemo, useState } from 'react'
-import { RiArrowDownSFill, RiArrowUpSFill, RiFlashlightLine, RiSubtractLine } from '@remixicon/react'
+import { ListBox, Select } from '@heroui/react'
+import {
+  RiArrowDownSFill,
+  RiArrowDownSLine,
+  RiArrowUpSFill,
+  RiFlashlightLine,
+  RiSubtractLine,
+} from '@remixicon/react'
 
 import { cn } from '@/shared/lib/cn'
 import { AppPanel } from '@/shared/ui'
@@ -80,16 +87,40 @@ function PlanColumn({
   return (
     <section className="min-w-0 flex-1">
       <div className="mb-2 flex h-6 items-center justify-between gap-3">
-        <select
+        <Select
           value={planId}
-          onChange={(event) => onChange(Number(event.target.value))}
+          onChange={(key) => {
+            if (key != null) onChange(Number(key))
+          }}
           aria-label={`${label}: версия плана`}
-          className="cursor-pointer bg-transparent text-base font-semibold leading-6 text-foreground outline-none"
+          className="w-auto min-w-0"
         >
-          {plans.map((plan) => (
-            <option key={plan.plan_id} value={plan.plan_id}>План №{plan.version}</option>
-          ))}
-        </select>
+          <Select.Trigger className="flex cursor-pointer items-center gap-1 bg-transparent text-left text-base font-semibold leading-6 text-foreground outline-none transition-colors hover:opacity-80">
+            <Select.Value className="min-w-0 truncate" />
+            <Select.Indicator className="shrink-0 text-foreground">
+              <RiArrowDownSLine size={20} />
+            </Select.Indicator>
+          </Select.Trigger>
+          <Select.Popover
+            className="min-w-[193px] bg-surface p-1 shadow-lg outline-none"
+            style={{ borderRadius: 16 }}
+          >
+            <ListBox className="outline-none">
+              {plans.map((plan) => (
+                <ListBox.Item
+                  key={plan.plan_id}
+                  id={plan.plan_id}
+                  textValue={`План №${plan.version}`}
+                  className="cursor-pointer px-3 py-2 text-sm font-medium leading-5 text-foreground outline-none data-[focused]:bg-surface-hover data-[selected]:bg-surface-hover"
+                  style={{ borderRadius: 8 }}
+                >
+                  План №{plan.version}
+                  <ListBox.ItemIndicator />
+                </ListBox.Item>
+              ))}
+            </ListBox>
+          </Select.Popover>
+        </Select>
         <span className="inline-flex items-center gap-1 text-xs font-medium leading-5 text-foreground">
           {tone === 'efficient' ? <RiFlashlightLine size={12} /> : <RiSubtractLine size={12} />}
           {label}
