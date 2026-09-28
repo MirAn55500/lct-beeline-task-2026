@@ -270,6 +270,7 @@ class PlanningRepository:
         rows: list[Assignment],
         legs: dict[int, dict] | None = None,
         lunches: list[dict] | None = None,
+        distribution: str | None = None,
     ) -> Plan:
         plan = Plan(
             version=version,
@@ -277,6 +278,7 @@ class PlanningRepository:
             region_id=region_id,
             created_at=datetime.now(),
             reference_plan_id=reference_plan_id,
+            distribution=distribution,
             lunches=lunches,
         )
         self._session.add(plan)

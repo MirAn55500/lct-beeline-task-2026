@@ -47,6 +47,8 @@ export type PlanVersion = {
   plan_id: number
   version: number
   created_at: string
+  /** even — базовый, efficient — эффективный; null у старых версий. */
+  distribution?: PlanDistribution | null
 }
 
 export type DayOverview = {

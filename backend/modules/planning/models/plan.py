@@ -25,6 +25,8 @@ class Plan(BaseTable, table=True):
     region_id: int = Field(foreign_key="regions.region_id", index=True)
     created_at: datetime
     reference_plan_id: Optional[int] = Field(default=None, foreign_key="plans.plan_id")
+    # even = равномерное (базовый), efficient = эффективное; пусто у старых версий.
+    distribution: Optional[str] = Field(default=None, max_length=20)
     # Версия так, как её показывали при сохранении (`PlanExportResponse`). Заявки и инженеры
     # потом меняются — переносятся на другой день, отменяются, правятся, — а старая версия
     # плана остаётся историей. Пусто у планов до миграции 0016: их собирают по текущим данным.

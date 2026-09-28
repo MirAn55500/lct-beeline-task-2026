@@ -13,7 +13,7 @@ import { AppPanel } from '@/shared/ui'
 
 import { useDayOverview } from '../lib/useDayOverview'
 import { useGetPlanExportQuery, type PlanExportResponse } from '../planApi'
-import type { PlanVersion } from '../types'
+import type { PlanDistribution, PlanVersion } from '../types'
 
 type PlanKind = 'efficient' | 'baseline' | 'neutral'
 
@@ -81,6 +81,16 @@ function trendFor(key: MetricKey, own: number, other: number): Trend | null {
   const higher = own > other
   const better = isHigherBetter(key) ? higher : !higher
   return { better, higher }
+}
+
+/** Кто «эффективнее» по сохранённому режиму; иначе — по метрикам пары. */
+function kindForPlan(
+  distribution: PlanDistribution | null | undefined,
+  fallback: PlanKind,
+): PlanKind {
+  if (distribution === 'efficient') return 'efficient'
+  if (distribution === 'even') return 'baseline'
+  return fallback === 'neutral' ? 'efficient' : fallback
 }
 
 /** Кто «эффективнее» по правилу стенда: заявки → инженеры → загрузка → неназначенные. */
@@ -467,7 +477,13 @@ export function PlanCompareWorkspace({ regionId, date, className }: PlanCompareW
     () => metricsFromPlan(rightPlan.data, engineersTotal),
     [rightPlan.data, engineersTotal],
   )
-  const kinds = classifyKinds(leftMetrics, rightMetrics)
+  const relativeKinds = classifyKinds(leftMetrics, rightMetrics)
+  const leftVersion = plans.find((item) => item.plan_id === leftId)
+  const rightVersion = plans.find((item) => item.plan_id === rightId)
+  const kinds = {
+    left: kindForPlan(leftVersion?.distribution, relativeKinds.left),
+    right: kindForPlan(rightVersion?.distribution, relativeKinds.right),
+  }
   const canCompare = leftId != null && rightId != null && leftId !== rightId
 
   return (

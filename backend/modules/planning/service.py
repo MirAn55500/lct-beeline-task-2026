@@ -3,6 +3,7 @@ import math
 from collections.abc import Iterable
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
+from typing import Literal
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -115,6 +116,7 @@ class PlanningService:
                 plan_id=item.plan_id,
                 version=item.version,
                 created_at=item.created_at,
+                distribution=_plan_distribution(item.distribution),
             )
             for item in plans
             if item.plan_id is not None
@@ -237,7 +239,12 @@ class PlanningService:
             baseline = await asyncio.to_thread(run_plan, scenario, Algorithm.BASELINE, profiles)
             comparison = _comparison(compare_plans(baseline, result))
         plan, assigned, unassigned = await self._persist(
-            region_id, day, scenario, result, transport_by_engineer
+            region_id,
+            day,
+            scenario,
+            result,
+            transport_by_engineer,
+            distribution=distribution.value,
         )
         return RecalculateResponse(
             plan_id=plan.plan_id or 0,
@@ -247,7 +254,16 @@ class PlanningService:
             comparison=comparison,
         )
 
-    async def _persist(self, region_id: int, day: date, scenario, result, transport_by_engineer):
+    async def _persist(
+        self,
+        region_id: int,
+        day: date,
+        scenario,
+        result,
+        transport_by_engineer,
+        *,
+        distribution: str | None = None,
+    ):
         reasons = await self._repo.ensure_unassigned_reasons()
         rows, assigned, unassigned = assignments_from_result(
             result,
@@ -260,6 +276,10 @@ class PlanningService:
         version = (previous.version + 1) if previous is not None else 1
         requests, engineers = self._rows
         offset = scenario.settings.timezone_offset_hours
+        # События и ручные правки без явного режима наследуют прошлую версию.
+        saved_distribution = distribution or (
+            previous.distribution if previous is not None else Distribution.EFFICIENT.value
+        )
         plan = await self._repo.save_plan(
             region_id=region_id,
             day=day,
@@ -267,6 +287,7 @@ class PlanningService:
             reference_plan_id=previous.plan_id if previous is not None else None,
             rows=rows,
             lunches=lunch_rows(result, offset),
+            distribution=saved_distribution,
             legs=route_legs(
                 result,
                 address_of={r.request_id: r.address_id for r in requests if r.request_id is not None},
@@ -980,6 +1001,11 @@ class PlanningService:
                 rows=rows,
                 legs=legs,
                 lunches=lunches,
+                distribution=(
+                    latest.distribution
+                    if latest is not None and latest.distribution
+                    else Distribution.EFFICIENT.value
+                ),
             )
             await self._save_snapshot(saved)
         except Exception:
@@ -1055,6 +1081,12 @@ _COMPARE_LINES = (
     ("total_distance_km", "Пробег, км", False),
     ("distance_per_assigned_km", "Км на заявку", False),
 )
+
+
+def _plan_distribution(raw: str | None) -> Literal["even", "efficient"] | None:
+    if raw in ("even", "efficient"):
+        return raw  # type: ignore[return-value]
+    return None
 
 
 def _comparison(raw: dict) -> PlanComparison:

@@ -61,6 +61,8 @@ class PlanVersionResponse(BaseModel):
     plan_id: int
     version: int
     created_at: datetime
+    """even — базовый, efficient — эффективный; null у старых версий."""
+    distribution: Literal["even", "efficient"] | None = None
 
 
 class DayOverviewResponse(BaseModel):
