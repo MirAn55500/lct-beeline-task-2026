@@ -10,6 +10,7 @@ export {
   useGetPersonnelHealthQuery,
   useUpdateBrigadeMutation,
   useUpdateEngineerMutation,
+  useUploadEngineersMutation,
 } from './api'
 export type {
   BrigadeArea,
@@ -27,16 +28,21 @@ export type {
   UpdateBrigadeBody,
   UpdateBrigadeResult,
 } from './types'
+export type { UploadEngineersResult } from './api'
 export {
   QUALIFICATION_HINT,
   QUALIFICATION_LABEL,
   QUALIFICATION_OPTIONS,
   SKILL_LABEL,
   TRANSPORT_LABEL,
-  createUploadBatch,
   shortName,
 } from './mocks'
 export { downloadEngineers } from './lib/exportEngineers'
+export {
+  ENGINEERS_FILE_TYPES,
+  downloadEngineersTemplate,
+  isEngineersFile,
+} from './lib/template'
 export { EngineerFormPanel } from './ui/EngineerFormPanel'
 export {
   AddressPointField,

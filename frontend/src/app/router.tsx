@@ -85,6 +85,7 @@ const HIGHLIGHT_MS = 4000
 function PersonnelPage() {
   const [params, setParams] = useSearchParams()
   const [isAddOpen, setAddOpen] = useState(false)
+  const [addSingle, setAddSingle] = useState(false)
   const [activeEngineerId, setActiveEngineerId] = useState<number | null>(null)
   // Открытая карточка — в форме редактирования
   const [isEditing, setEditing] = useState(false)
@@ -185,8 +186,15 @@ function PersonnelPage() {
           onAddEngineer={() => {
             setActiveEngineerId(null)
             setEditing(false)
+            setAddSingle(false)
             setAddOpen(true)
-            // Добавленные инженеры подсвечиваются в таблице
+            update({ tab: 'engineers' })
+          }}
+          onAddSingleEngineer={() => {
+            setActiveEngineerId(null)
+            setEditing(false)
+            setAddSingle(true)
+            setAddOpen(true)
             update({ tab: 'engineers' })
           }}
           onExport={(format) =>
@@ -230,8 +238,10 @@ function PersonnelPage() {
 
         {isAddOpen ? (
           <EngineerFormPanel
+            key={addSingle ? 'single' : 'file'}
             brigades={brigades}
             defaultBrigadeId={brigadeId}
+            startInSingle={addSingle}
             onAdd={handleAdded}
             onClose={() => setAddOpen(false)}
           />

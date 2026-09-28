@@ -81,6 +81,18 @@ function lunchPoint(item: { lunch_lat?: number | null; lunch_lon?: number | null
   return item.lunch_lat != null && item.lunch_lon != null ? [item.lunch_lon, item.lunch_lat] : null
 }
 
+type ApiUploadEngineersResult = {
+  created: number
+  skipped: number
+  engineers: ApiEngineer[]
+}
+
+export type UploadEngineersResult = {
+  created: number
+  skipped: number
+  engineers: PersonnelEngineer[]
+}
+
 function mapBrigade(item: ApiBrigade): PersonnelBrigade {
   return {
     id: item.id,
@@ -232,6 +244,23 @@ export const personnelApi = baseApi.injectEndpoints({
       transformResponse: (response: ApiEngineer) => mapPersonnelEngineer(response),
       invalidatesTags: ['Engineer', 'Brigade'],
     }),
+    uploadEngineers: build.mutation<
+      UploadEngineersResult,
+      { file: File; brigadeId: number }
+    >({
+      query: ({ file, brigadeId }) => {
+        const body = new FormData()
+        body.append('file', file)
+        body.append('brigade_id', String(brigadeId))
+        return { url: '/api/personnel/engineers/upload', method: 'POST', body }
+      },
+      transformResponse: (response: ApiUploadEngineersResult) => ({
+        created: response.created,
+        skipped: response.skipped,
+        engineers: response.engineers.map(mapPersonnelEngineer),
+      }),
+      invalidatesTags: ['Engineer', 'Brigade'],
+    }),
     updateEngineer: build.mutation<PersonnelEngineer, { id: number; body: EngineerBody }>({
       query: ({ id, body }) => ({ url: `/api/personnel/engineers/${id}`, method: 'PATCH', body }),
       transformResponse: (response: ApiEngineer) => mapPersonnelEngineer(response),
@@ -258,6 +287,7 @@ export const {
   useGetEngineersQuery,
   useGetPersonnelEngineersQuery,
   useCreateEngineerMutation,
+  useUploadEngineersMutation,
   useDeleteEngineerMutation,
   useUpdateBrigadeMutation,
   useUpdateEngineerMutation,

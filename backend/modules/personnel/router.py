@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 
 from modules.personnel.dependencies import get_personnel_service
 from modules.planning import board as plan_boards
@@ -17,6 +17,7 @@ from modules.personnel.schemas import (
     UpdateBrigadeRequest,
     UpdateBrigadeResponse,
     UpdateEngineerRequest,
+    UploadEngineersResult,
 )
 from modules.personnel.service import PersonnelService
 
@@ -126,6 +127,21 @@ async def create_engineer(
     response = await service.create_engineer(body)
     plan_boards.clear()
     return response
+
+
+@router.post("/engineers/upload", response_model=UploadEngineersResult)
+async def upload_engineers(
+    service: PersonnelServiceDep,
+    file: Annotated[UploadFile, File()],
+    brigade_id: Annotated[int, Form(ge=1)],
+) -> UploadEngineersResult:
+    """Загрузка CSV/JSON профилей в бригаду. Поля: `file`, `brigade_id`."""
+    raw = await file.read()
+    return await service.upload_engineers(
+        brigade_id=brigade_id,
+        filename=file.filename or "engineers.csv",
+        raw=raw,
+    )
 
 
 @router.patch("/engineers/{engineer_id}", response_model=EngineerResponse)

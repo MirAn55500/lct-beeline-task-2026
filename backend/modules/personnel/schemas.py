@@ -182,6 +182,14 @@ class UpdateEngineerRequest(EngineerFields):
     """Карточка инженера целиком: не переданные часы и дни — как у бригады."""
 
 
+class UploadEngineersResult(BaseModel):
+    """Результат загрузки CSV/JSON профилей в бригаду."""
+
+    created: int
+    skipped: int
+    engineers: list[EngineerResponse] = Field(default_factory=list)
+
+
 class PersonnelFilterOptions(BaseModel):
     skills: list[str]
     transports: list[str]

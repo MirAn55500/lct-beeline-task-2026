@@ -25,6 +25,7 @@ from modules.personnel.qualification import (
     qualification_label,
 )
 from modules.personnel.repository import PersonnelRepository
+from modules.personnel.importer import parse_engineers_upload
 from modules.personnel.schemas import (
     AddressSuggestionResponse,
     AreaResponse,
@@ -35,10 +36,12 @@ from modules.personnel.schemas import (
     EngineersQuery,
     LunchPlace,
     PersonnelFilterOptions,
+    QualificationFilter,
     ReverseGeocodeResponse,
     UpdateBrigadeRequest,
     UpdateBrigadeResponse,
     UpdateEngineerRequest,
+    UploadEngineersResult,
 )
 from modules.personnel.skills import SKILL_LABELS, map_skill, skill_code
 from modules.personnel.transport import map_transport
@@ -395,6 +398,68 @@ class PersonnelService:
         if refreshed is None:
             raise AppError("Не удалось сохранить инженера", status_code=500)
         return self._to_response(refreshed)
+
+    async def upload_engineers(
+        self, *, brigade_id: int, filename: str, raw: bytes
+    ) -> UploadEngineersResult:
+        """Массовая загрузка профилей CSV/JSON в выбранную бригаду."""
+        brigade = await self._repo.get_brigade(brigade_id)
+        if brigade is None:
+            raise NotFoundError("Бригада не найдена")
+
+        try:
+            parsed, skipped = parse_engineers_upload(raw, filename)
+        except ValueError as exc:
+            raise AppError(str(exc)) from exc
+
+        if not parsed and skipped == 0:
+            raise AppError("В файле нет инженеров")
+
+        created_ids: list[int] = []
+        for row in parsed:
+            qualification: QualificationFilter | None = None
+            if row.qualification:
+                code = normalize_qualification(row.qualification)
+                if code is None:
+                    skipped += 1
+                    continue
+                qualification = QualificationFilter(code)
+
+            try:
+                body = CreateEngineerRequest(
+                    name=row.name,
+                    brigade_id=brigade_id,
+                    transport=row.transport,
+                    skills=list(row.skills),
+                    qualification=qualification,
+                    home_address=row.home_address,
+                    start_work=row.start_work,
+                    end_work=row.end_work,
+                    work_days=None,
+                    is_lead=False,
+                )
+                fields, skill_codes = await self._engineer_fields(body, brigade)
+            except AppError:
+                skipped += 1
+                continue
+
+            engineer = Engineer(**fields, is_lead=False)
+            engineer = await self._repo.add_engineer(engineer)
+            assert engineer.engineer_id is not None
+            for code in skill_codes:
+                skill_id = await self._repo.ensure_dict(DictGroup.SKILL, code)
+                await self._repo.add_skill(engineer.engineer_id, skill_id)
+            created_ids.append(engineer.engineer_id)
+
+        await self._repo.commit()
+        engineers = [
+            self._to_response(item)
+            for engineer_id in created_ids
+            if (item := await self._repo.get_engineer(engineer_id)) is not None
+        ]
+        return UploadEngineersResult(
+            created=len(engineers), skipped=skipped, engineers=engineers
+        )
 
     async def update_engineer(
         self, engineer_id: int, body: UpdateEngineerRequest

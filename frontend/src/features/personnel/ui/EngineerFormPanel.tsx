@@ -1,9 +1,21 @@
 import { useRef, useState, type SetStateAction } from 'react'
 import { ListBox, ScrollShadow, Select, toast } from '@heroui/react'
 import { Time } from '@internationalized/date'
-import { RiArrowDownSLine } from '@remixicon/react'
+import {
+  RiArrowDownSLine,
+  RiDeleteBinLine,
+  RiDownload2Line,
+  RiFileTextLine,
+  RiLoopRightLine,
+  RiUploadCloud2Line,
+} from '@remixicon/react'
+import { DropZone, FileTrigger, Button as AriaButton, isFileDropItem } from 'react-aria-components'
 
-import { useCreateEngineerMutation, useUpdateEngineerMutation } from '@/features/personnel/api'
+import {
+  useCreateEngineerMutation,
+  useUpdateEngineerMutation,
+  useUploadEngineersMutation,
+} from '@/features/personnel/api'
 import {
   QUALIFICATION_HINT,
   QUALIFICATION_LABEL,
@@ -20,10 +32,18 @@ import type {
 } from '@/features/personnel/types'
 import { WORK_TYPE_OPTIONS } from '@/features/tickets'
 import { cn } from '@/shared/lib/cn'
+import { pluralRu } from '@/shared/lib/text'
 import { AppPanel } from '@/shared/ui'
 
 import { errorReason } from '../lib/errors'
 import { lunchPlaceNote, lunchSpotMissing, lunchTimeError, type LunchDraft } from '../lib/lunch'
+import {
+  ENGINEERS_FILE_TYPES,
+  ENGINEERS_TEMPLATE_SIZE,
+  downloadEngineersTemplate,
+  formatFileSize,
+  isEngineersFile,
+} from '../lib/template'
 import { formatTime, parseTime } from '../lib/time'
 import { WEEKDAYS, sameDays } from '../lib/weekdays'
 import type { AddressPoint } from './AddressPointField'
@@ -35,7 +55,6 @@ const TRANSPORT_ORDER: TransportCode[] = ['car', 'public', 'bike', 'walking']
 
 const QUALIFICATION_ORDER: QualificationCode[] = ['master', 'worker', 'novice']
 
-// Навыки в форме — виды работ из заявок; в таблице они сведены в три группы.
 const WORK_TYPE_TO_SKILL: Record<string, SkillCode> = {
   'Аварийные работы': 'emergency',
   Подключение: 'connection',
@@ -43,7 +62,6 @@ const WORK_TYPE_TO_SKILL: Record<string, SkillCode> = {
   Ремонт: 'local',
 }
 
-/** Навыки инженера → виды работ формы: подключение открывает и дозаказы. */
 function workTypesOf(skills: SkillCode[]): string[] {
   return WORK_TYPE_OPTIONS.filter((type) => skills.includes(WORK_TYPE_TO_SKILL[type]!))
 }
@@ -137,7 +155,6 @@ type Draft = {
   transport: TransportCode | null
   qualification: QualificationCode | null
   workTypes: string[]
-  /** null — бригада, открытая слева (только при добавлении). */
   brigadeId: number | null
   timeFrom: Time | null
   timeTo: Time | null
@@ -199,29 +216,36 @@ function lunchPlaceBody(snapshot: Draft): Partial<EngineerBody> {
 type EngineerFormPanelProps = {
   brigades: PersonnelBrigade[]
   defaultBrigadeId: number | null
-  /** Инженер, которого редактируют; без него — добавление нового. */
+  /** Инженер, которого редактируют; без него — добавление (файл или один). */
   engineer?: PersonnelEngineer
+  /** Сразу форма одного инженера, без зоны файла. */
+  startInSingle?: boolean
   onAdd?: (added: PersonnelEngineer[]) => void
   onSaved?: (saved: PersonnelEngineer) => void
   onClose: () => void
 }
 
-/** Правая панель «Добавить инженера» / «Редактировать инженера». */
+/** Правая панель: загрузка файла / один инженер / редактирование. */
 export function EngineerFormPanel({
   brigades,
   defaultBrigadeId,
   engineer,
+  startInSingle = false,
   onAdd,
   onSaved,
   onClose,
 }: EngineerFormPanelProps) {
   const editing = engineer != null
+  const [mode, setMode] = useState<'file' | 'single'>(
+    editing || startInSingle ? 'single' : 'file',
+  )
   const [submitting, setSubmitting] = useState(false)
+  const [file, setFile] = useState<File | null>(null)
+  const [uploadBrigadeId, setUploadBrigadeId] = useState<number | null>(defaultBrigadeId)
   const [createEngineer] = useCreateEngineerMutation()
   const [updateEngineer] = useUpdateEngineerMutation()
+  const [uploadEngineers] = useUploadEngineersMutation()
   const [draft, setDraft] = useState<Draft>(() => initialDraft(engineer))
-  // Часы и дни идут за бригадой, пока их не поменяли руками: у нового инженера сразу,
-  // у сохранённого — если у него не своя смена или не свой график
   const [hoursTouched, setHoursTouched] = useState(engineer?.ownSchedule ?? false)
   const [daysTouched, setDaysTouched] = useState(engineer?.ownWorkDays ?? false)
   // Обед тоже идёт за бригадой — окно и место по отдельности, как часы и дни
@@ -341,7 +365,6 @@ export function EngineerFormPanel({
       qualification: snapshot.qualification ?? undefined,
       skills: [...new Set(snapshot.workTypes.map((type) => WORK_TYPE_TO_SKILL[type]!))],
       home_address: snapshot.homeAddress.trim() || null,
-      // Часы и дни бригады не передаём: тогда они меняются вместе с бригадой
       ...(own.hours
         ? { start_work: formatTime(snapshot.timeFrom), end_work: formatTime(snapshot.timeTo) }
         : {}),
@@ -361,9 +384,51 @@ export function EngineerFormPanel({
     lunchPlace: ownLunchPlace,
   }
   const body = bodyOf(form, own)
-  // Сохранять нечего, пока карточка совпадает с тем, что пришло с сервера
   const [initialBody] = useState(() => JSON.stringify(body))
   const dirty = !editing || JSON.stringify(body) !== initialBody
+
+  const pickFile = (files: File[]) => {
+    const next = files.find(isEngineersFile)
+    if (next) setFile(next)
+  }
+
+  const submitFile = async () => {
+    if (uploadBrigadeId == null || file == null) return
+    setSubmitting(true)
+    try {
+      const result = await uploadEngineers({ file, brigadeId: uploadBrigadeId }).unwrap()
+      if (result.created === 0) {
+        toast.danger('Инженеры не добавлены', {
+          description:
+            result.skipped > 0
+              ? `Пропущено строк: ${result.skipped}. Проверьте формат файла.`
+              : 'В файле нет подходящих строк',
+        })
+        return
+      }
+      toast.success(
+        `Добавлено ${result.created} ${pluralRu(result.created, ['инженер', 'инженера', 'инженеров'])}`,
+        {
+          description:
+            result.skipped > 0 ? `Пропущено строк: ${result.skipped}` : undefined,
+        },
+      )
+      onAdd?.(result.engineers)
+      onClose()
+    } catch (error) {
+      toast.danger('Файл не загружен', {
+        description: errorReason(error),
+        actionProps: {
+          children: 'Повторить',
+          variant: 'outline',
+          size: 'sm',
+          onPress: () => void submitFile(),
+        },
+      })
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   const submit = async (payload: EngineerBody) => {
     setSubmitting(true)
@@ -396,6 +461,145 @@ export function EngineerFormPanel({
   const qualificationHint =
     form.qualification != null ? QUALIFICATION_HINT[form.qualification] : null
 
+  const canUpload = uploadBrigadeId != null && file != null && !submitting
+
+  if (!editing && mode === 'file') {
+    return (
+      <AppPanel className="flex min-h-0 w-[346px] shrink-0 flex-col">
+        <div className="flex shrink-0 flex-col gap-1 px-5 pt-5 pb-2">
+          <h2 className="text-xl font-semibold leading-7 text-foreground">Загрузить инженеров</h2>
+          <p className="text-sm leading-6 text-muted">
+            Новые инженеры будут добавлены в выбранную бригаду.
+            <span className="mt-2 block">
+              Чтобы добавить одного{' '}
+              <button
+                type="button"
+                onClick={() => setMode('single')}
+                className="cursor-pointer text-link outline-none hover:underline focus-visible:underline"
+              >
+                Нажмите здесь
+              </button>
+            </span>
+          </p>
+        </div>
+
+        <div className="flex min-h-0 flex-1 flex-col gap-4 px-5 py-3">
+          <div className="flex flex-col gap-1">
+            <FieldLabel required>Бригада</FieldLabel>
+            <SingleSelect
+              label="Бригада"
+              placeholder="Выберите бригаду"
+              options={brigades.map((item) => ({ id: item.id, label: item.name }))}
+              value={uploadBrigadeId}
+              onChange={setUploadBrigadeId}
+            />
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <FieldLabel required>Выгрузка</FieldLabel>
+            {file ? (
+              <div className="flex items-center gap-3 rounded-[8px] border border-border bg-surface p-3">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-[8px] bg-surface-tertiary text-foreground">
+                  <RiFileTextLine size={16} />
+                </span>
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-xs leading-5 font-medium text-foreground">
+                    {file.name}
+                  </span>
+                  <span className="text-xs leading-4 text-muted">{formatFileSize(file.size)}</span>
+                </div>
+                <FileTrigger
+                  acceptedFileTypes={ENGINEERS_FILE_TYPES}
+                  onSelect={(list) => list && pickFile(Array.from(list))}
+                >
+                  <AriaButton
+                    aria-label="Заменить файл"
+                    className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-[8px] bg-surface-tertiary text-foreground outline-none transition-colors hover:bg-default-hover"
+                  >
+                    <RiLoopRightLine size={16} />
+                  </AriaButton>
+                </FileTrigger>
+                <button
+                  type="button"
+                  aria-label="Удалить файл"
+                  onClick={() => setFile(null)}
+                  className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-[8px] bg-surface-tertiary text-foreground transition-colors hover:bg-default-hover"
+                >
+                  <RiDeleteBinLine size={16} />
+                </button>
+              </div>
+            ) : (
+              <DropZone
+                getDropOperation={(types) =>
+                  types.has('text/csv') ||
+                  types.has('application/json') ||
+                  types.has('text/plain')
+                    ? 'copy'
+                    : 'cancel'
+                }
+                onDrop={async (event) => {
+                  const files: File[] = []
+                  for (const item of event.items) {
+                    if (isFileDropItem(item)) files.push(await item.getFile())
+                  }
+                  pickFile(files)
+                }}
+                className="flex min-h-[160px] flex-col items-center justify-center rounded-[8px] border border-dashed border-border bg-surface-tertiary/40 px-4 py-6 outline-none data-[drop-target]:border-accent data-[drop-target]:bg-accent/5"
+              >
+                <FileTrigger
+                  acceptedFileTypes={ENGINEERS_FILE_TYPES}
+                  onSelect={(list) => list && pickFile(Array.from(list))}
+                >
+                  <AriaButton className="flex cursor-pointer flex-col items-center gap-3 outline-none">
+                    <RiUploadCloud2Line size={28} className="shrink-0 text-muted" />
+                    <div className="flex flex-col items-center text-center">
+                      <span className="text-sm font-medium leading-5 text-foreground">
+                        Загрузите инженеров
+                      </span>
+                      <span className="text-xs leading-5 text-muted">
+                        Нажмите на это поле или перетащите
+                        <br />в него json или csv файл
+                      </span>
+                    </div>
+                  </AriaButton>
+                </FileTrigger>
+              </DropZone>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={downloadEngineersTemplate}
+            className="flex h-9 cursor-pointer items-center justify-center gap-2 self-start text-sm leading-5 font-medium text-foreground transition-colors hover:text-link"
+          >
+            <RiDownload2Line size={16} />
+            Скачать шаблон ({ENGINEERS_TEMPLATE_SIZE})
+          </button>
+        </div>
+
+        <div className="flex shrink-0 gap-2 px-5 pt-2 pb-5">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center border border-border bg-surface text-sm font-medium leading-5 text-foreground transition-colors hover:bg-surface-hover"
+            style={{ borderRadius: 8, padding: '8px 16px' }}
+          >
+            Отмена
+          </button>
+          <button
+            type="button"
+            disabled={!canUpload}
+            onClick={() => void submitFile()}
+            className="inline-flex h-9 flex-1 cursor-pointer items-center justify-center bg-accent text-sm font-medium leading-5 text-accent-foreground transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent"
+            style={{ borderRadius: 8, padding: '8px 16px' }}
+          >
+            {submitting ? 'Загружаем…' : 'Загрузить'}
+          </button>
+        </div>
+      </AppPanel>
+    )
+  }
+
   return (
     <AppPanel className="flex min-h-0 w-[346px] shrink-0 flex-col">
       <div className="flex shrink-0 flex-col gap-1 px-5 pt-5 pb-2">
@@ -403,16 +607,30 @@ export function EngineerFormPanel({
           {editing ? 'Редактировать инженера' : 'Добавить инженера'}
         </h2>
         <p className="text-sm leading-6 text-muted">
-          {editing ? 'Измените информацию о сотруднике' : 'Заполните информацию о сотруднике'}
+          {editing ? (
+            'Измените информацию о сотруднике'
+          ) : (
+            <>
+              Заполните информацию о сотруднике.
+              <span className="mt-2 block">
+                Чтобы загрузить файл{' '}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('file')
+                    setFile(null)
+                  }}
+                  className="cursor-pointer text-link outline-none hover:underline focus-visible:underline"
+                >
+                  Нажмите здесь
+                </button>
+              </span>
+            </>
+          )}
         </p>
       </div>
 
-      <ScrollShadow
-        hideScrollBar
-        size={40}
-        className="min-h-0 flex-1"
-        orientation="vertical"
-      >
+      <ScrollShadow hideScrollBar size={40} className="min-h-0 flex-1" orientation="vertical">
         <div className="flex flex-col gap-3 px-5 py-3">
           <label className="flex flex-col gap-1">
             <FieldLabel required>ФИО инженера</FieldLabel>
