@@ -26,6 +26,7 @@ import {
 import {
   DayOverviewWorkspace,
   EngineersSidebar,
+  PlanCompareWorkspace,
   PlanEventReport,
   UnavailableDialog,
   PlanGanttBoard,
@@ -76,6 +77,16 @@ function OverviewPage() {
   return (
     <HomeAreaLayout>
       {(context) => <OverviewContent context={context} />}
+    </HomeAreaLayout>
+  )
+}
+
+function ComparePage() {
+  return (
+    <HomeAreaLayout>
+      {(context) => (
+        <PlanCompareWorkspace regionId={context.regionId} date={context.date} />
+      )}
     </HomeAreaLayout>
   )
 }
@@ -461,6 +472,7 @@ export function AppRouter() {
   return (
     <Routes>
       <Route path={routes.overview} element={<OverviewPage />} />
+      <Route path={routes.compare} element={<ComparePage />} />
 
       <Route path={routes.plan} element={<Navigate to={routes.planGantt} replace />} />
       <Route path={routes.planGantt} element={<PlanGanttPage />} />
@@ -473,6 +485,7 @@ export function AppRouter() {
       <Route path="/layouts/home" element={<Navigate to={routes.overview} replace />} />
       <Route path="/layouts/gantt" element={<Navigate to={routes.planGantt} replace />} />
       <Route path="/layouts/map" element={<Navigate to={routes.planMap} replace />} />
+      <Route path="/layouts/compare" element={<Navigate to={routes.compare} replace />} />
       <Route
         path="/layouts/personnel"
         element={<Navigate to={routes.personnel} replace />}

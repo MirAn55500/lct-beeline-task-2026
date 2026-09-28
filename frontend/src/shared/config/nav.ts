@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react'
 import {
+  RiArrowLeftRightLine,
   RiCalendarScheduleLine,
   RiGroupLine,
   RiHome5Line,
@@ -29,6 +30,11 @@ export const navPrimaryItems: NavItem[] = [
     label: 'План работ',
     icon: RiCalendarScheduleLine,
     match: (pathname) => pathname.startsWith(routes.plan),
+  },
+  {
+    to: routes.compare,
+    label: 'Сравнение планов',
+    icon: RiArrowLeftRightLine,
   },
   {
     to: routes.personnel,

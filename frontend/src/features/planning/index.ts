@@ -16,6 +16,7 @@ export type {
   RemakeLevel,
 } from './types'
 export { DayOverviewWorkspace } from './ui/DayOverviewWorkspace'
+export { PlanCompareWorkspace } from './ui/PlanCompareWorkspace'
 export { RemakePlanModal } from './ui/RemakePlanModal'
 export { PlanRebuildDialog } from './ui/PlanRebuildDialog'
 export { PlanCompareDialog, PlanEventReport, UnavailableDialog } from './ui/PlanDefenseDialogs'

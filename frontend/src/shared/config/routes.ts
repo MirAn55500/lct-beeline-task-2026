@@ -3,6 +3,7 @@ export const routes = {
   plan: '/plan',
   planGantt: '/plan/gantt',
   planMap: '/plan/map',
+  compare: '/compare',
   personnel: '/personnel',
   config: '/config',
   help: '/help',

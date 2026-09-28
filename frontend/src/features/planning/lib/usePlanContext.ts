@@ -1,10 +1,16 @@
-import { useSyncExternalStore } from 'react'
+import { useEffect, useSyncExternalStore } from 'react'
 import { useSearchParams } from 'react-router'
 import { getLocalTimeZone, parseDate, today, type CalendarDate } from '@internationalized/date'
 import { skipToken } from '@reduxjs/toolkit/query/react'
 import { toast } from '@heroui/react'
 
 import { useGetRegionsQuery } from '@/features/catalogs'
+import {
+  readSessionDate,
+  readSessionRegionId,
+  writeSessionDate,
+  writeSessionRegionId,
+} from '@/shared/lib'
 
 import { useRecalculatePlanMutation } from '../api'
 import {
@@ -61,12 +67,21 @@ export function usePlanContext() {
 
   const regions = offline ? MOCK_MAP_REGIONS : (regionsQuery.data ?? [])
   const requestedRegion = Number(params.get('region'))
-  const regionId = regions.find((item) => item.id === requestedRegion)?.id ?? regions[0]?.id ?? null
-  // Без даты в адресе — сегодня, как на «Обзоре дня»; на моках — день из выгрузки.
-  const date = readDate(params.get('date'), offline ? parseDate(MOCK_MAP_DATE) : today(getLocalTimeZone()))
+  const sessionRegionId = readSessionRegionId()
+  const regionId =
+    regions.find((item) => item.id === requestedRegion)?.id ??
+    regions.find((item) => item.id === sessionRegionId)?.id ??
+    regions[0]?.id ??
+    null
+  // Без даты в адресе — сессия вкладки, иначе сегодня; на моках — день из выгрузки.
+  const date = readDate(
+    params.get('date') ?? readSessionDate(),
+    offline ? parseDate(MOCK_MAP_DATE) : today(getLocalTimeZone()),
+  )
+  const dateIso = date.toString()
 
   const overviewQuery = useDayOverview(
-    !offline && regionId != null ? { regionId, date: date.toString() } : skipToken,
+    !offline && regionId != null ? { regionId, date: dateIso } : skipToken,
   )
   // Версии — только этого дня; дни с планом в календаре можно показывать и от прошлого ответа.
   const overview = overviewQuery.currentData
@@ -95,6 +110,23 @@ export function usePlanContext() {
       { replace: true },
     )
 
+  // Регион и день сессии — в sessionStorage и в адресе, чтобы переживали переходы по меню.
+  useEffect(() => {
+    if (regionId == null) return
+    writeSessionRegionId(regionId)
+    writeSessionDate(dateIso)
+    if (params.get('region') === String(regionId) && params.get('date') === dateIso) return
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.set('region', String(regionId))
+        next.set('date', dateIso)
+        return next
+      },
+      { replace: true },
+    )
+  }, [regionId, dateIso, params, setParams])
+
   /** «Обновить план»: пересчёт на backend и сразу новая версия; без backend — мок с теми же назначениями. */
   const rebuild = async (options: { level: PlanRebuildLevel; distribution: PlanDistribution }) => {
     if (offline) {
@@ -107,7 +139,7 @@ export function usePlanContext() {
     try {
       const result = await recalculatePlan({
         regionId,
-        date: date.toString(),
+        date: dateIso,
         ...options,
       }).unwrap()
       update({ plan: String(result.plan_id) })
@@ -145,8 +177,14 @@ export function usePlanContext() {
     isPlanning: overview?.planning ?? false,
     planningSeconds: isRebuilding ? rebuildSeconds : (overview?.planning_eta_seconds ?? null),
     // Другой регион или день — другие версии плана: выбор версии сбрасываем.
-    setRegionId: (id: number) => update({ region: String(id), plan: null }),
-    setDate: (value: CalendarDate) => update({ date: value.toString(), plan: null }),
+    setRegionId: (id: number) => {
+      writeSessionRegionId(id)
+      update({ region: String(id), plan: null })
+    },
+    setDate: (value: CalendarDate) => {
+      writeSessionDate(value.toString())
+      update({ date: value.toString(), plan: null })
+    },
     setPlanId: (id: number) => update({ plan: String(id) }),
   }
 }

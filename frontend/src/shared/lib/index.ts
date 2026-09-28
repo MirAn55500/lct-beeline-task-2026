@@ -3,3 +3,10 @@ export { downloadTextFile } from './download'
 export { formatDateTime, formatTime, formatWait, formatWaitShort } from './format'
 export { getInitials, pluralRu } from './text'
 export { ASIDE_WIDTH_CLASS, useAsideWidth } from './layout'
+export {
+  preservedContextSearch,
+  readSessionDate,
+  readSessionRegionId,
+  writeSessionDate,
+  writeSessionRegionId,
+} from './sessionContext'

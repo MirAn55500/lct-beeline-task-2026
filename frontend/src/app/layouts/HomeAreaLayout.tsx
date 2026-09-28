@@ -19,7 +19,14 @@ import {
 } from '@/features/planning'
 import { isOfflineError } from '@/features/planning/lib/offline'
 import { TicketsUploadDialog, useTicketsExport } from '@/features/tickets'
-import { ASIDE_WIDTH_CLASS, cn } from '@/shared/lib'
+import {
+  ASIDE_WIDTH_CLASS,
+  cn,
+  readSessionDate,
+  readSessionRegionId,
+  writeSessionDate,
+  writeSessionRegionId,
+} from '@/shared/lib'
 import { AppNav, AppPanel, BrandBar, ContextHeader } from '@/shared/ui'
 
 export type HomeAreaContext = {
@@ -44,6 +51,19 @@ function readDateParam(raw: string | null): CalendarDate | null {
   }
 }
 
+function pickRegionId(
+  regions: { id: number }[],
+  requested: number,
+  sessionId: number | null,
+): number | null {
+  return (
+    regions.find((item) => item.id === requested)?.id ??
+    regions.find((item) => item.id === sessionId)?.id ??
+    regions[0]?.id ??
+    null
+  )
+}
+
 export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
   const [params, setParams] = useSearchParams()
   const regionsQuery = useGetRegionsQuery()
@@ -51,23 +71,29 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
   const regions = offline ? MOCK_MAP_REGIONS : (regionsQuery.data ?? [])
   const isLoading = regionsQuery.isLoading
   const isError = regionsQuery.isError && !offline
-  const [regionId, setRegionId] = useState<number | null>(null)
   const [planId, setPlanId] = useState<number | null>(null)
   const [recalculatePlan, { isLoading: isRecalculating }] = useRecalculatePlanMutation()
   const exportTickets = useTicketsExport()
   const [uploadOpen, setUploadOpen] = useState(false)
   const [rebuildOpen, setRebuildOpen] = useState(false)
 
+  const requestedRegion = Number(params.get('region'))
+  const regionId = pickRegionId(regions, requestedRegion, readSessionRegionId())
+
   const date =
     readDateParam(params.get('date')) ??
+    readDateParam(readSessionDate()) ??
     (offline ? parseDate(MOCK_MAP_DATE) : today(getLocalTimeZone()))
+  const dateIso = date.toString()
 
   const setDate = (next: CalendarDate) => {
     setPlanId(null)
+    writeSessionDate(next.toString())
     setParams(
       (prev) => {
         const copy = new URLSearchParams(prev)
         copy.set('date', next.toString())
+        if (regionId != null) copy.set('region', String(regionId))
         return copy
       },
       { replace: true },
@@ -76,22 +102,27 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
 
   // Переспрашивается, пока план считается в фоне: индикатор в шапке и обновление по готовности
   const { data: overview } = useDayOverview(
-    { regionId: regionId ?? 0, date: date.toString(), planId },
+    { regionId: regionId ?? 0, date: dateIso, planId },
     { skip: regionId == null },
   )
   const rebuildSeconds = useCountdown(isRecalculating, overview?.rebuild_eta_seconds ?? null)
 
+  // Регион и день сессии — в sessionStorage и в адресе, чтобы переживали переходы по меню.
   useEffect(() => {
-    if (regions.length === 0) {
-      setRegionId(null)
-      return
-    }
-    setRegionId((current) =>
-      current != null && regions.some((item) => item.id === current)
-        ? current
-        : regions[0].id,
+    if (regionId == null) return
+    writeSessionRegionId(regionId)
+    writeSessionDate(dateIso)
+    if (params.get('region') === String(regionId) && params.get('date') === dateIso) return
+    setParams(
+      (prev) => {
+        const copy = new URLSearchParams(prev)
+        copy.set('region', String(regionId))
+        copy.set('date', dateIso)
+        return copy
+      },
+      { replace: true },
     )
-  }, [regions])
+  }, [regionId, dateIso, params, setParams])
 
   const regionName = regions.find((item) => item.id === regionId)?.name ?? null
   const plans = (overview?.plans ?? []).map((item) => ({
@@ -105,7 +136,16 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
   }
   const selectRegion = (nextRegionId: number) => {
     setPlanId(null)
-    setRegionId(nextRegionId)
+    writeSessionRegionId(nextRegionId)
+    setParams(
+      (prev) => {
+        const copy = new URLSearchParams(prev)
+        copy.set('region', String(nextRegionId))
+        copy.set('date', dateIso)
+        return copy
+      },
+      { replace: true },
+    )
   }
 
   const content =
@@ -113,7 +153,7 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
       ? children({
           regionId,
           regionName,
-          date: date.toString(),
+          date: dateIso,
           planId: selectedPlanId,
           focusDay,
           setRegionId: selectRegion,
@@ -154,9 +194,9 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
               ? undefined
               : (format) =>
                   exportTickets(
-                    { regionId, date: date.toString(), planId: selectedPlanId, offline },
+                    { regionId, date: dateIso, planId: selectedPlanId, offline },
                     format,
-                    `Заявки_${regionName ?? regionId}_${date.toString()}`,
+                    `Заявки_${regionName ?? regionId}_${dateIso}`,
                   )
           }
         />
@@ -169,7 +209,7 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
         isOpen={uploadOpen}
         onClose={() => setUploadOpen(false)}
         defaultRegionId={regionId}
-        date={date.toString()}
+        date={dateIso}
         onUploaded={(result) => {
           if (result.date) focusDay(result.date)
         }}
@@ -182,7 +222,7 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
           try {
             const result = await recalculatePlan({
               regionId,
-              date: date.toString(),
+              date: dateIso,
               remakeLevel: options.level,
               distribution: options.distribution,
             }).unwrap()
