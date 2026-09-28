@@ -38,6 +38,11 @@ export {
 } from './mocks'
 export { downloadEngineers } from './lib/exportEngineers'
 export { EngineerFormPanel } from './ui/EngineerFormPanel'
+export {
+  AddressPointField,
+  EMPTY_ADDRESS_POINT,
+  type AddressPoint,
+} from './ui/AddressPointField'
 export { BrigadeInfo } from './ui/BrigadeInfo'
 export { BrigadeMap } from './ui/BrigadeMap'
 export { BrigadesPanel } from './ui/BrigadesPanel'

@@ -16,6 +16,8 @@ type GanttUnassignedPanelProps = {
   selectedId: string | null
   draggingId: string | null
   onDragStart: (ticket: GanttUnassigned, event: PointerEvent<HTMLElement>) => void
+  /** Заявку можно взять; неподвижную (старая версия плана) не берут и не выбирают. */
+  canDrag: (ticket: GanttUnassigned) => boolean
   onApprove: (ticketId: string) => void
 }
 
@@ -26,6 +28,7 @@ export function GanttUnassignedPanel({
   selectedId,
   draggingId,
   onDragStart,
+  canDrag,
   onApprove,
 }: GanttUnassignedPanelProps) {
   const [sort, setSort] = useState<TicketSortKey>('window')
@@ -68,7 +71,7 @@ export function GanttUnassignedPanel({
                 ticket={ticket}
                 selected={ticket.id === selectedId}
                 className="snap-start"
-                onPointerDown={(event) => onDragStart(ticket, event)}
+                onPointerDown={canDrag(ticket) ? (event) => onDragStart(ticket, event) : undefined}
                 onApprove={() => onApprove(ticket.id)}
               />
             ),

@@ -12,7 +12,7 @@ import { cn } from '@/shared/lib/cn'
 
 import { legSteps } from '../../lib/routeSteps'
 import type { EngineerRoute, MapEngineer } from '../../mapTypes'
-import { MetaSeparator, TicketTags } from './parts'
+import { ExplanationPopover, MetaSeparator, TicketTags } from './parts'
 import { RouteStepChip } from './RouteSteps'
 
 /** Ширина колонки панели поверх карты вместе с отступами — для fitBounds. */
@@ -56,7 +56,8 @@ type RouteDetailsPanelProps = {
   route: EngineerRoute
   activeStopId: string | null
   onToggleStop: (stopId: string) => void
-  onAddTicket: () => void
+  /** Нет — план не меняется (старая версия или прошедший день): кнопки нет. */
+  onAddTicket?: () => void
   /** «Изменить параметры маршрута» — окно с транспортом и вариантами маршрута. */
   onEditParams: () => void
   onCancelStop?: (requestId: string) => void
@@ -196,9 +197,7 @@ export function RouteDetailsPanel({
                 </button>
                 {expanded && (stop.explanation || onCancelStop) ? (
                   <div className="flex flex-col gap-2 px-3 pb-3">
-                    {stop.explanation ? (
-                      <p className="text-sm leading-5 text-foreground">{stop.explanation}</p>
-                    ) : null}
+                    {stop.explanation ? <ExplanationPopover explanation={stop.explanation} /> : null}
                     {onCancelStop ? (
                       <button
                         type="button"
@@ -215,17 +214,19 @@ export function RouteDetailsPanel({
           })}
         </div>
 
-        <div className="shrink-0 px-3 pt-2 pb-3">
-          <button
-            type="button"
-            onClick={onAddTicket}
-            className="flex h-9 w-full cursor-pointer items-center justify-center gap-2 px-4 text-sm leading-5 font-medium text-foreground transition-colors hover:bg-surface-hover"
-            style={{ borderRadius: 8 }}
-          >
-            <RiMapPinAddLine size={16} />
-            Добавить заявку
-          </button>
-        </div>
+        {onAddTicket ? (
+          <div className="shrink-0 px-3 pt-2 pb-3">
+            <button
+              type="button"
+              onClick={onAddTicket}
+              className="flex h-9 w-full cursor-pointer items-center justify-center gap-2 px-4 text-sm leading-5 font-medium text-foreground transition-colors hover:bg-surface-hover"
+              style={{ borderRadius: 8 }}
+            >
+              <RiMapPinAddLine size={16} />
+              Добавить заявку
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   )

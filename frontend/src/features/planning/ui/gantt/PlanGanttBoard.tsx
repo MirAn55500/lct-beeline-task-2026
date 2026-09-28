@@ -295,8 +295,9 @@ export function PlanGanttBoard({ board, viewKey }: PlanGanttBoardProps) {
           scrollRef={scrollRef}
           lanesRef={lanesRef}
           onTaskPointerDown={(task: GanttTask, event) => {
-            if (isMovable(task)) startDrag(task, 'task', event)
+            if (isMovable(task) && board.canDrag(task.id)) startDrag(task, 'task', event)
           }}
+          canDrag={(task: GanttTask) => isMovable(task) && board.canDrag(task.id)}
           onFreeCellClick={(engineerId, start) => {
             const engineer = engineers.find((item) => item.id === engineerId)
             if (!selectedTicket || !engineer) return
@@ -317,6 +318,7 @@ export function PlanGanttBoard({ board, viewKey }: PlanGanttBoardProps) {
           }
           selectedId={board.selectedTicketId}
           draggingId={drag?.source === 'unassigned' ? drag.ticket.id : null}
+          canDrag={(ticket: GanttUnassigned) => board.canDrag(ticket.id)}
           onDragStart={(ticket: GanttUnassigned, event) =>
             startDrag(ticket, 'unassigned', event, () => board.selectTicket(ticket.id))
           }

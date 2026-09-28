@@ -1586,7 +1586,7 @@ def attach_route_geometry(
 class Routing:
     """Всё, что нужно расчёту для работы с реальной маршрутизацией, одним объектом.
 
-    Типовое использование (и в `demo.py`, и в основном сервисе):
+    Типовое использование (в основном сервисе):
 
         routing = setup_routing(scenario, url="http://localhost:8081/ors")
         result = plan(scenario, travel=routing.travel)

@@ -83,7 +83,6 @@ lct-beeline-task-2026_ors-data`, следующий деплой соберёт 
 
 ```bash
 cd solution
-python demo.py --ors                              # расчёт на расстояниях по улицам
 python viz/export.py --ors                        # выгрузка для карты с линиями маршрутов
 python tools/ors_prefetch.py --with-geometry      # прогреть кэш и работать офлайн
 python tools/ors_prefetch.py --transit            # ещё и расписания транспорта (разово)
@@ -97,7 +96,7 @@ python tools/ors_prefetch.py --transit --date 2026-09-21   # расписани�
 привязано к дате плана».
 
 После `ors_prefetch.py` ответы сервиса лежат в `data/routing_cache.json`, и
-`python demo.py` без флагов берёт расстояния оттуда — контейнер больше не нужен.
+расчёт без адреса сервиса берёт расстояния оттуда — контейнер больше не нужен.
 Смысл тот же, что у `data/geocache.json`: расчёт остаётся воспроизводимым и не зависит
 от внешнего сервиса в момент показа.
 

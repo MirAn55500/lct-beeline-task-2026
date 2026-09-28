@@ -16,10 +16,14 @@ type AddressFieldProps = {
   confirmed: boolean
   busy?: boolean
   placeholder?: string
+  /** Подпись поля для скринридера. */
+  label?: string
+  /** Что ставят на карте, в винительном падеже: «офис», «заявку». */
+  pointName?: string
   onType: (text: string) => void
   /** Выбран адрес с домом. */
   onSelect: (suggestion: AddressSuggestion) => void
-  /** Подсказок нет — предложить поставить офис на карте. */
+  /** Подсказок нет — предложить поставить точку на карте. */
   onPickOnMap?: () => void
 }
 
@@ -33,6 +37,8 @@ export function AddressField({
   confirmed,
   busy = false,
   placeholder,
+  label = 'Адрес офиса',
+  pointName = 'офис',
   onType,
   onSelect,
   onPickOnMap,
@@ -109,7 +115,7 @@ export function AddressField({
           ref={inputRef}
           type="text"
           role="combobox"
-          aria-label="Адрес офиса"
+          aria-label={label}
           aria-expanded={showList}
           aria-controls={listId}
           aria-autocomplete="list"
@@ -159,8 +165,8 @@ export function AddressField({
           </p>
           <p className="text-xs leading-5 text-muted">
             {failed
-              ? 'Попробуйте ещё раз чуть позже или поставьте офис на карте'
-              : 'Проверьте, как пишется улица, или поставьте офис на карте'}
+              ? `Попробуйте ещё раз чуть позже или поставьте ${pointName} на карте`
+              : `Проверьте, как пишется улица, или поставьте ${pointName} на карте`}
           </p>
           {onPickOnMap ? (
             <button

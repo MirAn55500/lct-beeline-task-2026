@@ -4,6 +4,7 @@ import {
   Map as MapLibreMap,
   Marker,
   setWorkerUrl,
+  type ExpressionSpecification,
   type GeoJSONSource,
   type MapOptions,
 } from 'maplibre-gl'
@@ -46,6 +47,8 @@ const STRAIGHT_COLOR = '#77849D'
 const STRAIGHT_END = '#64748b'
 const ACTIVE_STOP = '#F84A00'
 const OVERVIEW_LAYERS = ['overview-road', 'overview-straight']
+/** Насколько бледнеют чужие маршруты и их точки, пока курсор на одном из маршрутов. */
+const DIM_OPACITY = 0.5
 
 type LineFeature = Feature<LineString | MultiLineString>
 
@@ -145,7 +148,9 @@ function pointElement(options: {
   const root = document.createElement(options.onClick ? 'button' : 'div')
   if (root instanceof HTMLButtonElement) root.type = 'button'
   if (options.title) root.title = options.title
-  root.style.cssText = `width:20px;height:20px;border-radius:9999px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;padding:0;cursor:${options.onClick ? 'pointer' : 'default'};opacity:${options.dim ? 0.5 : 1};transition:opacity .15s`
+  root.style.cssText = `width:20px;height:20px;border-radius:9999px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;padding:0;cursor:${options.onClick ? 'pointer' : 'default'};transition:filter .15s`
+  // Marker сам пишет opacity в style элемента, поэтому бледнеем через filter.
+  if (options.dim) root.style.filter = `opacity(${DIM_OPACITY})`
   const inner = document.createElement('span')
   const size = options.variant === 'count' ? 14 : 8
   const background = options.variant === 'ring' ? 'var(--surface)' : options.color
@@ -292,16 +297,18 @@ export function PlanMap({
     )
   }, [map, ready, engineers, routes, selectedId])
 
-  // Подсветка маршрута под курсором: остальные бледнеют, как во фрейме макета.
+  // Подсветка маршрута под курсором: остальные бледнеют и тоньшают, а он рисуется поверх них.
   useEffect(() => {
     if (!map || !ready) return
+    const hovered: ExpressionSpecification = ['==', ['get', 'engineerId'], hoveredId ?? '']
+    const pick = (on: number, off: number): number | ExpressionSpecification =>
+      hoveredId == null ? on : ['case', hovered, on, off]
     for (const layer of OVERVIEW_LAYERS) {
-      map.setPaintProperty(
-        layer,
-        'line-opacity',
-        hoveredId == null ? 1 : ['case', ['==', ['get', 'engineerId'], hoveredId], 1, 0.5],
-      )
+      map.setPaintProperty(layer, 'line-opacity', pick(1, DIM_OPACITY))
+      map.setLayoutProperty(layer, 'line-sort-key', pick(1, 0))
     }
+    map.setPaintProperty('overview-road', 'line-width', pick(6, 4))
+    map.setPaintProperty('overview-straight', 'line-width', pick(4, 4 / 1.5))
   }, [map, ready, hoveredId])
 
   // Точки маршрутов.
@@ -341,23 +348,32 @@ export function PlanMap({
       const engineer = engineers.find((item) => item.id === selectedId)
       const route = routes.find((item) => item.engineerId === selectedId)
       if (engineer && route) {
-        add(pointElement({ color: engineer.color, variant: 'ring', title: engineer.start.address }), engineer.start.coord)
+        // Без раскрытой заявки номера у всех точек; с раскрытой — только у неё и предыдущей,
+        // чтобы было видно, откуда куда ехать. Перед первой заявкой — старт «A».
+        const active = route.stops.findIndex((stop) => stop.id === activeStopId)
+        const numbered = (index: number) => active < 0 || index === active - 1
+        add(
+          numbered(-1)
+            ? pointElement({ color: '#28303F', label: 'A', variant: 'count', title: engineer.start.address })
+            : pointElement({ color: engineer.color, variant: 'ring', title: engineer.start.address }),
+          engineer.start.coord,
+        )
         route.stops.forEach((stop, index) => {
-          if (stop.id === activeStopId) {
-            add(activeStopElement(String(index + 1)), stop.coord)
-            return
-          }
+          if (index === active) return
           // В заявку ведёт прямая — точка серая, как конец пунктира в макете.
           add(
             pointElement({
               color: stop.leg.straight ? STRAIGHT_END : engineer.color,
-              variant: 'dot',
+              label: numbered(index) ? String(index + 1) : undefined,
+              variant: numbered(index) ? 'count' : 'dot',
               title: `${index + 1}. ${stop.address}`,
               onClick: () => handlersRef.current.onSelectStop?.(stop.id),
             }),
             stop.coord,
           )
         })
+        // Раскрытая заявка последней — поверх соседних точек.
+        if (active >= 0) add(activeStopElement(String(active + 1)), route.stops[active].coord)
       }
     }
     markersRef.current = markers

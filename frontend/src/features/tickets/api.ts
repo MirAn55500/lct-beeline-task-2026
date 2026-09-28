@@ -49,6 +49,9 @@ export type CreateTicketBody = {
   region_id: number
   date: string
   address: string
+  /** Точка адреса из подсказки или с карты. */
+  lat?: number
+  lon?: number
   start: string
   end: string
   work_type: string

@@ -54,7 +54,7 @@ from .models import (
     Settings,
     WorkInterval,
 )
-from .replan import apply_event, replan
+from .replan import apply_event, rebuild_unstarted, replan
 from .result import (
     Assignment,
     EngineerMetrics,
@@ -101,6 +101,7 @@ __all__ = [
     # API
     "plan",
     "replan",
+    "rebuild_unstarted",
     "apply_event",
     "reassign",
     "compare",

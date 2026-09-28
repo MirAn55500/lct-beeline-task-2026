@@ -1,7 +1,8 @@
 from datetime import date as date_type, datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import Column, Date, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship
 
 from core.base_model import BaseTable
@@ -24,6 +25,10 @@ class Plan(BaseTable, table=True):
     region_id: int = Field(foreign_key="regions.region_id", index=True)
     created_at: datetime
     reference_plan_id: Optional[int] = Field(default=None, foreign_key="plans.plan_id")
+    # Версия так, как её показывали при сохранении (`PlanExportResponse`). Заявки и инженеры
+    # потом меняются — переносятся на другой день, отменяются, правятся, — а старая версия
+    # плана остаётся историей. Пусто у планов до миграции 0016: их собирают по текущим данным.
+    snapshot: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSONB, nullable=True))
 
     region: Optional["Region"] = Relationship(back_populates="plans")
 

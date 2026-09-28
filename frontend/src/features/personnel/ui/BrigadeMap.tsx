@@ -31,7 +31,7 @@ function clock(now: number) {
 }
 
 /** Булавка макета marker-point: белая с серым контуром, внутри — цветная капля. */
-function Pin({ fill, title, children }: { fill: string; title: string; children: ReactNode }) {
+export function Pin({ fill, title, children }: { fill: string; title: string; children: ReactNode }) {
   return (
     <div title={title} className="relative cursor-default" style={{ width: 42, height: 48 }}>
       <svg

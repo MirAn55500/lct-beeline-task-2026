@@ -116,6 +116,7 @@ async def create_ticket(service: TicketsServiceDep, body: CreateTicketRequest) -
     """Одна заявка вручную (окно «Добавить заявку») и её постановка в план дня.
 
     Номер назначается следующим после самого большого. План считается в фоне, как после
-    загрузки; `remake_level` по умолчанию `fix` — только свободные окна.
+    загрузки; `remake_level` по умолчанию `free` для аварии (пересчёт дня), иначе `fix` —
+    только свободные окна.
     """
     return await service.create(body)

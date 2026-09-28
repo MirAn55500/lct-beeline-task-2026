@@ -46,7 +46,8 @@ export function usePlanMapBoard(
   regionId: number | null,
   date: string,
   planId: number | null = null,
-  options?: { onSaved?: (planId: number) => void },
+  /** `readOnly` — старая версия плана или прошедший день: руками не правится. */
+  options?: { onSaved?: (planId: number) => void; readOnly?: boolean },
 ) {
   const query = useGetPlanExportQuery(regionId != null ? { regionId, date, planId } : skipToken)
   const offline = isOfflineError(query.isError, query.error)
@@ -213,7 +214,15 @@ export function usePlanMapBoard(
     select,
     hover: setHoveredId,
     toggleStop,
-    requestDrop: setPendingDrop,
+    requestDrop: (drop: PendingDrop | null) => {
+      if (drop && options?.readOnly) {
+        toast.danger('Этот план не меняется', {
+          description: 'Старая версия или прошедший день — править можно последнюю версию текущего или будущего дня',
+        })
+        return
+      }
+      setPendingDrop(drop)
+    },
     cancelDrop: () => setPendingDrop(null),
     confirmDrop,
     applyVariant,

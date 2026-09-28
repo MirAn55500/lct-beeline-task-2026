@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import sys
 import threading
+from collections.abc import Collection
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -133,13 +134,19 @@ def build_scenario(
     region_name: str,
     requests: list[Request],
     engineers: list[Engineer],
+    keep_closed: Collection[int] = (),
 ) -> tuple[Scenario, dict[int, int]]:
-    """Возвращает сценарий и transport_id инженеров для записи назначений."""
+    """Возвращает сценарий и transport_id инженеров для записи назначений.
+
+    `keep_closed` — id закрытых заявок, которые всё равно нужны: показ старой версии плана.
+    """
 
     region_key = str(region_id)
     planner_requests: list[PlannerRequest] = []
     for index, request in enumerate(requests):
-        if request.request_id is None or request.address_ref is None or _is_closed(request):
+        if request.request_id is None or request.address_ref is None:
+            continue
+        if _is_closed(request) and request.request_id not in keep_closed:
             continue
         skill = _skill(request.skill.value if request.skill else None)
         category = request.request_type_vk.value if request.request_type_vk else ""
@@ -383,14 +390,31 @@ def assignments_from_result(
     transport_by_engineer: dict[int, int],
     reason_by_code: dict[str, int],
     offset_hours: float = 3.0,
+    scenario: Scenario | None = None,
+    window_shift: dict[str, float] | None = None,
 ) -> tuple[list[Assignment], int, int]:
-    """Строки назначений плана — вместе с расписанием визита (выезд, прибытие, работа)."""
+    """Строки назначений плана — вместе с расписанием визита (выезд, прибытие, работа).
+
+    `scenario` — откуда взять окна клиентов, которые версия запоминает. `window_shift` —
+    на сколько минут окно заявки сдвинуто согласованием в этом же ходе: в сценарии его
+    ещё нет, а версия должна хранить уже новое.
+    """
     visits = {v.request_id: v for route in result.routes for v in route.visits}
+    by_id = scenario.request_by_id if scenario is not None else {}
+    shifts = window_shift or {}
     rows: list[Assignment] = []
     assigned = 0
     unassigned = 0
     for item in result.assignments:
         request_id = int(item.request_id)
+        window = {}
+        source = by_id.get(item.request_id)
+        if source is not None:
+            shift = timedelta(minutes=shifts.get(item.request_id, 0.0))
+            window = {
+                "window_start": local_time(source.window_start + shift, offset_hours),
+                "window_end": local_time(source.window_end + shift, offset_hours),
+            }
         if item.is_assigned and item.engineer_id is not None:
             engineer_id = int(item.engineer_id)
             visit = visits.get(item.request_id)
@@ -401,6 +425,7 @@ def assignments_from_result(
                     plan_id=0,
                     transport_id=transport_by_engineer.get(engineer_id),
                     explanation=item.explanation or None,
+                    **window,
                     **({} if visit is None else {
                         "position": visit.position,
                         "planned_departure_at": local_time(visit.departure_at, offset_hours),
@@ -427,6 +452,7 @@ def assignments_from_result(
                 transport_id=None,
                 unassigned_reason_id=reason_id,
                 explanation=item.explanation or None,
+                **window,
             )
         )
         unassigned += 1

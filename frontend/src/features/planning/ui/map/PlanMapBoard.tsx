@@ -29,10 +29,12 @@ type DragState = {
 type PlanMapBoardProps = {
   board: PlanMapBoardState
   onCancelStop?: (requestId: string) => void
+  /** Старая версия или прошедший день: заявки в маршрут не добавляются. */
+  readOnly?: boolean
 }
 
 /** Рабочая область карты: маршруты, панель выбранного маршрута и неназначенные заявки. */
-export function PlanMapBoard({ board, onCancelStop }: PlanMapBoardProps) {
+export function PlanMapBoard({ board, onCancelStop, readOnly = false }: PlanMapBoardProps) {
   const listRef = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
   const [hint, setHint] = useState(false)
@@ -129,7 +131,7 @@ export function PlanMapBoard({ board, onCancelStop }: PlanMapBoardProps) {
             route={selectedRoute}
             activeStopId={board.activeStopId}
             onToggleStop={board.toggleStop}
-            onAddTicket={() => setHint(true)}
+            onAddTicket={readOnly ? undefined : () => setHint(true)}
             onEditParams={() => setParamsOpen(true)}
             onCancelStop={onCancelStop}
             dropIndex={drag?.index ?? null}

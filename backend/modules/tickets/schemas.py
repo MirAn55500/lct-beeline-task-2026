@@ -28,11 +28,15 @@ class CreateTicketRequest(BaseModel):
     region_id: int = Field(ge=1)
     date: date_type
     address: str = Field(min_length=1, max_length=300)
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+    """Точка адреса из подсказки или с карты. Без неё адрес ищет геокодер."""
     start: time
     end: time
     work_type: str
     """Подключение / Дозаказ / Ремонт / Аварийные работы."""
-    remake_level: RemakeLevel = RemakeLevel.FIX
+    remake_level: RemakeLevel | None = None
+    """Без него: авария — `free` (пересчёт дня), остальное — `fix` (свободные окна)."""
 
 
 class CreateTicketResult(UploadTicketsResult):

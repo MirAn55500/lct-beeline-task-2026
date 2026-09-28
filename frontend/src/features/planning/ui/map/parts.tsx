@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from 'react'
-import { Tooltip } from '@heroui/react'
-import { RiErrorWarningLine, RiRouterLine, RiTimeLine, RiTvLine } from '@remixicon/react'
+import { Popover, Tooltip } from '@heroui/react'
+import { RiErrorWarningLine, RiQuestionLine, RiRouterLine, RiTimeLine, RiTvLine } from '@remixicon/react'
 
 import { cn } from '@/shared/lib/cn'
 import { getInitials } from '@/shared/lib'
@@ -133,5 +133,33 @@ export function ReasonTag({ label, explanation }: { label: string; explanation: 
         {explanation}
       </AppTooltipContent>
     </Tooltip>
+  )
+}
+
+/** Почему заявка у этого инженера: ссылка, полное объяснение планировщика — во всплывающем окне. */
+export function ExplanationPopover({ explanation }: { explanation: string }) {
+  return (
+    <Popover>
+      <Popover.Trigger className="inline-flex w-fit cursor-pointer items-center gap-1 text-sm leading-5 font-medium text-link outline-none hover:underline focus-visible:underline">
+        <RiQuestionLine size={16} className="shrink-0" />
+        Почему этот инженер
+      </Popover.Trigger>
+      <Popover.Content
+        placement="right top"
+        offset={12}
+        className="w-[360px] max-w-[calc(100vw-32px)] border-0 bg-surface p-0 text-foreground outline-none"
+        style={{
+          borderRadius: 16,
+          boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
+        }}
+      >
+        <Popover.Dialog className="flex flex-col gap-1 p-4 outline-none" style={{ borderRadius: 16 }}>
+          <Popover.Heading className="text-base leading-6 font-semibold text-foreground">
+            Почему этот инженер
+          </Popover.Heading>
+          <p className="text-sm leading-5 text-foreground">{explanation}</p>
+        </Popover.Dialog>
+      </Popover.Content>
+    </Popover>
   )
 }

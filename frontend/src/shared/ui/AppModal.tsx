@@ -57,7 +57,7 @@ export function AppModal({
         {isOpen ? (
           <AlertDialog.Dialog
             className={cn(
-              'relative flex w-[450px] max-w-[calc(100vw-32px)] flex-col gap-5 bg-surface p-6 outline-none',
+              'relative flex max-h-[calc(100dvh-32px)] w-[450px] max-w-[calc(100vw-32px)] flex-col gap-5 bg-surface p-6 outline-none',
               className,
             )}
             style={{
@@ -65,7 +65,7 @@ export function AppModal({
               boxShadow: '0 14px 28px rgb(0 0 0 / 0.08), 0 -6px 12px rgb(0 0 0 / 0.03), 0 2px 8px rgb(0 0 0 / 0.06)',
             }}
           >
-            <div className="flex flex-col gap-4">
+            <div className="flex min-h-0 flex-1 flex-col gap-4">
               {icon ? (
                 <div className="flex flex-col gap-2">
                   <div className="flex flex-col gap-3 pr-6">
@@ -89,10 +89,13 @@ export function AppModal({
                   {description ? <p className="text-sm leading-6 text-muted">{description}</p> : null}
                 </div>
               )}
-              {children}
+              {/* Высокая форма прокручивается внутри окна: заголовок и кнопки остаются на месте */}
+              {children ? (
+                <div className="-m-1 min-h-0 flex-1 overflow-y-auto p-1">{children}</div>
+              ) : null}
             </div>
 
-            {footer ? <div className="flex justify-end gap-2">{footer}</div> : null}
+            {footer ? <div className="flex shrink-0 justify-end gap-2">{footer}</div> : null}
 
             <button
               type="button"

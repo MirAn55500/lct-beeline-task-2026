@@ -11,7 +11,7 @@ from core.config import get_settings
 from core.exceptions import AppError
 from modules.catalogs.seed_values import reason_code, reason_hint, reason_label
 from modules.geocoding.anchors import district_anchors
-from modules.geocoding.geocoder import DISTRICT, SETTLED, AddressGeocoder
+from modules.geocoding.geocoder import DISTRICT, HOUSE, REGION_BBOX, SETTLED, AddressGeocoder, has_house
 from modules.planning.models.assignment import Assignment
 from modules.planning import background
 from modules.planning.schemas import RemakeLevel
@@ -258,6 +258,11 @@ class TicketsService:
         if not address:
             raise AppError("Укажите адрес заявки")
 
+        remake_level = body.remake_level
+        if remake_level is None:
+            emergency = body.work_type == "Аварийные работы"
+            remake_level = RemakeLevel.FREE if emergency else RemakeLevel.FIX
+
         number = await self._repo.next_external_id()
         ticket = manual_ticket(
             external_id=number,
@@ -266,11 +271,28 @@ class TicketsService:
             end=datetime.combine(body.date, body.end),
             work_type=body.work_type,
         )
-        [ticket] = await self._geocode(body.region_id, [ticket])
-        stored = (await self._repo.find_addresses(body.region_id)).get((ticket.district, address))
-        if ticket.geo_precision not in SETTLED and (stored is None or stored.geo_precision not in SETTLED):
-            # Точка по району или городу увела бы инженера не туда — лучше уточнить адрес
-            raise AppError("Не удалось найти адрес на карте — уточните улицу и дом")
+        if body.lat is not None and body.lon is not None:
+            # Как офис бригады: адрес из подсказок или точка на карте — геокодер не нужен
+            south, west, north, east = REGION_BBOX
+            if not (south <= body.lat <= north and west <= body.lon <= east):
+                raise AppError("Адрес заявки должен быть в Москве или Московской области")
+            if not has_house(address):
+                raise AppError("Укажите адрес заявки с номером дома")
+            ticket = replace(
+                ticket,
+                latitude=body.lat,
+                longitude=body.lon,
+                geo_precision=HOUSE,
+                geo_source="map",
+            )
+        else:
+            [ticket] = await self._geocode(body.region_id, [ticket])
+            stored = (await self._repo.find_addresses(body.region_id)).get((ticket.district, address))
+            if ticket.geo_precision not in SETTLED and (
+                stored is None or stored.geo_precision not in SETTLED
+            ):
+                # Точка по району или городу увела бы инженера не туда — лучше уточнить адрес
+                raise AppError("Не удалось найти адрес на карте — уточните улицу и дом")
 
         created, updated, skipped, touched = await self._repo.save_upload(
             region_id=body.region_id,
@@ -284,7 +306,7 @@ class TicketsService:
             created=created,
             updated=updated,
             skipped=skipped,
-            **await self._plan_after(body.region_id, [ticket], body.remake_level, touched),
+            **await self._plan_after(body.region_id, [ticket], remake_level, touched),
         )
 
     async def _plan_after(

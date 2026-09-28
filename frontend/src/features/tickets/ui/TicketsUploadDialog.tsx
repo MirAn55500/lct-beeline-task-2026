@@ -13,13 +13,17 @@ import {
 import { DropZone, FileTrigger, Button as AriaButton, isFileDropItem } from 'react-aria-components'
 
 import { useGetRegionsQuery } from '@/features/catalogs'
+import {
+  AddressPointField,
+  EMPTY_ADDRESS_POINT,
+  type AddressPoint,
+} from '@/features/personnel/ui/AddressPointField'
 import { cn } from '@/shared/lib/cn'
 import {
   AppModal,
   AppTooltipContent,
   FieldLabel,
   RebuildLevelField,
-  TextInput,
   WorkTimeField,
   buttonClass,
   type RebuildLevel,
@@ -39,9 +43,6 @@ type TicketsUploadDialogProps = {
   date: string
   onUploaded?: (result: UploadTicketsResult) => void
 }
-
-/** Столько же, сколько принимает backend. */
-const ADDRESS_MAX = 300
 
 function InfoHint({ children }: { children: string }) {
   return (
@@ -114,6 +115,9 @@ function OptionsDropdown<K extends string | number>({
 
 const WORK_TYPES = WORK_TYPE_OPTIONS.map((item) => ({ id: item, label: item }))
 
+/** Авария вытесняет работы и сдвигает маршруты — по умолчанию план пересобирается целиком. */
+const EMERGENCY_WORK_TYPE = 'Аварийные работы'
+
 const clock = (time: Time) => `${String(time.hour).padStart(2, '0')}:${String(time.minute).padStart(2, '0')}`
 
 /**
@@ -126,7 +130,7 @@ export function TicketsUploadDialog({ isOpen, onClose, defaultRegionId = null, d
   const [regionId, setRegionId] = useState<number | null>(defaultRegionId)
   const [file, setFile] = useState<File | null>(null)
   const [level, setLevel] = useState<RebuildLevel>('fix')
-  const [address, setAddress] = useState('')
+  const [address, setAddress] = useState<AddressPoint>(EMPTY_ADDRESS_POINT)
   const [timeFrom, setTimeFrom] = useState<Time | null>(new Time(9, 0))
   const [timeTo, setTimeTo] = useState<Time | null>(new Time(18, 0))
   const [workType, setWorkType] = useState<string | null>(null)
@@ -142,7 +146,7 @@ export function TicketsUploadDialog({ isOpen, onClose, defaultRegionId = null, d
       setRegionId(defaultRegionId)
       setFile(null)
       setLevel('fix')
-      setAddress('')
+      setAddress(EMPTY_ADDRESS_POINT)
       setTimeFrom(new Time(9, 0))
       setTimeTo(new Time(18, 0))
       setWorkType(null)
@@ -153,7 +157,10 @@ export function TicketsUploadDialog({ isOpen, onClose, defaultRegionId = null, d
   const canUpload = region != null && file != null && !isUploading
   const badWindow = timeFrom != null && timeTo != null && timeTo.compare(timeFrom) <= 0
   const canCreate =
-    region != null && address.trim() !== '' && timeFrom != null && timeTo != null && !badWindow && workType != null && !isCreating
+    region != null &&
+    address.confirmed &&
+    address.point != null &&
+    timeFrom != null && timeTo != null && !badWindow && workType != null && !isCreating
 
   const pick = (files: File[]) => {
     const next = files.find(isTicketsFile)
@@ -167,11 +174,13 @@ export function TicketsUploadDialog({ isOpen, onClose, defaultRegionId = null, d
   }
 
   const submitSingle = async () => {
-    if (!region || !timeFrom || !timeTo || !workType) return
+    if (!region || !timeFrom || !timeTo || !workType || !address.point) return
     const done = await create({
       region_id: region.id,
       date,
-      address: address.trim(),
+      address: address.address.trim(),
+      lon: address.point[0],
+      lat: address.point[1],
       start: clock(timeFrom),
       end: clock(timeTo),
       work_type: workType,
@@ -201,12 +210,12 @@ export function TicketsUploadDialog({ isOpen, onClose, defaultRegionId = null, d
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1">
             <FieldLabel required>Адрес заявки</FieldLabel>
-            <TextInput
-              aria-label="Адрес заявки"
+            <AddressPointField
               value={address}
               onChange={setAddress}
-              placeholder="г. Москва, "
-              maxLength={ADDRESS_MAX}
+              label="Адрес заявки"
+              pointName="заявку"
+              doneHint="Сюда приедет инженер"
             />
           </div>
           <div className="flex flex-col gap-1">
@@ -227,7 +236,10 @@ export function TicketsUploadDialog({ isOpen, onClose, defaultRegionId = null, d
               placeholder="Выберите тип работ"
               options={WORK_TYPES}
               value={workType}
-              onChange={setWorkType}
+              onChange={(next) => {
+                setWorkType(next)
+                setLevel(next === EMERGENCY_WORK_TYPE ? 'free' : 'fix')
+              }}
             />
           </div>
           <RebuildLevelField value={level} onChange={setLevel} />

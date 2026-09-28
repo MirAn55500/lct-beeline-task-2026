@@ -61,7 +61,7 @@ from .solution import Solution
 from .solver import build_result
 from .travel import TravelModel
 
-__all__ = ["replan", "apply_event", "seed_from_previous", "build_diff"]
+__all__ = ["replan", "rebuild_unstarted", "apply_event", "seed_from_previous", "build_diff"]
 
 _EPS_MINUTES = 1e-6
 
@@ -704,6 +704,48 @@ def _trim_intervals(
 # --------------------------------------------------------------------------------------
 # Перенос предыдущего плана в рабочее состояние
 # --------------------------------------------------------------------------------------
+
+
+def rebuild_unstarted(
+    previous: PlanResult,
+    scenario: Scenario,
+    at: datetime,
+    *,
+    travel: TravelModel | None = None,
+    plan_id: str | None = None,
+) -> PlanResult:
+    """Пересчёт дня, который не трогает начатое: «Свободный» пересчёт посреди смены.
+
+    Визиты, к которым инженер выехал до `at`, остаются на своих местах и со своим
+    расписанием. Всё неначатое снимается и вместе с заявками без исполнителя (и новыми,
+    которых в прошлом плане не было) раскладывается заново, не раньше `at`. Это та же
+    третья ступень, что и при событии, только без самого события.
+    """
+    started = _time.monotonic()
+    ctx = PlanContext(scenario, travel)
+    deadline = started + max(0.1, scenario.settings.time_limit_seconds)
+    solution, pool, _ = seed_from_previous(
+        ctx, previous, at, keep_tail=False, not_before=at
+    )
+    known = solution.assigned_ids() | {r.id for r in pool}
+    for request in scenario.planning_requests():
+        if request.id not in known:
+            pool.append(request)
+            known.add(request.id)
+    pool.sort(key=lambda r: (-r.priority.rank, r.input_order, r.id))
+    insert_regret(ctx, solution, pool, deadline=deadline)
+    reclaim_emergencies(ctx, solution)
+    if scenario.settings.enable_local_search:
+        local_search(ctx, solution, deadline=deadline)
+    result = build_result(
+        ctx,
+        solution,
+        Algorithm.OPTIMIZED,
+        warnings=tuple(scenario.validate()),
+        elapsed_ms=(_time.monotonic() - started) * 1000.0,
+        plan_id=plan_id,
+    )
+    return _replace(result, not_before=at)
 
 
 def seed_from_previous(

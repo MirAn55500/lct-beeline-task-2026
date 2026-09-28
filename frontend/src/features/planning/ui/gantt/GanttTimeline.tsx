@@ -46,6 +46,8 @@ type GanttTimelineProps = {
   scrollRef: RefObject<HTMLDivElement | null>
   lanesRef: RefObject<HTMLDivElement | null>
   onTaskPointerDown: (task: GanttTask, event: PointerEvent<HTMLElement>) => void
+  /** Визит можно схватить; неподвижные не показывают курсор «взять». */
+  canDrag: (task: GanttTask) => boolean
   onFreeCellClick: (engineerId: string, start: number) => void
   onBackgroundClick: () => void
 }
@@ -64,6 +66,7 @@ export function GanttTimeline({
   scrollRef,
   lanesRef,
   onTaskPointerDown,
+  canDrag,
   onFreeCellClick,
   onBackgroundClick,
 }: GanttTimelineProps) {
@@ -233,7 +236,7 @@ export function GanttTimeline({
                             task={task}
                             full={full}
                             joined={roadWidth > 0}
-                            className={cn(task.status === 'assigned' && !dragging && 'cursor-grab')}
+                            className={cn(canDrag(task) && !dragging && 'cursor-grab')}
                             style={{ width: full ? fullWidth : cardWidth }}
                             onPointerDown={(event) => onTaskPointerDown(task, event)}
                           />

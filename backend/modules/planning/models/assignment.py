@@ -46,6 +46,11 @@ class Assignment(BaseTable, table=True):
     waiting_minutes: Optional[float] = Field(default=None)
     idle_minutes: Optional[float] = Field(default=None)
     explanation: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    # Окно клиента, с которым считалась версия (местное время). Окно заявки потом может
+    # сдвинуться по согласованию, а старая версия плана должна остаться такой, какой была.
+    # Пусто у планов до миграции 0015 — тогда берётся окно из заявки.
+    window_start: Optional[datetime] = Field(default=None)
+    window_end: Optional[datetime] = Field(default=None)
 
     request: Optional["Request"] = Relationship(back_populates="assignments")
     engineer: Optional["Engineer"] = Relationship(back_populates="assignments")

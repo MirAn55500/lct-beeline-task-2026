@@ -53,7 +53,7 @@ from planner.dispatch import Board, MoveOutcome, StoredVisit
 from planner.enums import EventType, ReasonCode, ReplanScope
 from planner.metrics import compare as compare_plans
 from planner.models import ReplanEvent, Scenario
-from planner.replan import replan
+from planner.replan import rebuild_unstarted, replan
 from planner.result import PlanResult
 
 _REMAKE_TO_SCOPE = {
@@ -125,9 +125,16 @@ class PlanningService:
                 planning_eta_seconds=planning_eta,
             )
 
-        assigned = await self._repo.count_assigned_requests(plan.plan_id, region_id)
-        engaged = await self._repo.count_engaged_engineers(plan.plan_id, region_id)
-        travel_minutes, distance_km = await self._repo.travel_totals(plan.plan_id)
+        # Сводка считается из того же вида версии, что показывают карта и Гант: старая —
+        # из снимка, последняя — по текущим данным. Отдельные запросы к БД расходились с планом
+        # (заявка, перенесённая на другой день, оставалась в «назначено»).
+        shown = await self._export(plan, latest=plan is plans[0])
+        visits = [v for route in shown.routes for v in route.visits]
+        tickets_total = len(shown.requests)
+        assigned = len(visits)
+        engaged = sum(1 for route in shown.routes if route.visits)
+        travel_minutes = sum(v.travelMinutes for v in visits)
+        distance_km = sum(v.distanceKm for v in visits)
 
         return DayOverviewResponse(
             plan_id=plan.plan_id,
@@ -187,7 +194,9 @@ class PlanningService:
     ) -> RecalculateResponse:
         """Новая версия плана дня.
 
-        «Свободный» (и первый план дня) — расчёт с нуля. «Фикс» и «Инженерный» берут
+        «Свободный» пересобирает весь день, но сегодня не трогает начатое: визиты, к которым
+        инженер уже выехал, остаются как есть (`_rebuild_unstarted`). Первый план дня,
+        прошедший или будущий день и «Равномерное» — расчёт с нуля. «Фикс» и «Инженерный» берут
         последнюю версию и только ставят в неё заявки, которых там нет: в свободные окна
         или (Инженерный) с вытеснением внутри маршрута одного инженера, см. `Board.place_new`.
         `fresh` — id добавленных и изменённых загрузкой заявок: их прежние визиты
@@ -202,6 +211,8 @@ class PlanningService:
         result = None
         if remake_level is not RemakeLevel.FREE and previous is not None:
             result = await self._extend(previous.plan_id or 0, day, scenario, profiles, fresh, remake_level)
+        elif previous is not None and algorithm is Algorithm.OPTIMIZED:
+            result = await self._rebuild_unstarted(previous.plan_id or 0, day, scenario, profiles, fresh)
         if result is None:
             result = await asyncio.to_thread(run_plan, scenario, algorithm, profiles)
         comparison = None
@@ -226,6 +237,7 @@ class PlanningService:
             transport_by_engineer=transport_by_engineer,
             reason_by_code=reason_index(reasons),
             offset_hours=scenario.settings.timezone_offset_hours,
+            scenario=scenario,
         )
         previous = await self._repo.find_latest_plan(region_id, day)
         version = (previous.version + 1) if previous is not None else 1
@@ -248,6 +260,7 @@ class PlanningService:
                 offset_hours=scenario.settings.timezone_offset_hours,
             ),
         )
+        await self._save_snapshot(plan)
         if previous is not None and previous.plan_id is not None:
             boards.drop(previous.plan_id)
         return plan, assigned, unassigned
@@ -256,6 +269,8 @@ class PlanningService:
         self, region_id: int, day: date, body: PlanEventRequest
     ) -> PlanEventResponse:
         """Отмена заявки или недоступность инженера: ремонт остатка дня и разница с прошлым планом."""
+        if day < datetime.now(_PLAN_ZONE).date():
+            raise AppError(_PAST_DAY, status_code=409)
         previous_plan = await self._repo.find_latest_plan(region_id, day)
         if previous_plan is None or previous_plan.plan_id is None:
             raise AppError("Сначала составьте план на этот день")
@@ -313,7 +328,7 @@ class PlanningService:
             assigned=assigned,
             unassigned=unassigned,
             summary=summary,
-            warnings=list(result.warnings),
+            warnings=_dispatcher_notes(result.warnings),
         )
 
     async def _extend(
@@ -349,6 +364,37 @@ class PlanningService:
             board = Board(scenario, visits, unassigned=unassigned, travel=travel, now=now)
             board.place_new(candidates, scope=_REMAKE_TO_SCOPE[remake_level])
             return finish_plan(scenario, board.result(), routing, travel)
+
+        return await asyncio.to_thread(compute)
+
+    async def _rebuild_unstarted(
+        self,
+        plan_id: int,
+        day: date,
+        scenario: Scenario,
+        profiles,
+        fresh: Iterable[int],
+    ) -> PlanResult | None:
+        """«Свободный» посреди дня: начатое и выполненное на месте, остальное — заново.
+
+        Начатым считается визит, к которому инженер выехал до «сейчас». None — замораживать
+        нечего (не сегодня или в версии нет расписания), и день считается с нуля.
+        """
+        zone = timezone(timedelta(hours=scenario.settings.timezone_offset_hours))
+        now = datetime.now(zone)
+        if now.date() != day:
+            return None
+        fresh_ids = {str(i) for i in fresh}
+        rows = [r for r in await self._repo.list_assignments(plan_id) if str(r.request_id) not in fresh_ids]
+        visits, unassigned = self._stored_visits(rows, scenario)
+        if not visits:
+            return None
+
+        def compute() -> PlanResult:
+            routing, travel = build_travel(scenario, profiles)
+            board = Board(scenario, visits, unassigned=unassigned, travel=travel, now=now)
+            result = rebuild_unstarted(board.result(), scenario, now, travel=travel)
+            return finish_plan(scenario, result, routing, travel)
 
         return await asyncio.to_thread(compute)
 
@@ -406,15 +452,45 @@ class PlanningService:
             plan = next((item for item in plans if item.plan_id == plan_id), None)
         if plan is None or plan.plan_id is None:
             raise AppError("План не найден", status_code=404)
+        return await self._export(plan, latest=plan is plans[0])
+
+    async def _export(self, plan: Plan, *, latest: bool) -> PlanExportResponse:
+        """Вид версии. Старая — история: ровно такой, какой была сохранена (снимок)."""
+        if not latest and plan.snapshot is not None:
+            return PlanExportResponse.model_validate(plan.snapshot)
+        return await self._build_export(plan)
+
+    async def _save_snapshot(self, plan: Plan) -> None:
+        """Запоминает вид версии на момент сохранения — потом она из него и показывается."""
+        export = await self._build_export(plan)
+        plan.snapshot = export.model_dump(mode="json")
+        self._repo.session.add(plan)
+        await self._repo.session.commit()
+
+    async def _build_export(self, plan: Plan) -> PlanExportResponse:
+        """Вид версии плана по текущим данным БД: заявки, инженеры, строки плана, линии."""
+        assert plan.plan_id is not None
+        region_id, day = plan.region_id, plan.date
         region = await self._repo.get_region(region_id)
         requests = await self._repo.list_requests_for_plan(region_id, day)
         engineers = await self._repo.list_engineers_for_plan(region_id)
+        rows = await self._repo.list_assignments(plan.plan_id)
+        # Версия плана — история: заявка, которую потом отменили или закрыли, в ней остаётся
+        # такой, какой была. Иначе старые версии задним числом теряли бы строки.
+        in_plan = {row.request_id for row in rows}
+        # Окно, с которым версия считалась; у планов до миграции 0015 его нет — окно заявки
+        saved_windows = {
+            str(row.request_id): (row.window_start, row.window_end)
+            for row in rows
+            if row.window_start is not None and row.window_end is not None
+        }
         scenario, _ = build_scenario(
             day=day,
             region_id=region_id,
             region_name=region.region_name if region else "",
             requests=requests,
             engineers=engineers,
+            keep_closed=in_plan,
         )
         zone = timezone(timedelta(hours=scenario.settings.timezone_offset_hours))
         suffix = datetime(2000, 1, 1, tzinfo=zone).strftime("%z")
@@ -431,7 +507,7 @@ class PlanningService:
             PlanRequestExport(
                 id=r.id,
                 point=[r.point.lon, r.point.lat],
-                window=[iso(r.window_start), iso(r.window_end)],
+                window=[iso(moment) for moment in saved_windows.get(r.id, (r.window_start, r.window_end))],
                 address=r.address,
                 type=r.request_type_bk,
                 skill=r.required_skill.value,
@@ -465,7 +541,7 @@ class PlanningService:
         paths = await self._repo.list_route_paths(plan.plan_id)
         by_engineer: dict[str, list] = {}
         unassigned_out: list[PlanUnassignedExport] = []
-        for row in await self._repo.list_assignments(plan.plan_id):
+        for row in rows:
             request_id = str(row.request_id)
             if request_id not in known:
                 continue
@@ -603,10 +679,27 @@ class PlanningService:
         boards.put(plan_id, entry)
         return entry
 
+    async def _frozen_reason(self, plan_id: int) -> str | None:
+        """Почему версию нельзя править руками: старая версия или прошедший день. None — можно.
+
+        Старые версии — история. Прошедший день целиком в прошлом: ставить в него заявки
+        некуда, и перетаскивание только показывало бы, что время прошло.
+        """
+        plan = await self._repo.session.get(Plan, plan_id)
+        if plan is None:
+            raise AppError("План не найден", status_code=404)
+        latest = await self._repo.find_latest_plan(plan.region_id, plan.date)
+        if latest is None or latest.plan_id != plan_id:
+            return _OLD_VERSION
+        if plan.date < datetime.now(_PLAN_ZONE).date():
+            return _PAST_DAY
+        return None
+
     async def get_slots(
         self, plan_id: int, request_ids: list[str] | None = None
     ) -> PlanSlotsResponse:
         """Куда можно поставить заявки плана: окна по инженерам и позициям маршрута."""
+        frozen = await self._frozen_reason(plan_id)
         entry = await self._open_board(plan_id)
 
         def compute():
@@ -614,6 +707,11 @@ class PlanningService:
                 return entry.board.slots(request_ids or None)
 
         items = await asyncio.to_thread(compute)
+        if frozen is not None:
+            items = [
+                replace(item, movable=False, reason=frozen, slots={}, refusals={})
+                for item in items
+            ]
         return PlanSlotsResponse(
             planId=plan_id,
             requests=[
@@ -642,6 +740,9 @@ class PlanningService:
 
     async def move(self, plan_id: int, body: MoveRequest) -> MoveResponse:
         """Ручной ход: проверка с превью или (commit) новая версия плана."""
+        frozen = await self._frozen_reason(plan_id)
+        if frozen is not None:
+            raise AppError(frozen, status_code=409)
         entry = await self._open_board(plan_id)
         options = dict(
             start=body.start, position=body.position, release=body.release, commit=body.commit
@@ -676,6 +777,10 @@ class PlanningService:
                 transport_by_engineer=entry.transport_of,
                 reason_by_code=reason_index(reasons),
                 offset_hours=offset,
+                scenario=entry.scenario,
+                window_shift=(
+                    {body.requestId: outcome.window_shift} if outcome.window_shift else None
+                ),
             )
             changed = set(outcome.engineers)
             legs = {
@@ -704,10 +809,16 @@ class PlanningService:
                 rows=rows,
                 legs=legs,
             )
+            await self._save_snapshot(saved)
         except Exception:
             boards.drop(plan_id)
             raise
-        boards.rename(plan_id, saved.plan_id or 0)
+        if outcome.window_shift:
+            # Окно заявки в БД сдвинуто, а сценарий доски помнит старое — следующая версия
+            # записала бы его. Доска соберётся заново уже с новым окном.
+            boards.drop(plan_id)
+        else:
+            boards.rename(plan_id, saved.plan_id or 0)
         response = self._move_response(outcome)
         response.planId = saved.plan_id
         response.version = saved.version
@@ -736,6 +847,22 @@ class PlanningService:
             ],
             released=list(outcome.released),
         )
+
+
+# Служебные записи маршрутизации: откуда взяты расстояния и расписания, команды прогрева
+# кэша. Диспетчеру они ничего не говорят — остаются в логах backend (`finish_plan`).
+_ROUTING_NOTE_PREFIXES = ("ORS:", "RAPTOR", "rRAPTOR", "Общественный транспорт:")
+
+
+def _dispatcher_notes(warnings: Iterable[str]) -> list[str]:
+    """Предупреждения плана, которые стоит показать диспетчеру: без служебных про маршрутизацию."""
+    return [w for w in warnings if w and not w.startswith(_ROUTING_NOTE_PREFIXES)]
+
+
+_OLD_VERSION = "Это старая версия плана — менять можно только последнюю"
+_PAST_DAY = "День плана уже прошёл — его план не меняется"
+# Пояс, в котором живут дни планов (как `Settings.timezone_offset_hours` планировщика)
+_PLAN_ZONE = timezone(timedelta(hours=3))
 
 
 _COMPARE_LINES = (

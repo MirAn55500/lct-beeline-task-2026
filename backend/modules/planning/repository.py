@@ -53,42 +53,12 @@ class PlanningRepository:
         )
         return int(result.one())
 
-    async def count_assigned_requests(
-        self, plan_id: int, region_id: int
-    ) -> int:
-        result = await self._session.exec(
-            select(func.count())
-            .select_from(Assignment)
-            .join(Request, Assignment.request_id == Request.request_id)
-            .where(
-                Assignment.plan_id == plan_id,
-                Request.region_id == region_id,
-                Assignment.engineer_id.is_not(None),
-            )
-        )
-        return int(result.one())
-
     async def count_engineers(self, region_id: int) -> int:
         result = await self._session.exec(
             select(func.count())
             .select_from(Engineer)
             .join(Brigade, Engineer.brigade_id == Brigade.brigade_id)
             .where(Brigade.region_id == region_id)
-        )
-        return int(result.one())
-
-    async def count_engaged_engineers(
-        self, plan_id: int, region_id: int
-    ) -> int:
-        result = await self._session.exec(
-            select(func.count(func.distinct(Assignment.engineer_id)))
-            .select_from(Assignment)
-            .join(Request, Assignment.request_id == Request.request_id)
-            .where(
-                Assignment.plan_id == plan_id,
-                Request.region_id == region_id,
-                Assignment.engineer_id.is_not(None),
-            )
         )
         return int(result.one())
 
@@ -214,20 +184,6 @@ class PlanningRepository:
         request.plan_start_time = request.plan_start_time + shift
         request.plan_end_time = request.plan_end_time + shift
         self._session.add(request)
-
-    async def travel_totals(self, plan_id: int) -> tuple[float, float]:
-        """Сумма минут в пути и километров по назначенным визитам плана."""
-        result = await self._session.exec(
-            select(
-                func.coalesce(func.sum(Assignment.travel_minutes), 0.0),
-                func.coalesce(func.sum(Assignment.distance_km), 0.0),
-            ).where(
-                Assignment.plan_id == plan_id,
-                col(Assignment.engineer_id).is_not(None),
-            )
-        )
-        minutes, km = result.one()
-        return float(minutes or 0), float(km or 0)
 
     async def unavailable_cutoffs(self, day: date) -> dict[str, datetime]:
         """Самый ранний момент недоступности инженера в этот день. Ключ — id инженера строкой."""

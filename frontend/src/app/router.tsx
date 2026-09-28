@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { toast } from '@heroui/react'
 import { Navigate, Route, Routes, useSearchParams } from 'react-router'
-import { parseDate } from '@internationalized/date'
+import { getLocalTimeZone, parseDate, today } from '@internationalized/date'
 
 import {
   HomeAreaLayout,
@@ -331,8 +331,12 @@ function PlanMapPage() {
   const [applyEvent] = useApplyPlanEventMutation()
   const [eventReport, setEventReport] = useState<PlanEventResult | null>(null)
   const [awayEngineerId, setAwayEngineerId] = useState<string | null>(null)
+  // Старая версия плана и прошедший день — история: события и правки только в последней
+  // версии текущего или будущего дня
+  const editable = !context.offline && !isFrozenPlan(context)
   const board = usePlanMapBoard(context.regionId, context.date.toString(), context.queryPlanId, {
     onSaved: context.setPlanId,
+    readOnly: isFrozenPlan(context),
   })
 
   const runEvent = async (body: {
@@ -367,15 +371,16 @@ function PlanMapPage() {
           hoveredId={board.hoveredId}
           onSelect={board.select}
           onHover={board.hover}
-          onUnavailable={context.offline ? undefined : setAwayEngineerId}
+          onUnavailable={editable ? setAwayEngineerId : undefined}
         />
       }
       header={<PlanWorkHeader context={context} />}
     >
       <PlanMapBoard
         board={board}
+        readOnly={isFrozenPlan(context)}
         onCancelStop={
-          context.offline
+          !editable
             ? undefined
             : (requestId) => {
                 const id = Number(requestId)
@@ -401,11 +406,21 @@ function PlanMapPage() {
   )
 }
 
+/**
+ * Руками не правится: старая версия плана (история) или прошедший день — ставить заявки
+ * уже некуда. На моках без backend перетаскивание остаётся для показа.
+ */
+function isFrozenPlan(context: PlanContext) {
+  if (context.offline) return false
+  return context.queryPlanId != null || context.date.compare(today(getLocalTimeZone())) < 0
+}
+
 function PlanGanttPage() {
   const context = usePlanContext()
   const board = usePlanGanttBoard(context.regionId, context.date.toString(), context.queryPlanId, {
     // Ручной ход сохранён новой версией — переключаемся на неё.
     onSaved: context.setPlanId,
+    readOnly: isFrozenPlan(context),
   })
 
   return (

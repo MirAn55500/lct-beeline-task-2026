@@ -154,7 +154,8 @@ export function usePlanGanttBoard(
   regionId: number | null,
   date: string,
   planId: number | null = null,
-  { onSaved }: { onSaved?: (planId: number) => void } = {},
+  /** `readOnly` — старая версия плана или прошедший день: заявки не перетаскиваются вовсе. */
+  { onSaved, readOnly = false }: { onSaved?: (planId: number) => void; readOnly?: boolean } = {},
 ) {
   const query = useGetPlanExportQuery(regionId != null ? { regionId, date, planId } : skipToken)
   // 404 — плана на этот день нет; ошибка без статуса ответа — backend не поднят, остаёмся на моках.
@@ -332,6 +333,11 @@ export function usePlanGanttBoard(
     closeManage: () => setManageId(null),
     saveTicket,
     evaluate,
+    /**
+     * Можно ли вообще взять заявку: backend отметил неподвижные — старая версия плана,
+     * начатая или прошедшая работа. Пока окна не пришли — можно, проверит сам ход.
+     */
+    canDrag: (ticketId: string) => !readOnly && slotIndex?.get(ticketId)?.movable !== false,
     /** Время, прилипшее к ближайшему окну постановки у инженера. */
     magnet: (ticketId: string, engineerId: string, start: number, raw: number) =>
       magnetStart(start, raw, slotIndex?.get(ticketId)?.byEngineer.get(engineerId)),
