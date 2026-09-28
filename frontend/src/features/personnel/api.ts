@@ -4,6 +4,7 @@ import type { ModuleHealth } from '@/shared/types'
 import type {
   AddressSuggestion,
   BrigadeArea,
+  CreateBrigadeBody,
   CreateEngineerBody,
   Engineer,
   EngineerBody,
@@ -175,6 +176,11 @@ export const personnelApi = baseApi.injectEndpoints({
       transformResponse: (response: ApiBrigade[]) => response.map(mapBrigade),
       providesTags: ['Brigade'],
     }),
+    createBrigade: build.mutation<PersonnelBrigade, CreateBrigadeBody>({
+      query: (body) => ({ url: '/api/personnel/brigades', method: 'POST', body }),
+      transformResponse: (response: ApiBrigade) => mapBrigade(response),
+      invalidatesTags: ['Brigade'],
+    }),
     getBrigadeAreas: build.query<BrigadeArea[], number>({
       query: (regionId) => ({ url: '/api/personnel/areas', params: { region_id: regionId } }),
       providesTags: ['Catalog'],
@@ -281,6 +287,7 @@ export const {
   useGetPersonnelHealthQuery,
   useGetPersonnelFilterOptionsQuery,
   useGetBrigadesQuery,
+  useCreateBrigadeMutation,
   useGetBrigadeAreasQuery,
   useLazyReverseGeocodeQuery,
   useLazySuggestAddressQuery,

@@ -1,10 +1,10 @@
-import { ScrollShadow, Tooltip } from '@heroui/react'
+import { ScrollShadow } from '@heroui/react'
 import { RiAddCircleLine, RiUser3Line } from '@remixicon/react'
 
 import type { PersonnelBrigade } from '@/features/personnel/types'
 import { cn } from '@/shared/lib/cn'
 import { pluralRu } from '@/shared/lib/text'
-import { AppPanel, AppTooltipContent } from '@/shared/ui'
+import { AppPanel } from '@/shared/ui'
 
 function BrigadeCard({
   brigade,
@@ -47,6 +47,7 @@ type BrigadesPanelProps = {
   selectedId: number | null
   isLoading?: boolean
   onSelect: (brigadeId: number) => void
+  onAddBrigade: () => void
 }
 
 export function BrigadesPanel({
@@ -55,6 +56,7 @@ export function BrigadesPanel({
   selectedId,
   isLoading = false,
   onSelect,
+  onAddBrigade,
 }: BrigadesPanelProps) {
   return (
     <AppPanel className="flex min-h-0 flex-1 flex-col">
@@ -83,23 +85,16 @@ export function BrigadesPanel({
         </div>
       </ScrollShadow>
 
-      {/* Бригада — это инженеры одного региона: новая появляется вместе с регионом */}
       <div className="shrink-0 px-3 pt-2 pb-3">
-        <Tooltip delay={200}>
-          <Tooltip.Trigger className="w-full cursor-not-allowed outline-none">
-            <span
-              aria-disabled
-              className="inline-flex h-9 w-full items-center justify-center gap-2 border border-border text-sm font-medium leading-5 text-foreground opacity-50"
-              style={{ borderRadius: 8 }}
-            >
-              <RiAddCircleLine size={16} className="shrink-0" />
-              Добавить бригаду
-            </span>
-          </Tooltip.Trigger>
-          <AppTooltipContent className="max-w-[260px] text-left break-normal">
-            Бригада — это инженеры одного региона, новая появляется вместе с регионом
-          </AppTooltipContent>
-        </Tooltip>
+        <button
+          type="button"
+          onClick={onAddBrigade}
+          className="inline-flex h-9 w-full cursor-pointer items-center justify-center gap-2 border border-border text-sm font-medium leading-5 text-foreground transition-colors hover:bg-surface-hover"
+          style={{ borderRadius: 8 }}
+        >
+          <RiAddCircleLine size={16} className="shrink-0" />
+          Добавить бригаду
+        </button>
       </div>
     </AppPanel>
   )

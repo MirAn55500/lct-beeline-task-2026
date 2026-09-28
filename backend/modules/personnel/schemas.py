@@ -79,6 +79,19 @@ class UpdateBrigadeRequest(BaseModel):
     lunch_lon: float | None = Field(default=None, ge=-180, le=180)
 
 
+class CreateBrigadeRequest(BaseModel):
+    """Новая бригада в регионе: офис, смена и рабочие дни. Обед — по умолчанию 13–14 у последней заявки."""
+
+    region_id: int = Field(ge=1)
+    name: str = Field(min_length=1, max_length=200)
+    office_address: str = Field(min_length=3, max_length=300)
+    office_lat: float = Field(ge=-90, le=90)
+    office_lon: float = Field(ge=-180, le=180)
+    work_days: list[int] = Field(default_factory=lambda: [1, 2, 3, 4, 5, 6, 7], min_length=1)
+    start_work: time = time(9, 0)
+    end_work: time = time(22, 0)
+
+
 class AddressSuggestionResponse(BaseModel):
     address: str
     lat: float

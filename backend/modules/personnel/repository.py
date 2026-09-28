@@ -8,6 +8,7 @@ from modules.catalogs.enums import DictGroup
 from modules.catalogs.models.address import Address
 from modules.catalogs.models.area import Area
 from modules.catalogs.models.dictionary import Dictionary
+from modules.catalogs.models.region import Region
 from modules.personnel.models.brigade import Brigade
 from modules.personnel.models.engineer import Engineer
 from modules.personnel.models.engineer_skill import EngineerSkill
@@ -74,6 +75,37 @@ class PersonnelRepository:
             .order_by(Area.area)
         )
         return list(result.all())
+
+    async def get_region(self, region_id: int) -> Region | None:
+        result = await self._session.exec(select(Region).where(Region.region_id == region_id))
+        return result.first()
+
+    async def get_or_create_office_area(self, region_id: int) -> Area:
+        """Служебный район «Офис» региона — к нему привязывают адрес офиса бригады."""
+        found = (
+            await self._session.exec(
+                select(Area).where(Area.region_id == region_id, Area.area == OFFICE_AREA)
+            )
+        ).first()
+        if found is not None:
+            return found
+        area = Area(area=OFFICE_AREA, region_id=region_id)
+        self._session.add(area)
+        await self._session.flush()
+        return area
+
+    async def next_brigade_number(self, region_id: int) -> str:
+        count = (
+            await self._session.exec(
+                select(func.count()).select_from(Brigade).where(Brigade.region_id == region_id)
+            )
+        ).one()
+        return f"{int(count) + 1:02d}"
+
+    async def add_brigade(self, brigade: Brigade) -> Brigade:
+        self._session.add(brigade)
+        await self._session.flush()
+        return brigade
 
     async def find_address(
         self, area_id: int, address: str, lat: float, lon: float

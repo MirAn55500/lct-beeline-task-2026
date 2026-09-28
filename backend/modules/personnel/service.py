@@ -30,6 +30,7 @@ from modules.personnel.schemas import (
     AddressSuggestionResponse,
     AreaResponse,
     BrigadeResponse,
+    CreateBrigadeRequest,
     CreateEngineerRequest,
     EngineerFields,
     EngineerResponse,
@@ -127,6 +128,66 @@ class PersonnelService:
     async def list_areas(self, region_id: int) -> list[AreaResponse]:
         areas = await self._repo.list_areas(region_id)
         return [AreaResponse(id=area.id or 0, name=area.area) for area in areas]
+
+    async def create_brigade(self, body: CreateBrigadeRequest) -> BrigadeResponse:
+        """Новая бригада в регионе: офис, смена, рабочие дни. Обед — 13–14 у последней заявки."""
+        region = await self._repo.get_region(body.region_id)
+        if region is None:
+            raise NotFoundError("Регион не найден")
+
+        name = " ".join(body.name.split())
+        if not name:
+            raise AppError("Укажите название бригады")
+        if body.end_work <= body.start_work:
+            raise AppError("Конец рабочего дня должен быть позже начала")
+        days = sorted(set(body.work_days))
+        if not days or any(day < 1 or day > 7 for day in days):
+            raise AppError("Выберите хотя бы один рабочий день")
+
+        address = " ".join(body.office_address.split())
+        if not has_house(address):
+            raise AppError("Укажите адрес офиса с номером дома")
+        point = (body.office_lat, body.office_lon)
+        try:
+            await self._check_office_region(*point)
+        except address_suggest.DadataUnavailable:
+            pass
+
+        office_area = await self._repo.get_or_create_office_area(body.region_id)
+        assert office_area.id is not None
+        office = await self._repo.find_address(office_area.id, address, *point)
+        if office is None:
+            office = await self._repo.add_address(
+                Address(
+                    area_id=office_area.id,
+                    address=address,
+                    latitude=point[0],
+                    longitude=point[1],
+                    geo_precision=HOUSE,
+                    geo_source="map",
+                )
+            )
+        assert office.address_id is not None
+
+        number = await self._repo.next_brigade_number(body.region_id)
+        brigade = Brigade(
+            region_id=body.region_id,
+            name=name,
+            number=number,
+            start_work=body.start_work,
+            end_work=body.end_work,
+            office_address_id=office.address_id,
+            work_days="".join(str(day) for day in days),
+            lunch_start=time(13, 0),
+            lunch_end=time(14, 0),
+            lunch_place=LunchPlace.LAST_REQUEST.value,
+        )
+        brigade = await self._repo.add_brigade(brigade)
+        await self._repo.commit()
+
+        saved = await self._repo.get_brigade_full(brigade.brigade_id or 0)
+        assert saved is not None
+        return self._brigade_response(saved)
 
     async def update_brigade(
         self, brigade_id: int, body: UpdateBrigadeRequest

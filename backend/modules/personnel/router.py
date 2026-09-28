@@ -8,6 +8,7 @@ from modules.personnel.schemas import (
     AddressSuggestionResponse,
     AreaResponse,
     BrigadeResponse,
+    CreateBrigadeRequest,
     CreateEngineerRequest,
     EngineerResponse,
     EngineersQuery,
@@ -46,6 +47,19 @@ async def list_brigades(
 ) -> list[BrigadeResponse]:
     """Бригады региона или все бригады, если region_id не задан."""
     return await service.list_brigades(region_id)
+
+
+@router.post(
+    "/brigades",
+    response_model=BrigadeResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_brigade(
+    service: PersonnelServiceDep,
+    body: CreateBrigadeRequest,
+) -> BrigadeResponse:
+    """Новая бригада в регионе: офис, смена и рабочие дни."""
+    return await service.create_brigade(body)
 
 
 @router.patch("/brigades/{brigade_id}", response_model=UpdateBrigadeResponse)
