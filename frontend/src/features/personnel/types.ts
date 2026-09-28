@@ -76,17 +76,6 @@ export type UpdateBrigadeBody = {
   lunch_lon?: number
 }
 
-export type CreateBrigadeBody = {
-  region_id: number
-  name: string
-  office_address: string
-  office_lat: number
-  office_lon: number
-  work_days: number[]
-  start_work: string
-  end_work: string
-}
-
 export type UpdateBrigadeResult = PersonnelBrigade & {
   /** Скольким инженерам рабочий день переставлен вслед за бригадой. */
   rescheduledEngineers: number

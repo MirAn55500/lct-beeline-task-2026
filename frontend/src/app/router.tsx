@@ -12,7 +12,6 @@ import {
 import {
   BrigadeInfo,
   BrigadesPanel,
-  CreateBrigadeDialog,
   EngineerCardPanel,
   EngineerFormPanel,
   EngineersTable,
@@ -98,7 +97,6 @@ function PersonnelPage() {
   const [params, setParams] = useSearchParams()
   const [isAddOpen, setAddOpen] = useState(false)
   const [addSingle, setAddSingle] = useState(false)
-  const [createBrigadeOpen, setCreateBrigadeOpen] = useState(false)
   const [activeEngineerId, setActiveEngineerId] = useState<number | null>(null)
   // Открытая карточка — в форме редактирования
   const [isEditing, setEditing] = useState(false)
@@ -184,12 +182,6 @@ function PersonnelPage() {
             }
             update({ brigade: next })
           }}
-          onAddBrigade={() => {
-            setAddOpen(false)
-            setActiveEngineerId(null)
-            setEditing(false)
-            setCreateBrigadeOpen(true)
-          }}
         />
       }
       header={
@@ -198,7 +190,6 @@ function PersonnelPage() {
           tab={tab}
           onTabChange={(next) => {
             setAddOpen(false)
-            setCreateBrigadeOpen(false)
             setActiveEngineerId(null)
             setEditing(false)
             update({ tab: next })
@@ -207,7 +198,6 @@ function PersonnelPage() {
             setActiveEngineerId(null)
             setEditing(false)
             setAddSingle(false)
-            setCreateBrigadeOpen(false)
             setAddOpen(true)
             update({ tab: 'engineers' })
           }}
@@ -215,7 +205,6 @@ function PersonnelPage() {
             setActiveEngineerId(null)
             setEditing(false)
             setAddSingle(true)
-            setCreateBrigadeOpen(false)
             setAddOpen(true)
             update({ tab: 'engineers' })
           }}
@@ -288,14 +277,6 @@ function PersonnelPage() {
           />
         ) : null}
       </div>
-      <CreateBrigadeDialog
-        isOpen={createBrigadeOpen}
-        onClose={() => setCreateBrigadeOpen(false)}
-        defaultRegionId={brigade?.regionId ?? null}
-        onCreated={(created) => {
-          update({ brigade: created.id, tab: 'info' })
-        }}
-      />
     </WorkAreaMapLayout>
   )
 }

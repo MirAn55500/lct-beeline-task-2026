@@ -1,5 +1,5 @@
 import { ScrollShadow } from '@heroui/react'
-import { RiAddCircleLine, RiUser3Line } from '@remixicon/react'
+import { RiUser3Line } from '@remixicon/react'
 
 import type { PersonnelBrigade } from '@/features/personnel/types'
 import { cn } from '@/shared/lib/cn'
@@ -47,7 +47,6 @@ type BrigadesPanelProps = {
   selectedId: number | null
   isLoading?: boolean
   onSelect: (brigadeId: number) => void
-  onAddBrigade: () => void
 }
 
 export function BrigadesPanel({
@@ -56,7 +55,6 @@ export function BrigadesPanel({
   selectedId,
   isLoading = false,
   onSelect,
-  onAddBrigade,
 }: BrigadesPanelProps) {
   return (
     <AppPanel className="flex min-h-0 flex-1 flex-col">
@@ -85,17 +83,6 @@ export function BrigadesPanel({
         </div>
       </ScrollShadow>
 
-      <div className="shrink-0 px-3 pt-2 pb-3">
-        <button
-          type="button"
-          onClick={onAddBrigade}
-          className="inline-flex h-9 w-full cursor-pointer items-center justify-center gap-2 border border-border text-sm font-medium leading-5 text-foreground transition-colors hover:bg-surface-hover"
-          style={{ borderRadius: 8 }}
-        >
-          <RiAddCircleLine size={16} className="shrink-0" />
-          Добавить бригаду
-        </button>
-      </div>
     </AppPanel>
   )
 }

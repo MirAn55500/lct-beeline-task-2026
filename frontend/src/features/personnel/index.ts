@@ -1,6 +1,5 @@
 export {
   personnelApi,
-  useCreateBrigadeMutation,
   useCreateEngineerMutation,
   useDeleteEngineerMutation,
   useGetBrigadeAreasQuery,
@@ -16,7 +15,6 @@ export {
 export type {
   BrigadeArea,
   BrigadeId,
-  CreateBrigadeBody,
   CreateEngineerBody,
   Engineer,
   EngineerBody,
@@ -54,7 +52,6 @@ export {
 export { BrigadeInfo } from './ui/BrigadeInfo'
 export { BrigadeMap } from './ui/BrigadeMap'
 export { BrigadesPanel } from './ui/BrigadesPanel'
-export { CreateBrigadeDialog } from './ui/CreateBrigadeDialog'
 export { EngineerCardPanel } from './ui/EngineerCardPanel'
 export { EngineersPanel } from './ui/EngineersPanel'
 export { EngineersTable } from './ui/EngineersTable'
