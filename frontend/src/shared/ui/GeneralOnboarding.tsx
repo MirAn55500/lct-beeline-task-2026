@@ -12,7 +12,7 @@ type Step = {
   title: string
   description: string
   target?: string
-  placement?: 'bottom start' | 'bottom end' | 'right top' | 'left top'
+  placement?: 'bottom' | 'right' | 'left'
 }
 
 type AnchorRect = {
@@ -33,42 +33,42 @@ const steps: Step[] = [
     description:
       'Здесь можно перейти к обзору дня, планированию, заявкам, сотрудникам и справочникам.',
     target: 'main-navigation',
-    placement: 'right top',
+    placement: 'right',
   },
   {
     title: 'Регион и рабочая дата',
     description:
       'Выбранные регион и дата определяют данные, которые отображаются в рабочих разделах.',
     target: 'planning-context',
-    placement: 'bottom start',
+    placement: 'bottom',
   },
   {
     title: 'Сводка дня',
     description:
       'В верхнем блоке собраны состояние данных и основные показатели выбранного дня.',
     target: 'overview-summary',
-    placement: 'bottom start',
+    placement: 'bottom',
   },
   {
     title: 'Заявки на день',
     description:
       'Здесь отображается список заявок. Из этого блока можно перейти к их загрузке и подготовке.',
     target: 'overview-tickets',
-    placement: 'right top',
+    placement: 'right',
   },
   {
     title: 'План и сотрудники',
     description:
       'Правая часть обзора показывает готовность плана или данные по сотрудникам перед расчётом.',
     target: 'overview-secondary',
-    placement: 'left top',
+    placement: 'left',
   },
   {
     title: 'Работа с заявками',
     description:
       'Отсюда можно загрузить заявки и запустить действия, доступные для текущего состояния дня.',
     target: 'tickets-actions',
-    placement: 'bottom end',
+    placement: 'bottom',
   },
   {
     title: 'Всё готово',
@@ -186,12 +186,26 @@ export function GeneralOnboarding() {
   if (!step || stepIndex === null) return null
 
   const triggerStyle = anchor
-    ? {
-        top: anchor.top,
-        left: anchor.left,
-        width: anchor.width,
-        height: anchor.height,
-      }
+    ? step.placement === 'right'
+      ? {
+          top: anchor.top + anchor.height / 2,
+          left: anchor.left + anchor.width,
+          width: 1,
+          height: 1,
+        }
+      : step.placement === 'left'
+        ? {
+            top: anchor.top + anchor.height / 2,
+            left: anchor.left,
+            width: 1,
+            height: 1,
+          }
+        : {
+            top: anchor.top + anchor.height,
+            left: anchor.left + anchor.width / 2,
+            width: 1,
+            height: 1,
+          }
     : {
         top: '50%',
         left: '50%',
@@ -231,7 +245,7 @@ export function GeneralOnboarding() {
           offset={12}
           placement={step.placement ?? 'bottom'}
         >
-          <Popover.Arrow />
+          {anchor ? <Popover.Arrow /> : null}
           <Popover.Dialog className="flex flex-col gap-3 p-4">
             <div className="flex items-center justify-between gap-3 text-xs text-foreground-500">
               <span>Общий тур</span>
