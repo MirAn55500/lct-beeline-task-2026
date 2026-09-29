@@ -1,13 +1,13 @@
 import { useState, type PointerEvent, type RefObject } from 'react'
-import { Link } from 'react-router'
-import { RiArrowLeftSLine, RiCupLine } from '@remixicon/react'
+import { RiCupLine } from '@remixicon/react'
 
-import { routes } from '@/shared/config/routes'
 import { cn } from '@/shared/lib/cn'
 import { AppPanel } from '@/shared/ui'
 
 import type { GanttEngineer, GanttLunch, GanttTask } from '../../ganttTypes'
 import { SNAP_MINUTES, formatClock, formatRange, type FreeCells } from '../../lib/ganttPlacement'
+import type { MapTransport } from '../../mapTypes'
+import { EngineerSearchFilters } from '../EngineerSearchFilters'
 import { GanttRoadPart, GanttTaskCard } from './cards'
 import { EngineerCell } from './EngineerCell'
 
@@ -44,6 +44,10 @@ type GanttTimelineProps = {
   /** Идёт перетаскивание: наведение отключено, чужие строки приглушены. */
   dragging: boolean
   draggingTaskId: string | null
+  engineerQuery: string
+  onEngineerQueryChange: (query: string) => void
+  engineerTransports: ReadonlySet<MapTransport>
+  onEngineerTransportsChange: (transports: ReadonlySet<MapTransport>) => void
   scrollRef: RefObject<HTMLDivElement | null>
   lanesRef: RefObject<HTMLDivElement | null>
   onTaskPointerDown: (task: GanttTask, event: PointerEvent<HTMLElement>) => void
@@ -163,6 +167,10 @@ export function GanttTimeline({
   target,
   dragging,
   draggingTaskId,
+  engineerQuery,
+  onEngineerQueryChange,
+  engineerTransports,
+  onEngineerTransportsChange,
   scrollRef,
   lanesRef,
   onTaskPointerDown,
@@ -184,20 +192,19 @@ export function GanttTimeline({
         className="min-h-0 flex-1 overflow-auto [scrollbar-color:#e1e1e1_transparent] [scrollbar-width:thin]"
       >
         <div className="relative flex min-h-full flex-col" style={{ width: column + width }}>
-          {/* Шкала часов прилипает сверху, угол со ссылкой «Обзор дня» — ещё и слева. */}
+          {/* Шкала часов и фильтры инженеров остаются на месте при прокрутке. */}
           <div className="sticky top-0 z-40 flex shrink-0 bg-surface" style={{ height: GANTT_HEADER }}>
             <div
-              className="sticky left-0 z-10 flex shrink-0 items-center border-r-[3px] border-b border-separator bg-surface px-1.5"
+              className="sticky left-0 z-10 flex shrink-0 items-center border-r-[3px] border-b border-separator bg-surface"
               style={{ width: column }}
             >
-              <Link
-                to={routes.overview}
-                className="flex h-9 flex-1 items-center gap-1.5 px-1.5 text-sm leading-6 font-medium text-foreground transition-colors hover:bg-surface-hover"
-                style={{ borderRadius: 8 }}
-              >
-                <RiArrowLeftSLine size={16} className="shrink-0 text-muted" />
-                Обзор дня
-              </Link>
+              <EngineerSearchFilters
+                query={engineerQuery}
+                onQueryChange={onEngineerQueryChange}
+                transports={engineerTransports}
+                onTransportsChange={onEngineerTransportsChange}
+                className="w-full px-1.5"
+              />
             </div>
             <div className="relative flex">
               {hours.map((hour) => (

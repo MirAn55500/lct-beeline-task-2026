@@ -6,6 +6,7 @@ import { cn } from '@/shared/lib/cn'
 import { useAsideWidth } from '@/shared/lib/layout'
 
 import type { GanttTask, GanttTicket, GanttUnassigned } from '../../ganttTypes'
+import type { MapTransport } from '../../mapTypes'
 import {
   formatClock,
   formatRange,
@@ -18,6 +19,7 @@ import {
 import type { PlanGanttBoard as PlanGanttBoardState } from '../../lib/usePlanGanttBoard'
 import type { PlanMoveResponse } from '../../planApi'
 import { getClientContact } from '../../mocks/gantt'
+import { filterEngineers } from '../EngineerSearchFilters'
 import { PlanLoadingBadge } from '../PlanLoadingBadge'
 import { GanttTaskCard, GanttTicketCard } from './cards'
 import { ClientApprovalDialog } from './ClientApprovalDialog'
@@ -104,8 +106,15 @@ export function PlanGanttBoard({ board, viewKey }: PlanGanttBoardProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const lanesRef = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
+  const [engineerQuery, setEngineerQuery] = useState('')
+  const [engineerTransports, setEngineerTransports] = useState<ReadonlySet<MapTransport>>(
+    () => new Set(),
+  )
   const column = useAsideWidth()
   const { engineers, tasks, now, change } = board
+  const visibleEngineers = filterEngineers(engineers, engineerQuery, engineerTransports)
+  const visibleEngineerIds = new Set(visibleEngineers.map((engineer) => engineer.id))
+  const visibleTasks = tasks.filter((task) => visibleEngineerIds.has(task.engineerId))
 
   const edges = [
     ...engineers.flatMap((engineer) => engineer.shifts.flat()),
@@ -176,7 +185,7 @@ export function PlanGanttBoard({ board, viewKey }: PlanGanttBoardProps) {
     ) {
       return null
     }
-    const engineer = engineers[Math.floor((clientY - lanes.top) / GANTT_ROW)]
+    const engineer = visibleEngineers[Math.floor((clientY - lanes.top) / GANTT_ROW)]
     if (!engineer) return null
     const minute = fromHour * 60 + ((clientX - lanes.left) / GANTT_HOUR) * 60 - grabMinutes
     const start = board.magnet(ticket.id, engineer.id, snapMinutes(minute), minute)
@@ -300,8 +309,12 @@ export function PlanGanttBoard({ board, viewKey }: PlanGanttBoardProps) {
         <PlanLoadingBadge active={board.isLoading} />
         <GanttTimeline
           column={column}
-          engineers={previewLunches ? withLunches(engineers, previewLunches) : engineers}
-          tasks={tasks}
+          engineers={previewLunches ? withLunches(visibleEngineers, previewLunches) : visibleEngineers}
+          tasks={visibleTasks}
+          engineerQuery={engineerQuery}
+          onEngineerQueryChange={setEngineerQuery}
+          engineerTransports={engineerTransports}
+          onEngineerTransportsChange={setEngineerTransports}
           fromHour={fromHour}
           toHour={toHour}
           now={showNow ? now : null}
