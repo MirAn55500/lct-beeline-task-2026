@@ -21,6 +21,7 @@ from modules.planning.scenario_builder import (
     _REASON_LABELS,
     assignments_from_result,
     build_travel,
+    fetch_lines,
     finish_plan,
     lunch_address_ids,
     lunch_rows,
@@ -29,7 +30,9 @@ from modules.planning.scenario_builder import (
     reason_index,
     restrict_availability,
     run_plan,
+    street_path,
 )
+from modules.planning import routing_cache
 from modules.planning.schemas import (
     CounterPair,
     MoveBatchRequest,
@@ -62,6 +65,7 @@ from planner.dispatch import Board, MoveOutcome, StoredLunch, StoredVisit
 from planner.enums import EventType, ReasonCode, ReplanScope
 from planner.metrics import compare as compare_plans
 from planner.models import ReplanEvent, Scenario
+from planner.ors import DEFAULT_PROFILES, Routing
 from planner.replan import rebuild_unstarted, replan
 from planner.result import PlanResult
 
@@ -82,13 +86,74 @@ def schedule_baseline(plan: Plan) -> None:
         try:
             async with async_session_factory() as session:
                 service = PlanningService(session)
-                source = await session.get(Plan, plan_id)
+                source = await service._repo.get_plan(plan_id)
                 if source is not None:
                     await service._save_baseline(source)
         finally:
             _baseline_jobs.pop(plan_id, None)
 
     _baseline_jobs[plan_id] = asyncio.create_task(job())
+
+
+def inherit_baseline(source_id: int, plan: Plan) -> None:
+    """Базовый план версии после ручного хода — тот же, что у исходной версии.
+
+    Ход на Ганте не меняет ни заявок, ни инженеров, а базовый план считается с нуля
+    именно по ним: ручных правок алгоритм ТЗ не видит. Пересчёт на каждый ход стоил
+    секунды CPU (расчёт, линии по улицам всех маршрутов, снимок) и шёл в фоне как раз
+    тогда, когда диспетчер делал следующий ход. Базовый план исходной версии, который
+    ещё считается, дожидаемся; если его нет — сравнение посчитает его по запросу.
+    """
+    if plan.plan_id is None:
+        return
+    plan_id = plan.plan_id
+
+    async def job() -> None:
+        try:
+            source_job = _baseline_jobs.get(source_id)
+            if source_job is not None:
+                await asyncio.shield(source_job)
+            async with async_session_factory() as session:
+                await PlanningService(session)._copy_baseline(source_id, plan_id)
+        except Exception:
+            logger.exception("Базовый план версии %d не перенесён с версии %d", plan_id, source_id)
+        finally:
+            _baseline_jobs.pop(plan_id, None)
+
+    _baseline_jobs[plan_id] = asyncio.create_task(job())
+
+
+# Линии по улицам для новых участков — после ответа, по одному плану за раз: ORS на
+# стенде строит участок пешехода 3–14 с, а несколько поисков сразу роняли его по памяти
+_drawing = asyncio.Lock()
+_drawing_jobs: set[asyncio.Task] = set()
+
+
+def schedule_lines(plan_id: int, routing: Routing, result: PlanResult) -> None:
+    """Достроить в фоне линии, которых не было в кэше, и обновить снимок версии.
+
+    Версия сохранена с прямыми участками там, где линии ещё не было (`lines="cache"`).
+    Выдача плана подхватит линии из кэша (`street_path`), а снимок — вид версии в
+    истории — пересохраняется, когда они готовы.
+    """
+
+    async def job() -> None:
+        async with _drawing:
+            try:
+                if not await asyncio.to_thread(fetch_lines, routing, result):
+                    return
+                async with async_session_factory() as session:
+                    service = PlanningService(session)
+                    plan = await service._repo.get_plan(plan_id)
+                    if plan is not None:
+                        await service._save_snapshot(plan)
+            except Exception:
+                logger.exception("Линии по улицам версии %d не достроены", plan_id)
+
+    task = asyncio.create_task(job())
+    _drawing_jobs.add(task)
+    task.add_done_callback(_drawing_jobs.discard)
+
 
 _REMAKE_TO_SCOPE = {
     RemakeLevel.FIX: ReplanScope.LOW,
@@ -264,7 +329,9 @@ class PlanningService:
             result = await asyncio.to_thread(run_plan, scenario, algorithm, profiles)
         comparison = None
         if compare and algorithm is Algorithm.OPTIMIZED:
-            baseline = await asyncio.to_thread(run_plan, scenario, Algorithm.BASELINE, profiles)
+            baseline = await asyncio.to_thread(
+                run_plan, scenario, Algorithm.BASELINE, profiles, lines="none"
+            )
             comparison = _comparison(compare_plans(baseline, result))
         plan, assigned, unassigned = await self._persist(
             region_id,
@@ -354,7 +421,10 @@ class PlanningService:
         try:
             scenario, transport_by_engineer = await self._scenario(region_id, day)
             profiles = await transit.load_profiles(self._repo.session, scenario)
-            result = await asyncio.to_thread(run_plan, scenario, Algorithm.BASELINE, profiles)
+            # Без линий по улицам: базовый план показывают только в сравнении, без карты
+            result = await asyncio.to_thread(
+                run_plan, scenario, Algorithm.BASELINE, profiles, lines="none"
+            )
             reasons = await self._repo.ensure_unassigned_reasons()
             offset = scenario.settings.timezone_offset_hours
             rows, _, _ = assignments_from_result(
@@ -381,6 +451,32 @@ class PlanningService:
             logger.exception("Базовый план при версии %d не посчитан", plan_id)
             await self._repo.session.rollback()
             return None
+
+    async def _copy_baseline(self, source_id: int, plan_id: int) -> Plan | None:
+        """Базовый план версии `source_id` — ещё и базовым планом версии `plan_id`.
+
+        Сравнение показывает базовый план из снимка, поэтому копируется снимок, а не строки
+        назначений. Нет снимка у исходного — None: сравнение досчитает по запросу.
+        """
+        source = await self._repo.find_baseline(source_id)
+        target = await self._repo.get_plan(plan_id)
+        snapshot = await self._repo.get_snapshot(source.plan_id) if source and source.plan_id else None
+        if source is None or snapshot is None or target is None:
+            return None
+        copy = Plan(
+            version=target.version,
+            date=target.date,
+            region_id=target.region_id,
+            created_at=datetime.now(),
+            distribution=Distribution.EVEN.value,
+            baseline_of_id=plan_id,
+            lunches=source.lunches,
+        )
+        self._repo.session.add(copy)
+        await self._repo.session.flush()
+        copy.snapshot = {**snapshot, "planId": copy.plan_id, "version": copy.version}
+        await self._repo.session.commit()
+        return copy
 
     async def apply_event(
         self, region_id: int, day: date, body: PlanEventRequest
@@ -424,9 +520,12 @@ class PlanningService:
             with entry.lock:
                 previous = entry.board.result(plan_id=str(previous_plan.plan_id))
                 repaired = replan(previous, entry.scenario, event, travel=entry.travel)
-                return finish_plan(entry.scenario, repaired, entry.routing, entry.travel)
+                drawn = finish_plan(
+                    entry.scenario, repaired, entry.routing, entry.travel, lines="cache"
+                )
+                return repaired, drawn
 
-        result = await asyncio.to_thread(run)
+        repaired, result = await asyncio.to_thread(run)
         if body.type == "cancel_request" and body.request_id is not None:
             await self._repo.cancel_request(body.request_id, moment.replace(tzinfo=None))
         await self._repo.add_replan_event(
@@ -448,6 +547,8 @@ class PlanningService:
             warnings=_dispatcher_notes(result.warnings),
         )
         schedule_baseline(plan)
+        if plan.plan_id is not None:
+            schedule_lines(plan.plan_id, entry.routing, repaired)
         return response
 
     async def _extend(
@@ -562,7 +663,7 @@ class PlanningService:
 
     async def _stored_lunches(self, plan_id: int, scenario: Scenario) -> list[StoredLunch]:
         """Обеды сохранённой версии — начатые доска оставит на месте."""
-        plan = await self._repo.session.get(Plan, plan_id)
+        plan = await self._repo.get_plan(plan_id)
         return stored_lunches(plan.lunches if plan is not None else None, scenario)
 
     async def get_plan(
@@ -707,8 +808,10 @@ class PlanningService:
 
     async def _export(self, plan: Plan, *, latest: bool) -> PlanExportResponse:
         """Вид версии. Старая — история: ровно такой, какой была сохранена (снимок)."""
-        if not latest and plan.snapshot is not None:
-            return PlanExportResponse.model_validate(plan.snapshot)
+        if not latest and plan.plan_id is not None:
+            snapshot = await self._repo.get_snapshot(plan.plan_id)
+            if snapshot is not None:
+                return PlanExportResponse.model_validate(snapshot)
         return await self._build_export(plan)
 
     async def _save_snapshot(self, plan: Plan) -> None:
@@ -815,6 +918,9 @@ class PlanningService:
 
         paths = await self._repo.list_route_paths(plan.plan_id)
         lunch_of = {str(item.get("engineer_id")): item for item in plan.lunches or []}
+        # Участки, сохранённые прямыми до того, как фон достроил линию, — по кэшу
+        cache = routing_cache.shared()
+        profile_of = {e.id: DEFAULT_PROFILES.get(e.transport_mode) for e in scenario.engineers}
         by_engineer: dict[str, list] = {}
         unassigned_out: list[PlanUnassignedExport] = []
         for row in rows:
@@ -853,6 +959,7 @@ class PlanningService:
             def add(path: dict) -> list[int] | None:
                 nonlocal real, legs
                 legs += 1
+                path = street_path(path, profile_of.get(engineer_id), cache)
                 segment = path.get("line") or []
                 if len(segment) < 2:
                     return None
@@ -982,7 +1089,7 @@ class PlanningService:
         cached = boards.get(plan_id)
         if cached is not None:
             return cached
-        plan = await self._repo.session.get(Plan, plan_id)
+        plan = await self._repo.get_plan(plan_id)
         if plan is None:
             raise AppError("План не найден", status_code=404)
         region = await self._repo.get_region(plan.region_id)
@@ -1046,7 +1153,7 @@ class PlanningService:
         Старые версии — история. Прошедший день целиком в прошлом: ставить в него заявки
         некуда, и перетаскивание только показывало бы, что время прошло.
         """
-        plan = await self._repo.session.get(Plan, plan_id)
+        plan = await self._repo.get_plan(plan_id)
         if plan is None:
             raise AppError("План не найден", status_code=404)
         latest = await self._repo.find_latest_plan(plan.region_id, plan.date)
@@ -1113,7 +1220,7 @@ class PlanningService:
             with entry.lock:
                 outcome = entry.board.move(body.requestId, body.engineerId, **options)
                 if not outcome.ok or not body.commit:
-                    return outcome, None, None
+                    return outcome, None, None, None
                 result = entry.board.result()
                 # Линии по улицам — только изменившимся маршрутам: на весь план это секунды,
                 # а участки остальных переносятся из исходной версии как есть.
@@ -1123,10 +1230,14 @@ class PlanningService:
                     routes=tuple(r for r in result.routes if r.engineer_id in changed),
                     idle_lunches=tuple(item for item in result.idle_lunches if item[0] in changed),
                 )
-                return outcome, result, finish_plan(entry.scenario, partial, entry.routing, entry.travel)
+                # Линии — из кэша: недостающие ORS достроит в фоне (`schedule_lines`)
+                drawn = finish_plan(
+                    entry.scenario, partial, entry.routing, entry.travel, lines="cache"
+                )
+                return outcome, partial, result, drawn
 
         try:
-            outcome, result, drawn = await asyncio.to_thread(apply)
+            outcome, partial, result, drawn = await asyncio.to_thread(apply)
         except Exception:
             boards.drop(plan_id)
             raise
@@ -1166,7 +1277,7 @@ class PlanningService:
             # Обеды изменившихся маршрутов — из хода, остальные — из исходной версии как есть
             # (с её линией до места обеда). Если доска держит обед иначе, чем версия (обед
             # поменяли в карточке), — по доске: строки визитов тоже с неё.
-            source = await self._repo.session.get(Plan, plan_id)
+            source = await self._repo.get_plan(plan_id)
             kept = {
                 str(item.get("engineer_id")): item
                 for item in (source.lunches if source is not None else None) or []
@@ -1219,7 +1330,11 @@ class PlanningService:
         response = self._move_response(outcome)
         response.planId = saved.plan_id
         response.version = saved.version
-        schedule_baseline(saved)
+        if outcome.window_shift:
+            schedule_baseline(saved)  # окно заявки в БД сдвинуто — входные данные другие
+        else:
+            inherit_baseline(plan_id, saved)
+        schedule_lines(saved.plan_id or 0, entry.routing, partial)
         return response
 
     async def move_batch(self, plan_id: int, body: MoveBatchRequest) -> MoveResponse:

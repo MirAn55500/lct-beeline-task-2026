@@ -9,6 +9,7 @@ from collections.abc import Collection
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from typing import Literal
 
 _SOLUTION = Path(__file__).resolve().parents[3] / "solution"
 if str(_SOLUTION) not in sys.path:
@@ -34,7 +35,15 @@ from planner import (  # noqa: E402
 from planner.result import PlanResult  # noqa: E402
 from planner.raptor import Profile  # noqa: E402
 from planner.timed import TimedTransitModel  # noqa: E402
-from planner.ors import Routing  # noqa: E402
+from planner.ors import (  # noqa: E402
+    DEFAULT_PROFILES,
+    NO_MATRIX_PROFILES,
+    Routing,
+    RoutingCache,
+    collect_points,
+    point_key,
+    scenario_modes,
+)
 from planner.travel import HaversineTravelModel, TravelModel  # noqa: E402
 
 from core import ors_endpoint
@@ -307,8 +316,22 @@ def restrict_availability(scenario: Scenario, cutoffs: dict[str, datetime]) -> S
 
 logger = logging.getLogger(__name__)
 
-# Кэш маршрутов — один JSON-файл, запись не атомарная: чтение и запись по очереди
-routing_cache_lock = threading.Lock()
+# Запросы матриц в ORS — по одному расчёту за раз: пешие и велосипедные поиски вдвоём
+# роняли ORS по памяти (26.09). Расчёты по известным адресам этой очереди не ждут.
+_fetch_lock = threading.Lock()
+
+
+def _covered(scenario: Scenario, cache: RoutingCache) -> bool:
+    """Все матрицы сценария уже в кэше — в ORS идти не за чем."""
+    keys = [point_key(p) for p in collect_points(scenario)]
+    for mode in scenario_modes(scenario):
+        profile = DEFAULT_PROFILES.get(mode)
+        if profile is None or profile in NO_MATRIX_PROFILES:
+            continue
+        table = cache.legs_of(profile)
+        if any(a != b and (a, b) not in table for a in keys for b in keys):
+            return False
+    return True
 
 
 def build_travel(
@@ -319,16 +342,20 @@ def build_travel(
 
     `profiles` — профили rRAPTOR пар сценария (modules/planning/transit).
     """
-    from modules.planning import transit
+    from modules.planning import routing_cache, transit
 
     # Общественный транспорт новых адресов — RAPTOR на 10:00 в кэш, до чтения кэша
     transit.fill_missing(scenario)
     # Без ORS_URL берутся сохранённые ответы сервиса, без кэша — расстояния по координатам
-    settings = get_settings()
-    options = {"cache_path": settings.routing_cache_path} if settings.routing_cache_path else {}
-    url, api_key = ors_endpoint.pick(settings)  # основной или запасной ORS
-    with routing_cache_lock:
-        routing = setup_routing(scenario, url=url, api_key=api_key, **options)
+    url, api_key = ors_endpoint.pick(get_settings())  # основной или запасной ORS
+    cache = routing_cache.shared()
+    if url and not _covered(scenario, cache):
+        with _fetch_lock:
+            routing = setup_routing(scenario, url=url, api_key=api_key, cache=cache)
+    else:
+        routing = setup_routing(scenario, url=url, api_key=api_key, cache=cache)
+    if cache.dirty:
+        routing_cache.changed()
     travel = routing.travel
     if profiles is not None and profiles[0]:
         # Известные пары — время на фактический момент выезда (rRAPTOR)
@@ -340,25 +367,39 @@ def build_travel(
     return routing, travel
 
 
-def finish_plan(scenario: Scenario, result: PlanResult, routing: Routing, travel) -> PlanResult:
-    """Линии по улицам и состав поездок в готовый план, кэш маршрутов — на диск.
+Lines = Literal["ors", "cache", "none"]
+
+
+def finish_plan(
+    scenario: Scenario, result: PlanResult, routing: Routing, travel, *, lines: Lines = "ors"
+) -> PlanResult:
+    """Линии по улицам и состав поездок в готовый план; новые участки — в кэш маршрутов.
 
     Авто/пешком/велосипед — ORS или кэш, общественный транспорт — RAPTOR на фактический
     выезд. Сбой здесь не должен ронять готовый план.
-    """
-    from modules.planning import transit
 
-    try:
-        result = routing.attach(result, transit_legs=transit.legs_source(scenario))
-    except Exception:  # noqa: BLE001
-        logger.exception("Геометрия маршрутов не построена — участки будут прямыми")
+    `lines`: `"ors"` — недостающие линии из ORS; `"cache"` — только из кэша, остальные
+    участки прямые (их достроит `fetch_lines` в фоне: на стенде ORS строит участок
+    пешехода или велосипеда 3–14 с, и ход на Ганте ждал бы этого десятки секунд);
+    `"none"` — без линий вовсе (базовый план: его показывают только в сравнении, без карты).
+    """
+    from modules.planning import routing_cache, transit
+
+    if lines != "none":
+        if lines == "cache":
+            routing = Routing(routing.travel, None, routing.cache, routing.notes)
+        try:
+            result = routing.attach(result, transit_legs=transit.legs_source(scenario))
+        except Exception:  # noqa: BLE001
+            logger.exception("Геометрия маршрутов не построена — участки будут прямыми")
     notes = list(routing.notes)
     if isinstance(travel, (OrsTravelModel, TimedTransitModel)):
         notes += [n for n in travel.report() if n not in notes]
     for note in notes:
         logger.warning(note)
-    with routing_cache_lock:
-        routing.save()
+    # На диск — в фоне (`routing_cache`): запись 15 МБ JSON не должна держать ответ
+    if routing.cache is not None and routing.cache.dirty:
+        routing_cache.changed()
     return result
 
 
@@ -366,11 +407,53 @@ def run_plan(
     scenario: Scenario,
     algorithm: Algorithm = Algorithm.OPTIMIZED,
     profiles: tuple[dict[tuple[str, str], Profile], int, int] | None = None,
+    *,
+    lines: Lines = "ors",
 ) -> PlanResult:
     """Расчёт плана. `profiles` — профили rRAPTOR пар сценария (modules/planning/transit)."""
     routing, travel = build_travel(scenario, profiles)
     result = plan(scenario, algorithm, travel=travel)
-    return finish_plan(scenario, result, routing, travel)
+    return finish_plan(scenario, result, routing, travel, lines=lines)
+
+
+def fetch_lines(routing: Routing, result: PlanResult) -> bool:
+    """Линии участков плана, которых нет в кэше, — из ORS в кэш. True — кэш пополнился.
+
+    Для плана, сохранённого с `lines="cache"`: выдача плана берёт эти линии из кэша
+    (`street_path`). Общественный транспорт пропускается — его строит RAPTOR сразу.
+    """
+    from modules.planning import routing_cache
+
+    cache = routing.cache
+    routes = tuple(
+        r for r in result.routes
+        if r.visits and r.transport_mode is not TransportMode.PUBLIC_TRANSPORT
+    )
+    if cache is None or routing.client is None or not routes:
+        return False
+    before = cache.stats()["geometry"]
+    routing.attach(replace(result, routes=routes))
+    if cache.stats()["geometry"] == before:
+        return False
+    routing_cache.changed()
+    return True
+
+
+def street_path(path: dict, profile: str | None, cache: RoutingCache) -> dict:
+    """Участок, сохранённый прямой, — по улицам, если его линия уже появилась в кэше.
+
+    Прямой участок в строке плана — линия из двух точек: самих адресов. Линия ORS между
+    двумя адресами всегда длиннее (точки привязаны к улицам), поэтому путаницы нет.
+    """
+    line = path.get("line") or []
+    if len(line) != 2 or path.get("transit") or profile is None or profile in NO_MATRIX_PROFILES:
+        return path
+    a = GeoPoint(lat=line[0][1], lon=line[0][0])
+    b = GeoPoint(lat=line[1][1], lon=line[1][0])
+    found = cache.get_geometry(profile, a, b)
+    if not found or len(found) < 2:
+        return path
+    return {**path, "line": found, "straight": False}
 
 
 def route_legs(

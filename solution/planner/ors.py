@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
+import os
 import time as _time
 import urllib.error
 import urllib.parse
@@ -65,6 +66,7 @@ import urllib.request
 from dataclasses import replace as dc_replace
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
+from collections.abc import MutableMapping
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from .enums import TRANSPORT_TITLES, TransportMode
@@ -522,6 +524,60 @@ def _http_error_detail(exc: urllib.error.HTTPError) -> tuple[str, int | None]:
 # --------------------------------------------------------------------------------------
 
 
+class LegTable(MutableMapping):
+    """Участки одного раздела кэша как таблица `(откуда, куда) → (км, мин)` — без копии.
+
+    Раздел общий на все регионы: 47 тысяч пар на профиль, когда расчёту нужны сотни.
+    Копия всех разделов в словарь с кортежами стоила полсекунды и ~40 МБ на каждую
+    модель поездок, а backend держит модель на каждой открытой доске Ганта. Здесь пара
+    ищется в самом разделе по ключу «a>b» в момент обращения. Дописанное через таблицу
+    (`update` дозапрошенных пар) лежит поверх раздела и в кэш не пишется — кэш
+    пополняют `put_leg`.
+    """
+
+    __slots__ = ("_raw", "_own")
+
+    def __init__(self, raw: Mapping[str, Sequence[float]] | None = None) -> None:
+        self._raw: Mapping[str, Sequence[float]] = raw if raw is not None else {}
+        self._own: dict[tuple[str, str], tuple[float, float]] = {}
+
+    def __getitem__(self, key: tuple[str, str]) -> tuple[float, float]:
+        own = self._own.get(key)
+        if own is not None:
+            return own
+        value = self._raw.get(f"{key[0]}>{key[1]}")
+        if value is None:
+            raise KeyError(key)
+        return float(value[0]), float(value[1])
+
+    def __contains__(self, key: object) -> bool:
+        if key in self._own:
+            return True
+        return (
+            isinstance(key, tuple) and len(key) == 2 and f"{key[0]}>{key[1]}" in self._raw
+        )
+
+    def __setitem__(self, key: tuple[str, str], value: tuple[float, float]) -> None:
+        self._own[key] = value
+
+    def __delitem__(self, key: tuple[str, str]) -> None:
+        del self._own[key]
+
+    def __iter__(self):
+        yield from self._own
+        # Раздел пополняют другие потоки: перебираем снимок ключей, а не живой словарь
+        for key in list(self._raw):
+            ka, _, kb = key.partition(">")
+            if (ka, kb) not in self._own:
+                yield ka, kb
+
+    def __len__(self) -> int:
+        return len(self._raw) + sum(1 for key in self._own if f"{key[0]}>{key[1]}" not in self._raw)
+
+    def __bool__(self) -> bool:
+        return bool(self._own) or bool(self._raw)
+
+
 class RoutingCache:
     """JSON-кэш ответов маршрутного сервиса: участки и геометрия.
 
@@ -611,13 +667,13 @@ class RoutingCache:
             if name == profile or name.startswith(prefix)
         }
 
-    def legs_of(self, profile: str) -> dict[tuple[str, str], tuple[float, float]]:
-        """Все известные участки профиля в виде, готовом для `OrsTravelModel`."""
-        table: dict[tuple[str, str], tuple[float, float]] = {}
-        for key, value in self._legs.get(profile, {}).items():
-            ka, _, kb = key.partition(">")
-            table[(ka, kb)] = (float(value[0]), float(value[1]))
-        return table
+    def legs_of(self, profile: str) -> LegTable:
+        """Все известные участки профиля в виде, готовом для `OrsTravelModel`.
+
+        Таблица смотрит в сам раздел (`LegTable`): пары, которые кэш получит потом,
+        видны и в ней.
+        """
+        return LegTable(self._legs.get(profile))
 
     # -- геометрия --
     #
@@ -706,17 +762,27 @@ class RoutingCache:
         if target is None:
             raise ValueError("не задан путь к файлу кэша")
         target.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "version": self.VERSION,
-            "legs": {p: dict(sorted(v.items())) for p, v in sorted(self._legs.items())},
-            "geometry": {p: dict(sorted(v.items())) for p, v in sorted(self._geometry.items())},
-            "transit": {p: dict(sorted(v.items())) for p, v in sorted(self._transit.items())},
-        }
-        target.write_text(
-            json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=False),
-            encoding="utf-8",
-        )
+        # Флаг снимается до снимка: пара, дописанная другим потоком во время записи,
+        # оставит кэш «грязным» и уйдёт на диск следующей записью, а не потеряется
         self._dirty = False
+        try:
+            payload = {
+                "version": self.VERSION,
+                "legs": {p: dict(sorted(v.items())) for p, v in sorted(self._legs.items())},
+                "geometry": {p: dict(sorted(v.items())) for p, v in sorted(self._geometry.items())},
+                "transit": {p: dict(sorted(v.items())) for p, v in sorted(self._transit.items())},
+            }
+            # Через временный файл: оборванная запись оставляет прежний кэш, а не битый
+            # JSON, который прочитался бы как пустой
+            partial = target.with_name(target.name + ".tmp")
+            partial.write_text(
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=False),
+                encoding="utf-8",
+            )
+            os.replace(partial, target)
+        except BaseException:
+            self._dirty = True
+            raise
         return target
 
     def stats(self) -> dict[str, int]:
@@ -806,7 +872,9 @@ class OrsTravelModel:
         departure: str | None = None,
     ) -> None:
         self._settings = settings
-        self._legs = {p: dict(t) for p, t in legs.items()}
+        # Таблицы кэша (`LegTable`) — как есть: копия общего раздела стоила бы полсекунды
+        # и десятки мегабайт на модель
+        self._legs = {p: t if isinstance(t, LegTable) else dict(t) for p, t in legs.items()}
         self._profiles = dict(DEFAULT_PROFILES if profiles is None else profiles)
         self._fallback = fallback or HaversineTravelModel(settings)
         self._add_overhead = add_overhead
@@ -1146,7 +1214,7 @@ def _transit_from_cache(
     offset_hours: float,
     table: Mapping[tuple[str, str], tuple[float, float]],
     points: Sequence[GeoPoint],
-) -> tuple[dict[tuple[str, str], tuple[float, float]], str]:
+) -> tuple[MutableMapping[tuple[str, str], tuple[float, float]], str]:
     """Что взять из кэша для расписаний и что об этом написать в план.
 
     Раздел кэша расписаний включает дату (см. `transit_profile`), поэтому план на
@@ -1173,12 +1241,12 @@ def _transit_from_cache(
         covered, total = _covered(table, points)
         share = covered / total if total else 1.0
         if share >= TRANSIT_WARMED_SHARE:
-            return dict(table), (
+            return _table(table), (
                 f"ORS: «{title}» посчитан по расписанию на {asked} из кэша "
                 f"({_of_total(covered, total)}); остальные пары — вне зоны "
                 "действия фида и посчитаны по координатам"
             )
-        return dict(table), (
+        return _table(table), (
             f"ORS: расписания «{title}» на {asked} прогреты частично "
             f"({_of_total(covered, total)}, {share:.0%}) — остальное по "
             f"координатам; прогрев: {hint}"
@@ -1212,6 +1280,13 @@ def _transit_from_cache(
         f"ORS: матрица профиля «{profile}» не учитывает расписания, а расчёт по "
         f"расписанию не прогрет — «{title}» считается по координатам; прогрев: {hint}"
     )
+
+
+def _table(
+    table: Mapping[tuple[str, str], tuple[float, float]],
+) -> MutableMapping[tuple[str, str], tuple[float, float]]:
+    """Своя копия таблицы участков; таблица раздела кэша (`LegTable`) и так своя."""
+    return table if isinstance(table, LegTable) else dict(table)
 
 
 def _covers(table: Mapping[tuple[str, str], tuple[float, float]], points: Sequence[GeoPoint]) -> bool:
@@ -1660,6 +1735,7 @@ def setup_routing(
     max_routes: int = 25000,
     timeout: float = 180.0,
     transit: bool = False,
+    cache: RoutingCache | None = None,
 ) -> Routing:
     """Подключить реальную маршрутизацию настолько, насколько это сейчас возможно.
 
@@ -1675,9 +1751,13 @@ def setup_routing(
 
     Функция никогда не бросает исключений из-за сети: недоступный сервис — это
     предупреждение в плане, а не отказ в расчёте.
+
+    `cache` — уже загруженный кэш вместо файла `cache_path`: сервис держит один кэш на
+    процесс, а не читает многомегабайтный JSON на каждый расчёт.
     """
-    path = Path(cache_path) if cache_path is not None else None
-    cache = RoutingCache(path) if path is not None else None
+    if cache is None:
+        path = Path(cache_path) if cache_path is not None else None
+        cache = RoutingCache(path) if path is not None else None
     notes: list[str] = []
     if transit and not url:
         # Досчитывать нечем: без адреса сервиса идти некуда. Молчать об этом нельзя —

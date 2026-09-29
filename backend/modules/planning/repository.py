@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
 
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import defer, selectinload
 from sqlmodel import col, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -20,6 +20,13 @@ from modules.tickets.models.request import Request
 from modules.tickets.models.status_change import StatusChange
 
 
+# Снимок версии (`Plan.snapshot`) — JSON всего вида плана, сотни килобайт. Нужен только
+# при показе старой версии, а версий за день с ручными ходами — десятки: читать его с
+# каждой строкой значило разбирать мегабайты JSON на каждый обзор дня и ход на Ганте.
+# Поэтому строки плана читаются без него, а сам он — отдельно (`get_snapshot`).
+_NO_SNAPSHOT = defer(Plan.snapshot)  # type: ignore[arg-type]
+
+
 class PlanningRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -28,9 +35,19 @@ class PlanningRepository:
     def session(self) -> AsyncSession:
         return self._session
 
+    async def get_plan(self, plan_id: int) -> Plan | None:
+        """Версия плана без снимка."""
+        return await self._session.get(Plan, plan_id, options=[_NO_SNAPSHOT])
+
+    async def get_snapshot(self, plan_id: int) -> dict | None:
+        """Снимок версии — вид плана на момент сохранения."""
+        result = await self._session.exec(select(Plan.snapshot).where(Plan.plan_id == plan_id))
+        return result.first()
+
     async def find_latest_plan(self, region_id: int, day: date) -> Plan | None:
         result = await self._session.exec(
             select(Plan)
+            .options(_NO_SNAPSHOT)
             .where(Plan.region_id == region_id, Plan.date == day, col(Plan.baseline_of_id).is_(None))
             .order_by(col(Plan.version).desc(), col(Plan.created_at).desc())
             .limit(1)
@@ -40,6 +57,7 @@ class PlanningRepository:
     async def list_plans(self, region_id: int, day: date) -> list[Plan]:
         result = await self._session.exec(
             select(Plan)
+            .options(_NO_SNAPSHOT)
             .where(Plan.region_id == region_id, Plan.date == day, col(Plan.baseline_of_id).is_(None))
             .order_by(col(Plan.version).desc(), col(Plan.created_at).desc())
         )
@@ -49,6 +67,7 @@ class PlanningRepository:
         """Базовый расчёт при версии плана; пересчитанный позже — свежее."""
         result = await self._session.exec(
             select(Plan)
+            .options(_NO_SNAPSHOT)
             .where(Plan.baseline_of_id == plan_id)
             .order_by(col(Plan.created_at).desc())
             .limit(1)

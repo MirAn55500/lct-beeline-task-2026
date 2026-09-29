@@ -22,22 +22,18 @@ import logging
 import time
 from collections.abc import Iterable
 from datetime import date
-from pathlib import Path
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from core.config import get_settings
 from core.database import async_session_factory
 from core.exceptions import AppError
 from modules.planning.schemas import RemakeLevel
-from modules.planning.scenario_builder import routing_cache_lock  # и sys.path к planner
+from modules.planning import routing_cache  # и sys.path к planner
 
 from planner.models import Scenario  # noqa: E402
 from planner.ors import (  # noqa: E402
-    DEFAULT_CACHE_PATH,
     DEFAULT_PROFILES,
     NO_MATRIX_PROFILES,
-    RoutingCache,
     collect_points,
     point_key,
     scenario_modes,
@@ -69,10 +65,6 @@ _LEARN = 0.5
 """Вес последнего замера: план с тем же набором адресов считается почти одинаково."""
 
 
-def _cache_path() -> Path:
-    return Path(get_settings().routing_cache_path or DEFAULT_CACHE_PATH)
-
-
 def new_points(scenario: Scenario) -> int:
     """Сколько точек сценария ещё не посчитано: нет в кэше ни одного участка из них."""
     points = collect_points(scenario)
@@ -83,8 +75,7 @@ def new_points(scenario: Scenario) -> int:
     ]
     if not profiles or len(points) < 2:
         return 0
-    with routing_cache_lock:
-        cache = RoutingCache(_cache_path())
+    cache = routing_cache.shared()
     keys = [point_key(p) for p in points]
     fresh = 0
     for profile in profiles:

@@ -28,7 +28,7 @@ import pickle
 from array import array
 import threading
 import time
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
@@ -37,13 +37,12 @@ from sqlalchemy import bindparam, text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from core.config import get_settings
-from modules.planning.scenario_builder import routing_cache_lock  # и sys.path к planner
+from modules.planning import routing_cache  # и sys.path к planner
 
 from planner import raptor, transit_profiles  # noqa: E402
 from planner.enums import TransportMode  # noqa: E402
 from planner.models import Scenario  # noqa: E402
 from planner.ors import (  # noqa: E402
-    DEFAULT_CACHE_PATH,
     DEFAULT_PROFILES,
     RoutingCache,
     collect_points,
@@ -136,8 +135,7 @@ def _signature(day: date) -> str:
 
 
 def _timetable_dir() -> Path:
-    settings = get_settings()
-    return Path(settings.routing_cache_path or DEFAULT_CACHE_PATH).parent / "timetables"
+    return routing_cache.path().parent / "timetables"
 
 
 def _timetable_prefix() -> str:
@@ -248,13 +246,11 @@ def fill_missing(scenario: Scenario) -> int:
     """
     if not uses_transit(scenario) or not gtfs_path().exists():
         return 0
-    settings = get_settings()
-    cache_path = Path(settings.routing_cache_path or DEFAULT_CACHE_PATH)
+    cache_path = routing_cache.path()
     profile = DEFAULT_PROFILES[PT]
     departure = scenario_departure(scenario)
 
-    with routing_cache_lock:
-        snapshot = RoutingCache(cache_path)
+    snapshot = routing_cache.shared()
     section = transit_profile(profile, departure)
     available = snapshot.sections_of(profile)
     if section not in available:
@@ -292,12 +288,10 @@ def fill_missing(scenario: Scenario) -> int:
             km = distance.distance_km(points[a], points[b], PT)
             fresh.put_leg(section, points[a], points[b], round(km, 3), round(minutes, 3))
 
-    with routing_cache_lock:
-        cache = RoutingCache(cache_path)
-        added = cache.merge(fresh)
-        if added:
-            cache.save()
-        if outside:
+    added = routing_cache.merge(fresh)
+    if outside:
+        with routing_cache.lock:
+            unroutable = _load_unroutable(_unroutable_path(cache_path))
             unroutable[section] = sorted(set(unroutable.get(section, [])) | set(outside))
             _unroutable_path(cache_path).write_text(json.dumps(unroutable), encoding="utf-8")
     logger.info(
@@ -308,16 +302,47 @@ def fill_missing(scenario: Scenario) -> int:
     return added
 
 
+_itineraries: OrderedDict[tuple[str, str, str, str], tuple | None] = OrderedDict()
+"""(подпись дня, откуда, куда, выезд) → линия и состав поездки RAPTOR (`legs_source`).
+
+Ход на Ганте меняет время выезда только части участков маршрута: остальные поездки те
+же, и искать их заново не нужно."""
+_itinerary_lock = threading.Lock()
+KEEP_ITINERARIES = 512
+"""Поездок в памяти: линия с составом — десятки килобайт."""
+
+
 def legs_source(scenario: Scenario):
-    """Состав поездок на общественном транспорте для `Routing.attach` (RAPTOR), или None."""
+    """Состав поездок на общественном транспорте для `Routing.attach` (RAPTOR), или None.
+
+    Расписание дня грузится при первой поездке на транспорте, а не заранее: у хода на
+    Ганте их среди изменившихся маршрутов может не быть вовсе.
+    """
     if not uses_transit(scenario) or not gtfs_path().exists():
         return None
-    settings = get_settings()
-    with routing_cache_lock:
-        snapshot = RoutingCache(Path(settings.routing_cache_path or DEFAULT_CACHE_PATH))
-    foot = snapshot.legs_of(DEFAULT_PROFILES[TransportMode.WALKING])
+    cache = routing_cache.shared()
+    foot = DEFAULT_PROFILES[TransportMode.WALKING]
+    day = scenario.date
+    signature = _signature(day)
+    search = None
 
     def walk(a, b):
-        return (foot.get((point_key(a), point_key(b))) or (None, None))[1]
+        return (cache.get_leg(foot, a, b) or (None, None))[1]
 
-    return raptor.transit_legs(_router(scenario.date), walk)
+    def legs(a, b, departure):
+        nonlocal search
+        key = (signature, point_key(a), point_key(b), departure.isoformat())
+        with _itinerary_lock:
+            if key in _itineraries:
+                _itineraries.move_to_end(key)
+                return _itineraries[key]
+        if search is None:
+            search = raptor.transit_legs(_router(day), walk)
+        found = search(a, b, departure)
+        with _itinerary_lock:
+            _itineraries[key] = found
+            while len(_itineraries) > KEEP_ITINERARIES:
+                _itineraries.popitem(last=False)
+        return found
+
+    return legs
