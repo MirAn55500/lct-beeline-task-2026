@@ -144,7 +144,7 @@ export function PlanMapBoard({ board, onCancelStop, readOnly = false }: PlanMapB
         ) : (
           <div
             aria-live="polite"
-            className="absolute bottom-3 left-3 z-10 flex h-9 items-center gap-2 bg-surface px-3 text-sm leading-5 text-foreground shadow-lg"
+            className="absolute top-3 left-3 z-10 flex h-9 items-center gap-2 bg-surface px-3 text-sm leading-5 text-foreground shadow-lg"
             style={{ borderRadius: 8 }}
           >
             <span>Нераспределённые заявки</span>
