@@ -27,7 +27,7 @@ import {
   writeSessionDate,
   writeSessionRegionId,
 } from '@/shared/lib'
-import { AppNav, AppPanel, BrandBar, ContextHeader } from '@/shared/ui'
+import { AppNav, AppPanel, BrandBar, ContextHeader, GeneralOnboarding } from '@/shared/ui'
 
 export type HomeAreaContext = {
   regionId: number | null
@@ -245,6 +245,7 @@ export function HomeAreaLayout({ children }: HomeAreaLayoutProps) {
           }
         }}
       />
+      <GeneralOnboarding />
     </div>
   )
 }

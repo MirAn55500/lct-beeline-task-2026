@@ -3,6 +3,8 @@ import { NavLink, useLocation, useSearchParams } from 'react-router'
 import { isNavItemActive, navMenuGroups, type NavItem } from '@/shared/config/nav'
 import { cn } from '@/shared/lib/cn'
 import { preservedContextSearch } from '@/shared/lib/sessionContext'
+import { routes } from '@/shared/config/routes'
+import { resetGeneralOnboarding } from '@/shared/ui/GeneralOnboarding'
 
 function MenuItem({
   item,
@@ -21,7 +23,10 @@ function MenuItem({
   return (
     <NavLink
       to={to}
-      onClick={onNavigate}
+      onClick={() => {
+        if (item.to === routes.help) resetGeneralOnboarding()
+        onNavigate?.()
+      }}
       className={cn(
         'flex h-9 cursor-pointer items-center gap-3 rounded-lg px-3 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover',
         active && 'bg-surface-hover',
