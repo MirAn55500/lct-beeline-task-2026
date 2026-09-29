@@ -106,6 +106,28 @@ def test_dry_run_leaves_the_board_unchanged_and_commit_keeps_the_move():
     assert "R3" not in board.solution.unassigned
 
 
+def test_rollback_undoes_a_committed_chain():
+    """Черновик Ганта: цепочка ходов с commit для превью — и доска как была."""
+    board, _ = board_without_r3()
+    before = starts(board)
+    slots_before = board.slots(["R3"])
+    point = board.checkpoint()
+    slot = next(s for s in slots_before[0].slots["E1"] if s.position == 1)
+    assert board.move("R3", "E1", start=slot.earliest, position=1, commit=True).ok
+    assert board.move("R1", None, commit=True).ok
+    assert "R3" in starts(board) and "R1" not in starts(board)
+    assert board._client["R3"].window_start == slot.earliest, "окно сдвинуто согласием"
+
+    board.rollback(point)
+    assert starts(board) == before
+    assert board._client["R3"].window_start == minutes(t("12:00"))
+    assert board.slots(["R3"]) == slots_before
+    # Откат повторяемый: точка не испорчена второй цепочкой
+    assert board.move("R3", "E1", start=slot.latest, position=1, commit=True).ok
+    board.rollback(point)
+    assert starts(board) == before
+
+
 def test_start_outside_client_window_is_allowed_but_flagged():
     board, _ = board_without_r3()
     slot = next(s for s in board.slots(["R3"])[0].slots["E1"] if s.position == 1)

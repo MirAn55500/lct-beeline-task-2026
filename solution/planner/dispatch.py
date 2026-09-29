@@ -658,6 +658,22 @@ class Board:
             f"{_clock(timing.window_end)}{road}, и соседние заявки не успеют в свои окна"
         )
 
+    # ------------------------------------------------------------------ черновик
+
+    def checkpoint(self) -> tuple:
+        """Состояние доски перед цепочкой ходов: прогнать её для превью и вернуть как было.
+
+        Ход с `commit` заменяет решение копией, поэтому прежнее остаётся целым; меняются
+        только тайминги заявок и окна клиентов — их и запоминаем.
+        """
+        return self.solution, dict(self.ctx._timings), dict(self._client)  # noqa: SLF001
+
+    def rollback(self, point: tuple) -> None:
+        """Вернуть доску к `checkpoint` — дешевле, чем собирать её заново из БД."""
+        self.solution, timings, client = point
+        self.ctx._timings = dict(timings)  # noqa: SLF001
+        self._client = dict(client)
+
     # ------------------------------------------------------------------ новые заявки
 
     def place_new(self, request_ids: Iterable[str], *, scope: ReplanScope | str) -> list[str]:

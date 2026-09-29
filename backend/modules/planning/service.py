@@ -1349,6 +1349,9 @@ class PlanningService:
                 last: MoveOutcome | None = None
                 changed: set[str] = set()
                 shifts: dict[str, float] = {}
+                # Превью и отказ посередине возвращают доску сюда: собирать её заново из БД
+                # на каждую правку черновика — это секунды на стенде
+                point = entry.board.checkpoint()
                 for item in body.moves:
                     last = entry.board.move(
                         item.requestId,
@@ -1361,13 +1364,15 @@ class PlanningService:
                         commit=True,
                     )
                     if not last.ok:
-                        return last, None, None, changed, shifts
+                        entry.board.rollback(point)
+                        return last, None, None, None, changed, shifts
                     changed.update(last.engineers)
                     if last.window_shift:
                         shifts[item.requestId] = last.window_shift
                 assert last is not None
                 if not body.commit:
-                    return last, None, None, changed, shifts
+                    entry.board.rollback(point)
+                    return last, None, None, None, changed, shifts
                 result = entry.board.result()
                 # Линии по улицам — только изменившимся маршрутам: на весь план это секунды,
                 # а участки остальных переносятся из исходной версии как есть.
@@ -1376,22 +1381,19 @@ class PlanningService:
                     routes=tuple(r for r in result.routes if r.engineer_id in changed),
                     idle_lunches=tuple(item for item in result.idle_lunches if item[0] in changed),
                 )
-                return (
-                    last,
-                    result,
-                    finish_plan(entry.scenario, partial, entry.routing, entry.travel),
-                    changed,
-                    shifts,
+                # Линии — из кэша: недостающие ORS достроит в фоне (`schedule_lines`)
+                drawn = finish_plan(
+                    entry.scenario, partial, entry.routing, entry.travel, lines="cache"
                 )
+                return last, partial, result, drawn, changed, shifts
 
         try:
-            outcome, result, drawn, changed, shifts = await asyncio.to_thread(apply)
+            outcome, partial, result, drawn, changed, shifts = await asyncio.to_thread(apply)
         except Exception:
             boards.drop(plan_id)
             raise
         if result is None:
-            # Превью или отказ посередине пакета — доска уже мутирована, выбрасываем.
-            boards.drop(plan_id)
+            # Превью или отказ посередине пакета — доска уже откачена к исходной версии
             return self._move_response(outcome)
 
         # Доска уже сделала ходы: если сохранить не вышло, она расходится с БД — выбрасываем.
@@ -1424,7 +1426,7 @@ class PlanningService:
             # Обеды изменившихся маршрутов — из хода, остальные — из исходной версии как есть
             # (с её линией до места обеда). Если доска держит обед иначе, чем версия (обед
             # поменяли в карточке), — по доске: строки визитов тоже с неё.
-            source = await self._repo.session.get(Plan, plan_id)
+            source = await self._repo.get_plan(plan_id)
             kept = {
                 str(item.get("engineer_id")): item
                 for item in (source.lunches if source is not None else None) or []
@@ -1477,7 +1479,11 @@ class PlanningService:
         response = self._move_response(outcome)
         response.planId = saved.plan_id
         response.version = saved.version
-        schedule_baseline(saved)
+        if shifts:
+            schedule_baseline(saved)  # окна заявок в БД сдвинуты — входные данные другие
+        else:
+            inherit_baseline(plan_id, saved)
+        schedule_lines(saved.plan_id or 0, entry.routing, partial)
         return response
 
     @staticmethod
