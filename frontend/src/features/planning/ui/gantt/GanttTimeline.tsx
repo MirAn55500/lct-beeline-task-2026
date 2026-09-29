@@ -13,7 +13,7 @@ import { EngineerCell } from './EngineerCell'
 
 /** Размеры сетки из макета: час и строка. Колонка инженеров — общая левая колонка (useAsideWidth). */
 export const GANTT_HOUR = 120
-export const GANTT_HEADER = 48
+export const GANTT_HEADER = 60
 export const GANTT_ROW = 60
 /** Ширина раскрытой карточки визита. */
 const FULL_CARD = 204
@@ -203,7 +203,7 @@ export function GanttTimeline({
                 onQueryChange={onEngineerQueryChange}
                 transports={engineerTransports}
                 onTransportsChange={onEngineerTransportsChange}
-                className="w-full px-1.5"
+                className="w-full p-3"
               />
             </div>
             <div className="relative flex">
@@ -220,12 +220,12 @@ export function GanttTimeline({
                 <>
                   <span
                     aria-hidden
-                    className="absolute top-[33px] size-2.5 -translate-x-1/2 rounded-full bg-[#ea580c]"
+                    className="absolute top-[45px] size-2.5 -translate-x-1/2 rounded-full bg-[#ea580c]"
                     style={{ left: nowX }}
                   />
                   <span
                     aria-hidden
-                    className="absolute top-[38px] bottom-0 w-0.5 -translate-x-1/2 bg-[#ea580c]"
+                    className="absolute top-[50px] bottom-0 w-0.5 -translate-x-1/2 bg-[#ea580c]"
                     style={{ left: nowX }}
                   />
                 </>
