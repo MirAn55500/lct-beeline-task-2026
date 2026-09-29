@@ -221,6 +221,16 @@ export function GeneralOnboarding() {
           className="z-[90] w-80 p-0"
           offset={12}
           placement={step.placement ?? 'bottom'}
+          style={
+            anchor
+              ? undefined
+              : {
+                  position: 'fixed',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                }
+          }
           triggerRef={anchor ? targetRef : undefined}
         >
           {anchor ? <Popover.Arrow /> : null}
