@@ -135,8 +135,8 @@ python -m pytest tests -q
 |---|---|---|
 | catalogs | `/api/catalogs` | регионы, health |
 | personnel | `/api/personnel` | бригады, инженеры, адреса |
-| tickets | `/api/tickets` | загрузка и список заявок |
-| planning | `/api/planning` | план дня, пересчёт, события, Гант |
+| tickets | `/api/tickets` | загрузка, список, создание (`POST /api/tickets`), неназначенные (`/unassigned`) |
+| planning | `/api/planning` | план дня, пересчёт, события, Гант, окна вставки и ручные ходы |
 
 Авторизация в прототипе не требуется.
 
@@ -161,9 +161,15 @@ python -m pytest tests -q
 
 1. **Вручную:** `.env` в корне (переменные и секреты) + `docker compose`
    ([DEPLOY.md](DEPLOY.md#3-ручной-деплой-docker-compose)).
-2. **GitHub Actions** (self-hosted runner при пуше в `main`): собирает тот же
-   `.env` из vars/secrets и выполняет те же команды compose
+2. **GitHub Actions** (self-hosted runner): собирает тот же `.env` из
+   vars/secrets и выполняет те же команды compose
    ([DEPLOY.md](DEPLOY.md#4-деплой-через-github-actions)).
+
+Deploy стартует не на любой push в `main`, а только при изменениях в
+`backend/`, `frontend/`, `solution/planner/`, `solution/data/*.json`,
+`solution/deploy/ors/`, `docker-compose.yml` или самом workflow; либо вручную
+через `workflow_dispatch`. Push только с правками документации деплой не
+запускает.
 
 ORS, экономный режим 4 ГБ, заливка графов: [DEPLOY.md](DEPLOY.md).
 ORS отдельно: [solution/deploy/ors/README.md](solution/deploy/ors/README.md).

@@ -373,9 +373,21 @@ docker compose logs --tail=80 backend
 Автоматизация того же процесса, что в п. 3. Workflow:
 [.github/workflows/deploy.yml](.github/workflows/deploy.yml).
 
-Триггер: push в `main` (пути `backend/`, `frontend/`, `solution/planner/`,
-compose, workflow) или `workflow_dispatch`. Runner: **self-hosted** на той же
-машине, где выполняется compose.
+Триггер: push в `main` **только по путям** ниже, либо ручной
+`workflow_dispatch`. Push только с документацией (README, DEPLOY и т.п.)
+workflow не запускает.
+
+Пути из `deploy.yml`:
+
+* `backend/**`
+* `frontend/**`
+* `solution/planner/**`
+* `solution/data/*.json`
+* `solution/deploy/ors/**`
+* `docker-compose.yml`
+* `.github/workflows/deploy.yml`
+
+Runner: **self-hosted** на той же машине, где выполняется compose.
 
 ### 4.1. Требования к runner
 
