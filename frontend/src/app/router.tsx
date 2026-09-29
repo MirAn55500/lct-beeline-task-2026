@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from '@heroui/react'
-import { Navigate, Route, createBrowserRouter, createRoutesFromElements, RouterProvider, useBlocker, useSearchParams } from 'react-router'
+import { Navigate, Outlet, Route, createBrowserRouter, createRoutesFromElements, RouterProvider, useBlocker, useSearchParams } from 'react-router'
 import { getLocalTimeZone, parseDate, today } from '@internationalized/date'
 import { RiAlertFill } from '@remixicon/react'
 
@@ -46,7 +46,7 @@ import {
 } from '@/features/tickets'
 import type { PlanEventResult } from '@/features/planning'
 import { routes } from '@/shared/config/routes'
-import { AppModal, AppPanel, ContextHeader, PlanViewTabs, buttonClass } from '@/shared/ui'
+import { AppModal, AppPanel, ContextHeader, GeneralOnboarding, PlanViewTabs, buttonClass } from '@/shared/ui'
 
 function OverviewContent({ context }: { context: HomeAreaContext }) {
   const { regionId, date, planId, focusDay } = context
@@ -577,9 +577,18 @@ function PlaceholderPage() {
   return <HomeAreaLayout />
 }
 
+function AppRoot() {
+  return (
+    <>
+      <Outlet />
+      <GeneralOnboarding />
+    </>
+  )
+}
+
 const appRouter = createBrowserRouter(
   createRoutesFromElements(
-    <>
+    <Route element={<AppRoot />}>
       <Route path={routes.overview} element={<OverviewPage />} />
       <Route path={routes.compare} element={<ComparePage />} />
 
@@ -589,7 +598,7 @@ const appRouter = createBrowserRouter(
 
       <Route path={routes.personnel} element={<PersonnelPage />} />
       <Route path={routes.config} element={<PlaceholderPage />} />
-      <Route path={routes.help} element={<PlaceholderPage />} />
+      <Route path={routes.help} element={<Navigate to={routes.overview} replace />} />
 
       <Route path="/layouts/home" element={<Navigate to={routes.overview} replace />} />
       <Route path="/layouts/gantt" element={<Navigate to={routes.planGantt} replace />} />
@@ -597,10 +606,10 @@ const appRouter = createBrowserRouter(
       <Route path="/layouts/compare" element={<Navigate to={routes.compare} replace />} />
       <Route path="/layouts/personnel" element={<Navigate to={routes.personnel} replace />} />
       <Route path="/layouts/config" element={<Navigate to={routes.config} replace />} />
-      <Route path="/layouts/help" element={<Navigate to={routes.help} replace />} />
+      <Route path="/layouts/help" element={<Navigate to={routes.overview} replace />} />
 
       <Route path="*" element={<Navigate to={routes.overview} replace />} />
-    </>,
+    </Route>,
   ),
 )
 

@@ -3,7 +3,11 @@ export { AppNavMenu } from './AppNavMenu'
 export { AppPanel } from './AppPanel'
 export { BrandBar } from './BrandBar'
 export { ContextHeader } from './ContextHeader'
-export { GeneralOnboarding, resetGeneralOnboarding } from './GeneralOnboarding'
+export {
+  GeneralOnboarding,
+  resetGeneralOnboarding,
+  startGeneralOnboarding,
+} from './GeneralOnboarding'
 export { EmptyState } from './EmptyState'
 export { PageShell } from './PageShell'
 export { PlanViewTabs } from './PlanViewTabs'

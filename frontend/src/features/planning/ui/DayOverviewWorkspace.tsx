@@ -117,7 +117,7 @@ export function DayOverviewWorkspace({
 
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col gap-4', className)}>
-      <AppPanel className="flex shrink-0 flex-col gap-5 p-5">
+      <AppPanel data-onboarding="overview-summary" className="flex shrink-0 flex-col gap-5 p-5">
         <div className="flex items-center justify-between gap-5">
           <div className="flex min-w-0 flex-col gap-1">
             <h2 className="text-xl font-semibold leading-7 text-foreground">{title}</h2>
@@ -155,7 +155,10 @@ export function DayOverviewWorkspace({
       </AppPanel>
 
       <div className="flex min-h-0 flex-1 gap-4">
-        <AppPanel className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <AppPanel
+          data-onboarding="overview-tickets"
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+        >
           {hasTickets && regionId != null ? (
             <TicketsPanel regionId={regionId} date={date} planId={planId} />
           ) : showUploader ? (
@@ -172,11 +175,17 @@ export function DayOverviewWorkspace({
         </AppPanel>
 
         {hasTickets ? (
-          <AppPanel className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <AppPanel
+            data-onboarding="overview-secondary"
+            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+          >
             <DayPlanPreview plan={plan} loading={planQuery.isFetching} />
           </AppPanel>
         ) : (
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+          <div
+            data-onboarding="overview-secondary"
+            className="flex min-h-0 min-w-0 flex-1 flex-col gap-4"
+          >
             <AppPanel className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
               <EngineersPanel regionId={regionId} />
             </AppPanel>

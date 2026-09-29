@@ -1,95 +1,118 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { Button, Popover } from '@heroui/react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Button } from '@heroui/react'
+import { useLocation, useNavigate } from 'react-router-dom'
 
-const STORAGE_KEY = 'beeline-general-onboarding:v1'
+import { routes } from '@/shared/config/routes'
 
-type TourStep = {
-  id: string
+const STORAGE_KEY = 'beeline-general-onboarding:v2'
+const START_EVENT = 'beeline:start-general-onboarding'
+
+type Step = {
   title: string
   description: string
   target?: string
+  placement?: 'bottom start' | 'bottom end' | 'right top' | 'left top'
 }
-
-const STEPS: TourStep[] = [
-  {
-    id: 'welcome',
-    title: 'Добро пожаловать в Билайн Маршруты',
-    description:
-      'За пару минут покажем, где смотреть состояние дня, управлять планом и работать с заявками.',
-  },
-  {
-    id: 'sections',
-    title: 'Основные разделы',
-    description:
-      'В «Обзоре дня» собраны показатели, в «Плане работ» — Гант и карта, в «Сравнении» — версии расчёта, а в «Персонале» — бригады и инженеры.',
-    target: '[data-onboarding="main-navigation"]',
-  },
-  {
-    id: 'context',
-    title: 'Регион и рабочий день',
-    description:
-      'Выбранные регион и дата задают контекст для заявок, инженеров и всех версий плана.',
-    target: '[data-onboarding="planning-context"]',
-  },
-  {
-    id: 'tickets',
-    title: 'Работа с заявками',
-    description:
-      'Кнопка открывает загрузку CSV или JSON. В дополнительном меню рядом доступны экспорт и другие действия с заявками.',
-    target: '[data-onboarding="tickets-actions"]',
-  },
-  {
-    id: 'finish',
-    title: 'Основы готовы',
-    description:
-      'Дальше каждый рабочий экран можно изучать отдельно. Общий тур всегда можно запустить заново через раздел «Помощь».',
-  },
-]
 
 type AnchorRect = {
   top: number
-  right: number
-  bottom: number
   left: number
   width: number
   height: number
 }
 
+const steps: Step[] = [
+  {
+    title: 'Добро пожаловать в планировщик',
+    description:
+      'Коротко покажем основные разделы и элементы, с которых удобно начать работу.',
+  },
+  {
+    title: 'Основные разделы',
+    description:
+      'Здесь можно перейти к обзору дня, планированию, заявкам, сотрудникам и справочникам.',
+    target: 'main-navigation',
+    placement: 'right top',
+  },
+  {
+    title: 'Регион и рабочая дата',
+    description:
+      'Выбранные регион и дата определяют данные, которые отображаются в рабочих разделах.',
+    target: 'planning-context',
+    placement: 'bottom start',
+  },
+  {
+    title: 'Сводка дня',
+    description:
+      'В верхнем блоке собраны состояние данных и основные показатели выбранного дня.',
+    target: 'overview-summary',
+    placement: 'bottom start',
+  },
+  {
+    title: 'Заявки на день',
+    description:
+      'Здесь отображается список заявок. Из этого блока можно перейти к их загрузке и подготовке.',
+    target: 'overview-tickets',
+    placement: 'right top',
+  },
+  {
+    title: 'План и сотрудники',
+    description:
+      'Правая часть обзора показывает готовность плана или данные по сотрудникам перед расчётом.',
+    target: 'overview-secondary',
+    placement: 'left top',
+  },
+  {
+    title: 'Работа с заявками',
+    description:
+      'Отсюда можно загрузить заявки и запустить действия, доступные для текущего состояния дня.',
+    target: 'tickets-actions',
+    placement: 'bottom end',
+  },
+  {
+    title: 'Всё готово',
+    description:
+      'Тур можно повторить в любой момент кнопкой «Помощь» в основном меню.',
+  },
+]
+
+export function startGeneralOnboarding() {
+  localStorage.removeItem(STORAGE_KEY)
+  window.dispatchEvent(new Event(START_EVENT))
+}
+
 export function resetGeneralOnboarding() {
-  window.localStorage.removeItem(STORAGE_KEY)
-}
-
-function readInitialStep() {
-  return window.localStorage.getItem(STORAGE_KEY) ? -1 : 0
-}
-
-function cardPosition(rect: AnchorRect | null) {
-  const width = Math.min(360, window.innerWidth - 32)
-  if (!rect) {
-    return {
-      width,
-      left: Math.max(16, (window.innerWidth - width) / 2),
-      top: Math.max(16, (window.innerHeight - 280) / 2),
-    }
-  }
-
-  const left = Math.min(
-    Math.max(16, rect.left),
-    Math.max(16, window.innerWidth - width - 16),
-  )
-  const below = rect.bottom + 16
-  const top = below + 260 <= window.innerHeight
-    ? below
-    : Math.max(16, rect.top - 276)
-
-  return { width, left, top }
+  localStorage.removeItem(STORAGE_KEY)
 }
 
 export function GeneralOnboarding() {
-  const [stepIndex, setStepIndex] = useState(readInitialStep)
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [stepIndex, setStepIndex] = useState<number | null>(() =>
+    localStorage.getItem(STORAGE_KEY) ? null : 0,
+  )
   const [anchor, setAnchor] = useState<AnchorRect | null>(null)
-  const step = stepIndex >= 0 ? STEPS[stepIndex] : null
+
+  const step = stepIndex === null ? null : steps[stepIndex]
+
+  useEffect(() => {
+    const start = () => {
+      if (location.pathname !== routes.overview) {
+        navigate({ pathname: routes.overview, search: location.search })
+      }
+      setStepIndex(0)
+    }
+
+    window.addEventListener(START_EVENT, start)
+    return () => window.removeEventListener(START_EVENT, start)
+  }, [location.pathname, location.search, navigate])
+
+  useEffect(() => {
+    if (stepIndex !== null && location.pathname !== routes.overview) {
+      navigate({ pathname: routes.overview, search: location.search }, { replace: true })
+    }
+  }, [location.pathname, location.search, navigate, stepIndex])
 
   useLayoutEffect(() => {
     if (!step?.target) {
@@ -97,19 +120,21 @@ export function GeneralOnboarding() {
       return
     }
 
-    const target = document.querySelector<HTMLElement>(step.target)
-    if (!target) {
+    const element = document.querySelector<HTMLElement>(
+      `[data-onboarding="${step.target}"]`,
+    )
+
+    if (!element) {
       setAnchor(null)
       return
     }
 
-    target.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    element.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+
     const update = () => {
-      const rect = target.getBoundingClientRect()
+      const rect = element.getBoundingClientRect()
       setAnchor({
         top: rect.top,
-        right: rect.right,
-        bottom: rect.bottom,
         left: rect.left,
         width: rect.width,
         height: rect.height,
@@ -118,9 +143,10 @@ export function GeneralOnboarding() {
 
     update()
     const observer = new ResizeObserver(update)
-    observer.observe(target)
+    observer.observe(element)
     window.addEventListener('resize', update)
     window.addEventListener('scroll', update, true)
+
     return () => {
       observer.disconnect()
       window.removeEventListener('resize', update)
@@ -129,97 +155,124 @@ export function GeneralOnboarding() {
   }, [step])
 
   useEffect(() => {
-    if (!step) return
+    if (stepIndex === null) return
+
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        window.localStorage.setItem(STORAGE_KEY, 'skipped')
-        setStepIndex(-1)
-      }
-      if (event.key === 'ArrowRight') {
-        setStepIndex((current) => Math.min(current + 1, STEPS.length - 1))
-      }
-      if (event.key === 'ArrowLeft') {
-        setStepIndex((current) => Math.max(current - 1, 0))
-      }
+      if (event.key === 'Escape') finish()
+      if (event.key === 'ArrowRight') next()
+      if (event.key === 'ArrowLeft') previous()
     }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [step])
 
-  const position = useMemo(() => cardPosition(anchor), [anchor])
-  if (!step) return null
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  })
 
-  const close = (status: 'completed' | 'skipped') => {
-    window.localStorage.setItem(STORAGE_KEY, status)
-    setStepIndex(-1)
+  const finish = () => {
+    localStorage.setItem(STORAGE_KEY, 'completed')
+    setStepIndex(null)
   }
 
+  const next = () => {
+    if (stepIndex === null) return
+    if (stepIndex === steps.length - 1) finish()
+    else setStepIndex(stepIndex + 1)
+  }
+
+  const previous = () => {
+    if (stepIndex === null || stepIndex === 0) return
+    setStepIndex(stepIndex - 1)
+  }
+
+  if (!step || stepIndex === null) return null
+
+  const triggerStyle = anchor
+    ? {
+        top: anchor.top,
+        left: anchor.left,
+        width: anchor.width,
+        height: anchor.height,
+      }
+    : {
+        top: '50%',
+        left: '50%',
+        width: 1,
+        height: 1,
+      }
+
   return createPortal(
-    <div className="fixed inset-0 z-[80]" aria-live="polite">
+    <>
       {anchor ? (
         <div
-          className="pointer-events-none fixed rounded-2xl border-2 border-focus"
+          aria-hidden="true"
+          className="pointer-events-none fixed z-[80] rounded-xl ring-2 ring-accent"
           style={{
-            top: anchor.top - 6,
-            left: anchor.left - 6,
-            width: anchor.width + 12,
-            height: anchor.height + 12,
-            boxShadow: '0 0 0 9999px rgb(15 23 42 / 0.62)',
+            top: anchor.top - 4,
+            left: anchor.left - 4,
+            width: anchor.width + 8,
+            height: anchor.height + 8,
+            boxShadow: '0 0 0 9999px rgb(15 23 42 / 0.38)',
           }}
         />
       ) : (
-        <div className="fixed inset-0 bg-backdrop/60" />
+        <div
+          aria-hidden="true"
+          className="pointer-events-none fixed inset-0 z-[80] bg-backdrop/40"
+        />
       )}
 
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={`onboarding-${step.id}-title`}
-        className="fixed flex flex-col gap-4 rounded-[var(--border-radius-panel)] bg-surface p-5 text-foreground shadow-overlay"
-        style={position}
-      >
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-4 text-xs leading-4 text-muted">
-            <span>Знакомство с интерфейсом</span>
-            <span>{stepIndex + 1} из {STEPS.length}</span>
-          </div>
-          <div className="h-1 overflow-hidden rounded-full bg-surface-tertiary">
-            <div
-              className="h-full rounded-full bg-accent transition-[width]"
-              style={{ width: `${((stepIndex + 1) / STEPS.length) * 100}%` }}
-            />
-          </div>
-        </div>
+      <Popover isOpen>
+        <Popover.Trigger
+          aria-hidden="true"
+          className="pointer-events-none fixed z-[81]"
+          style={triggerStyle}
+        />
+        <Popover.Content
+          className="z-[90] w-80 p-0"
+          offset={12}
+          placement={step.placement ?? 'bottom'}
+        >
+          <Popover.Arrow />
+          <Popover.Dialog className="flex flex-col gap-3 p-4">
+            <div className="flex items-center justify-between gap-3 text-xs text-foreground-500">
+              <span>Общий тур</span>
+              <span>
+                {stepIndex + 1} из {steps.length}
+              </span>
+            </div>
 
-        <div className="flex flex-col gap-2">
-          <h2 id={`onboarding-${step.id}-title`} className="text-xl leading-7 font-semibold">
-            {step.title}
-          </h2>
-          <p className="text-sm leading-6 text-muted">{step.description}</p>
-        </div>
+            <div className="h-1 overflow-hidden rounded-full bg-default-100">
+              <div
+                className="h-full rounded-full bg-accent transition-[width]"
+                style={{ width: `${((stepIndex + 1) / steps.length) * 100}%` }}
+              />
+            </div>
 
-        <div className="flex items-center justify-between gap-3">
-          <Button variant="ghost" onPress={() => close('skipped')}>
-            Пропустить
-          </Button>
-          <div className="flex items-center gap-2">
-            {stepIndex > 0 ? (
-              <Button variant="secondary" onPress={() => setStepIndex(stepIndex - 1)}>
-                Назад
+            <div className="space-y-1">
+              <Popover.Heading className="text-base font-semibold text-foreground">
+                {step.title}
+              </Popover.Heading>
+              <p className="text-sm leading-5 text-foreground-600">{step.description}</p>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <Button size="sm" variant="ghost" onPress={finish}>
+                Пропустить
               </Button>
-            ) : null}
-            <Button
-              onPress={() => {
-                if (stepIndex === STEPS.length - 1) close('completed')
-                else setStepIndex(stepIndex + 1)
-              }}
-            >
-              {stepIndex === STEPS.length - 1 ? 'Готово' : 'Далее'}
-            </Button>
-          </div>
-        </div>
-      </section>
-    </div>,
+              <div className="flex gap-2">
+                {stepIndex > 0 && (
+                  <Button size="sm" variant="secondary" onPress={previous}>
+                    Назад
+                  </Button>
+                )}
+                <Button size="sm" onPress={next}>
+                  {stepIndex === steps.length - 1 ? 'Готово' : 'Далее'}
+                </Button>
+              </div>
+            </div>
+          </Popover.Dialog>
+        </Popover.Content>
+      </Popover>
+    </>,
     document.body,
   )
 }
