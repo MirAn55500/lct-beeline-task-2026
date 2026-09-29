@@ -61,6 +61,7 @@ type ApiEngineer = {
   position?: string | null
   qualification_hint?: string | null
   is_lead: boolean
+  planning_enabled: boolean
   start_work?: string | null
   end_work?: string | null
   own_schedule?: boolean
@@ -127,6 +128,7 @@ function mapPersonnelEngineer(item: ApiEngineer): PersonnelEngineer {
     skillLabels: item.skill_labels,
     transport: item.transport as TransportCode,
     isLead: item.is_lead,
+    planningEnabled: item.planning_enabled,
     qualification: (item.qualification as QualificationCode | null) ?? null,
     position: item.position,
     qualificationHint: item.qualification_hint,
@@ -267,6 +269,18 @@ export const personnelApi = baseApi.injectEndpoints({
       // Бригада — счётчик и бригадир в списке; план — имена и смены на Ганте
       invalidatesTags: ['Engineer', 'Brigade', 'Plan'],
     }),
+    updateEngineerPlanning: build.mutation<
+      PersonnelEngineer,
+      { id: number; planningEnabled: boolean }
+    >({
+      query: ({ id, planningEnabled }) => ({
+        url: `/api/personnel/engineers/${id}/planning`,
+        method: 'PATCH',
+        body: { planning_enabled: planningEnabled },
+      }),
+      transformResponse: (response: ApiEngineer) => mapPersonnelEngineer(response),
+      invalidatesTags: ['Engineer', 'Plan'],
+    }),
     deleteEngineer: build.mutation<void, number>({
       query: (engineerId) => ({
         url: `/api/personnel/engineers/${engineerId}`,
@@ -289,6 +303,7 @@ export const {
   useCreateEngineerMutation,
   useUploadEngineersMutation,
   useDeleteEngineerMutation,
+  useUpdateEngineerPlanningMutation,
   useUpdateBrigadeMutation,
   useUpdateEngineerMutation,
 } = personnelApi

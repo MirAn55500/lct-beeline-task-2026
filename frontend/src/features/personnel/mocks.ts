@@ -81,6 +81,7 @@ export function createUploadBatch(
     name,
     skills,
     transport,
+    planningEnabled: true,
     workDays: [],
     ownWorkDays: false,
     lunchStart: null,

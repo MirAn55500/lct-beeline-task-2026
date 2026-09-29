@@ -35,6 +35,9 @@ class Engineer(BaseTable, table=True):
     # UI-квалификация страницы «Персонал»: master | worker | novice
     qualification: Optional[str] = Field(default=None)
     is_lead: bool = Field(default=False)
+    # Постоянный допуск к автоматическому планированию. Карточка инженера при
+    # выключении остаётся в справочнике и может быть включена обратно.
+    planning_enabled: bool = Field(default=True)
     # Свой обед. Пусто — как у бригады: окно и место меняются вместе с ней
     lunch_start: Optional[time] = Field(default=None)
     lunch_end: Optional[time] = Field(default=None)

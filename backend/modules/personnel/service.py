@@ -42,6 +42,7 @@ from modules.personnel.schemas import (
     UpdateBrigadeRequest,
     UpdateBrigadeResponse,
     UpdateEngineerRequest,
+    UpdateEngineerPlanningRequest,
     UploadEngineersResult,
 )
 from modules.personnel.skills import SKILL_LABELS, map_skill, skill_code
@@ -561,6 +562,20 @@ class PersonnelService:
             raise AppError("Не удалось сохранить инженера", status_code=500)
         return self._to_response(refreshed)
 
+    async def update_engineer_planning(
+        self, engineer_id: int, body: UpdateEngineerPlanningRequest
+    ) -> EngineerResponse:
+        """Включить или исключить инженера из следующих расчётов плана."""
+        engineer = await self._repo.get_engineer(engineer_id)
+        if engineer is None:
+            raise NotFoundError("Инженер не найден")
+        engineer.planning_enabled = body.planning_enabled
+        self._session.add(engineer)
+        refreshed = await self._repo.refresh_engineer(engineer_id)
+        if refreshed is None:
+            raise AppError("Не удалось изменить допуск к планированию", status_code=500)
+        return self._to_response(refreshed)
+
     async def _engineer_fields(
         self, body: EngineerFields, brigade: Brigade, *, current_lunch: Address | None = None
     ) -> tuple[dict[str, object], list[str]]:
@@ -703,6 +718,7 @@ class PersonnelService:
             position=position,
             qualification_hint=qualification_hint(qualification),
             is_lead=bool(engineer.is_lead),
+            planning_enabled=bool(engineer.planning_enabled),
             start_work=engineer.start_work,
             end_work=engineer.end_work,
             own_schedule=bool(engineer.own_schedule),

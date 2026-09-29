@@ -1,13 +1,14 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Checkbox, ScrollShadow, Tooltip } from '@heroui/react'
 import {
-  RiDeleteBinLine,
   RiInformationLine,
   RiPencilLine,
   RiSearchLine,
+  RiUserAddLine,
+  RiUserUnfollowLine,
 } from '@remixicon/react'
 
-import { useDeleteEngineerMutation } from '@/features/personnel/api'
+import { useUpdateEngineerPlanningMutation } from '@/features/personnel/api'
 import {
   QUALIFICATION_OPTIONS,
   SKILL_LABEL,
@@ -102,6 +103,7 @@ function IconButton({
     <button
       type="button"
       aria-label={label}
+      title={label}
       disabled={disabled}
       onClick={(event) => {
         event.stopPropagation()
@@ -166,21 +168,21 @@ function EngineerRow({
   checked,
   active,
   highlighted,
-  deleting,
+  updatingPlanning,
   onToggle,
   onOpen,
   onEdit,
-  onDelete,
+  onTogglePlanning,
 }: {
   engineer: PersonnelEngineer
   checked: boolean
   active: boolean
   highlighted: boolean
-  deleting?: boolean
+  updatingPlanning?: boolean
   onToggle: (next: boolean) => void
   onOpen: () => void
   onEdit: () => void
-  onDelete: () => void
+  onTogglePlanning: () => void
 }) {
   const TransportIcon = TRANSPORT_ICON[engineer.transport]
 
@@ -221,11 +223,16 @@ function EngineerRow({
           <span className="truncate text-sm font-medium leading-5 text-foreground">
             {engineer.name}
           </span>
-          {engineer.position ? (
-            <span className="truncate text-xs leading-4 text-muted">
-              {engineer.position}
-            </span>
-          ) : null}
+          <span
+            className={cn(
+              'truncate text-xs leading-4',
+              engineer.planningEnabled ? 'text-muted' : 'text-danger',
+            )}
+          >
+            {engineer.planningEnabled
+              ? engineer.position
+              : 'Исключён из планирования'}
+          </span>
         </span>
       </div>
 
@@ -245,12 +252,20 @@ function EngineerRow({
           <RiPencilLine size={16} />
         </IconButton>
         <IconButton
-          label={`Удалить ${engineer.name}`}
-          tone="danger"
-          disabled={deleting}
-          onClick={onDelete}
+          label={
+            engineer.planningEnabled
+              ? `Исключить ${engineer.name} из планирования`
+              : `Вернуть ${engineer.name} в планирование`
+          }
+          tone={engineer.planningEnabled ? 'danger' : 'outline'}
+          disabled={updatingPlanning}
+          onClick={onTogglePlanning}
         >
-          <RiDeleteBinLine size={16} />
+          {engineer.planningEnabled ? (
+            <RiUserUnfollowLine size={16} />
+          ) : (
+            <RiUserAddLine size={16} />
+          )}
         </IconButton>
       </div>
     </div>
@@ -280,8 +295,9 @@ export function EngineersTable({
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState<EngineersFiltersState>(EMPTY_ENGINEERS_FILTERS)
   const [selected, setSelected] = useState<Set<number>>(() => new Set())
-  const [deleteEngineer, { isLoading: isDeleting }] = useDeleteEngineerMutation()
-  const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [updateEngineerPlanning, { isLoading: isUpdatingPlanning }] =
+    useUpdateEngineerPlanningMutation()
+  const [updatingPlanningId, setUpdatingPlanningId] = useState<number | null>(null)
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -330,19 +346,17 @@ export function EngineersTable({
       return copy
     })
 
-  const handleDelete = async (id: number) => {
-    setDeletingId(id)
+  const handleTogglePlanning = async (engineer: PersonnelEngineer) => {
+    setUpdatingPlanningId(engineer.id)
     try {
-      await deleteEngineer(id).unwrap()
-      setSelected((prev) => {
-        const copy = new Set(prev)
-        copy.delete(id)
-        return copy
-      })
+      await updateEngineerPlanning({
+        id: engineer.id,
+        planningEnabled: !engineer.planningEnabled,
+      }).unwrap()
     } catch {
       // Оставляем строку; RTK Query не инвалидирует кэш при ошибке.
     } finally {
-      setDeletingId(null)
+      setUpdatingPlanningId(null)
     }
   }
 
@@ -416,11 +430,13 @@ export function EngineersTable({
               checked={selected.has(engineer.id)}
               active={activeId === engineer.id}
               highlighted={highlightIds?.has(engineer.id) ?? false}
-              deleting={isDeleting && deletingId === engineer.id}
+              updatingPlanning={
+                isUpdatingPlanning && updatingPlanningId === engineer.id
+              }
               onToggle={(next) => toggle(engineer.id, next)}
               onOpen={() => onOpenEngineer?.(engineer)}
               onEdit={() => (onEditEngineer ?? onOpenEngineer)?.(engineer)}
-              onDelete={() => void handleDelete(engineer.id)}
+              onTogglePlanning={() => void handleTogglePlanning(engineer)}
             />
           ))
         ) : (
