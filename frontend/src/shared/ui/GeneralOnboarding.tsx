@@ -218,19 +218,9 @@ export function GeneralOnboarding() {
           style={{ top: '50%', left: '50%', width: 1, height: 1 }}
         />
         <Popover.Content
-          className="z-[90] w-80 p-0"
+          className={`z-[90] w-80 p-0${anchor ? '' : ' onboarding-popover--centered'}`}
           offset={12}
           placement={step.placement ?? 'bottom'}
-          style={
-            anchor
-              ? undefined
-              : {
-                  position: 'fixed',
-                  top: '50%',
-                  left: '50%',
-                  transform: 'translate(-50%, -50%)',
-                }
-          }
           triggerRef={anchor ? targetRef : undefined}
         >
           {anchor ? <Popover.Arrow /> : null}
