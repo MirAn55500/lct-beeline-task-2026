@@ -116,20 +116,20 @@ function EngineerHoverCard({ engineer, top, left }: HoverCard) {
   return (
     <div
       role="tooltip"
-      className="pointer-events-none fixed z-50 flex h-[72px] w-[350px] flex-col justify-center gap-1 border border-border bg-surface-hover py-3 pr-3 pl-4"
+      className="pointer-events-none fixed z-50 flex h-[60px] w-[350px] flex-col justify-center gap-1 border border-l-0 border-border bg-surface-hover py-2 pr-3 pl-4"
       style={{ top, left, borderRadius: '0 8px 8px 0' }}
     >
-      <p className="truncate text-base leading-6 font-medium text-foreground">
+      <p className="truncate text-sm leading-5 font-semibold text-foreground">
         Рабочая смена: {engineer.shift}
       </p>
-      <p className="flex items-center gap-2 text-sm leading-5 font-medium text-muted">
+      <p className="flex items-center gap-2 text-xs leading-4 text-muted">
         <span className="flex items-center gap-0.5">
-          <RiRouterLine size={16} />
+          <RiRouterLine size={14} />
           {engineer.routers} {pluralRu(engineer.routers, ['роутер', 'роутера', 'роутеров'])}
         </span>
         <MetaSeparator />
         <span className="flex items-center gap-0.5">
-          <RiTvLine size={16} />
+          <RiTvLine size={14} />
           {engineer.boxes} {pluralRu(engineer.boxes, ['приставка', 'приставки', 'приставок'])}
         </span>
       </p>
