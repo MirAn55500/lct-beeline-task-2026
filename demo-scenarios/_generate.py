@@ -12,8 +12,8 @@ ROOT = Path(r"D:/Downloads")
 OUT = Path(__file__).resolve().parent
 
 # Стенд проверяем «сегодня» — дата из сессии пользователя.
-DAY = date(2026, 9, 28)
-DAY_STR = DAY.strftime("%d.%m.%Y")  # 28.09.2026
+DAY = date(2026, 9, 29)
+DAY_STR = DAY.strftime("%d.%m.%Y")  # 29.09.2026
 REGION = "Юго-восток"
 OFFICE = "г. Москва, ул Бирюлёвская, д 1с1"
 BRIGADE = "Бригада Юго-восток"

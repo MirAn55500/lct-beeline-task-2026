@@ -122,7 +122,7 @@ export function PlanGanttBoard({ board, viewKey }: PlanGanttBoardProps) {
   ]
   const fromHour = edges.length > 0 ? Math.floor(Math.min(...edges) / 60) : 9
   const toHour = edges.length > 0 ? Math.max(Math.ceil(Math.max(...edges) / 60), fromHour + 1) : 22
-  const showNow = board.hasPlan
+  const showNow = board.engineers.length > 0
 
   const selectedTicket = board.unassigned.find((item) => item.id === board.selectedTicketId) ?? null
   const activeTicket = drag?.ticket ?? selectedTicket
@@ -340,7 +340,7 @@ export function PlanGanttBoard({ board, viewKey }: PlanGanttBoardProps) {
 
         <GanttUnassignedPanel
           tickets={board.unassigned}
-          empty={!board.hasPlan}
+          empty={!board.hasPlan && board.unassigned.length === 0}
           emptyText={
             board.noSchedule
               ? 'В этой версии плана нет расписания визитов — она составлена до его появления. Обновите план'

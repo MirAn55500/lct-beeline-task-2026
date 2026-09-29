@@ -57,7 +57,8 @@ export function usePlanMapBoard(
     () => (plan ? buildMapDataset(plan) : offline ? mockDatasetFor(regionId, date) : EMPTY),
     [plan, offline, regionId, date],
   )
-  const hasPlan = plan ? true : offline && date === getMapDataset(regionId).date
+  // planId 0 — каркас дня без версии плана: инженеры есть, маршрутов нет.
+  const hasPlan = plan != null ? plan.planId > 0 : offline && date === getMapDataset(regionId).date
   const viewKey = `${regionId}:${date}:${plan ? `plan-${plan.planId}` : offline ? 'mock' : 'none'}`
 
   const [loadedKey, setLoadedKey] = useState(viewKey)
@@ -104,7 +105,7 @@ export function usePlanMapBoard(
     if (!engineer) return
     setPendingDrop(null)
 
-    if (plan && !offline) {
+    if (plan && plan.planId > 0 && !offline) {
       void moveRequest({
         planId: plan.planId,
         requestId: ticket.id,

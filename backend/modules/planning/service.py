@@ -578,6 +578,10 @@ class PlanningService:
         (`PlanExport`): инженеры, заявки, маршруты с выездом/прибытием/работой и
         неназначенные с причиной. Геометрии по улицам backend не строит — маршрут
         рисуется прямыми между точками (`geometrySource: "straight"`).
+
+        Без версии плана на день — тот же каркас: инженеры региона и заявки дня
+        (все неназначенные), пустые маршруты. Так Гант/карта показывают ленту без
+        задач, как «Ganta — Empty», а не пустой экран.
         """
         plans = await self._repo.list_plans(region_id, day)
         if plan_id is None:
@@ -585,7 +589,7 @@ class PlanningService:
         else:
             plan = next((item for item in plans if item.plan_id == plan_id), None)
         if plan is None or plan.plan_id is None:
-            raise AppError("План не найден", status_code=404)
+            return await self._empty_day(region_id, day)
         latest = plan is plans[0]
         if baseline and plan.distribution != Distribution.EVEN.value:
             # Версии до базовых расчётов: последней досчитываем по текущим данным — они те же,
@@ -600,6 +604,105 @@ class PlanningService:
                 raise AppError("Для этой версии базовый план не сохранялся", status_code=404)
             return await self._export(found, latest=False)
         return await self._export(plan, latest=latest)
+
+    async def _empty_day(self, region_id: int, day: date) -> PlanExportResponse:
+        """День без версии плана: инженеры и заявки есть, визитов нет."""
+        region = await self._repo.get_region(region_id)
+        if region is None:
+            raise AppError("Регион не найден", status_code=404)
+        requests = await self._repo.list_requests_for_plan(region_id, day)
+        engineers = await self._repo.list_engineers_for_plan(region_id)
+        working = [e for e in engineers if e.works_on(day)]
+        engineers = working or engineers
+        if not engineers and not requests:
+            return PlanExportResponse(
+                planId=0,
+                version=0,
+                key=str(region_id),
+                region=region.region_name,
+                date=day,
+                engineers=[],
+                requests=[],
+                routes=[],
+                unassigned=[],
+            )
+        scenario, _ = build_scenario(
+            day=day,
+            region_id=region_id,
+            region_name=region.region_name,
+            requests=requests,
+            engineers=engineers,
+        )
+        zone = timezone(timedelta(hours=scenario.settings.timezone_offset_hours))
+        suffix = datetime(2000, 1, 1, tzinfo=zone).strftime("%z")
+        suffix = f"{suffix[:3]}:{suffix[3:]}"
+
+        def iso(moment: datetime | None) -> str:
+            if moment is None:
+                return ""
+            if moment.tzinfo is not None:
+                moment = moment.astimezone(zone).replace(tzinfo=None)
+            return moment.isoformat(timespec="seconds") + suffix
+
+        engineers_out = [
+            PlanEngineerExport(
+                id=e.id,
+                name=e.name,
+                start=[e.start_point.lon, e.start_point.lat],
+                workIntervals=[[iso(w.start), iso(w.end)] for w in e.work_intervals],
+                skills=sorted(s.value for s in e.skills),
+                transport=e.transport_mode.value,
+                equipment=sorted(e.equipment),
+            )
+            for e in scenario.engineers
+        ]
+        requests_out = [
+            PlanRequestExport(
+                id=r.id,
+                point=[r.point.lon, r.point.lat],
+                window=[iso(r.window_start), iso(r.window_end)],
+                address=r.address,
+                type=r.request_type_bk,
+                skill=r.required_skill.value,
+                duration=r.duration_minutes,
+                priority=r.priority.value,
+                equipment=sorted(r.required_equipment),
+            )
+            for r in scenario.requests
+        ]
+        starts = {e.id: [e.start_point.lon, e.start_point.lat] for e in scenario.engineers}
+        routes_out = [
+            PlanRouteExport(
+                engineerId=e.id,
+                startAt=None,
+                endAt=None,
+                utilization=0.0,
+                geometrySource="straight",
+                polyline=[starts[e.id]],
+                geometry=[],
+                visits=[],
+            )
+            for e in scenario.engineers
+        ]
+        unassigned_out = [
+            PlanUnassignedExport(
+                requestId=r.id,
+                reason="no_engineers",
+                explanation="План на этот день ещё не составлен",
+            )
+            for r in scenario.requests
+        ]
+        return PlanExportResponse(
+            planId=0,
+            version=0,
+            key=str(region_id),
+            region=scenario.name,
+            date=day,
+            engineers=engineers_out,
+            requests=requests_out,
+            routes=routes_out,
+            unassigned=unassigned_out,
+        )
 
     async def _export(self, plan: Plan, *, latest: bool) -> PlanExportResponse:
         """Вид версии. Старая — история: ровно такой, какой была сохранена (снимок)."""

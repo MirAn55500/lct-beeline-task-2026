@@ -149,7 +149,8 @@ const EMPTY: GanttDataset = { date: '', engineers: [], tasks: [], unassigned: []
 
 /**
  * Состояние страницы Ганта. Визиты — из `/api/planning/plan`: выбранная в шапке версия плана,
- * без неё — последняя. Без плана на этот день лента пустая, как «Ganta — Empty».
+ * без неё — последняя. Без версии плана backend отдаёт каркас дня: инженеры и заявки без
+ * визитов (как «Ganta — Empty»), а не 404.
  *
  * Ручные постановки проверяются по окнам планировщика (`/plan/{id}/slots`) — с дорогой между
  * адресами, без запросов во время перетаскивания; подтверждённый ход сохраняется новой версией
@@ -163,7 +164,7 @@ export function usePlanGanttBoard(
   { onSaved, readOnly = false }: { onSaved?: (planId: number) => void; readOnly?: boolean } = {},
 ) {
   const query = useGetPlanExportQuery(regionId != null ? { regionId, date, planId } : skipToken)
-  // 404 — плана на этот день нет; ошибка без статуса ответа — backend не поднят, остаёмся на моках.
+  // Ошибка без статуса ответа — backend не поднят, остаёмся на моках.
   const offline = isOfflineError(query.isError, query.error)
   // Пока грузится другая версия, держим прежнюю ленту, а не мигаем пустой.
   const plan = query.currentData ?? (query.isFetching ? query.data : undefined)
@@ -172,15 +173,17 @@ export function usePlanGanttBoard(
     () => (plan ? buildGantt(plan, now) : offline ? getGanttDataset(regionId) : EMPTY),
     [plan, now, offline, regionId],
   )
-  const hasPlan = plan ? true : offline && date === dataset.date
+  // Версия плана есть только при planId > 0; 0 — каркас дня без назначений.
+  const hasPlan = plan != null ? plan.planId > 0 : offline && date === dataset.date
   const key = `${regionId}:${date}:${plan ? `plan-${plan.planId}` : offline ? 'mock' : 'none'}`
   // Старые версии (до расписаний в БД) приходят без визитов и неназначенных.
   const noSchedule =
     plan != null &&
+    plan.planId > 0 &&
     plan.requests.length > 0 &&
     plan.routes.every((route) => route.visits.length === 0) &&
     plan.unassigned.length === 0
-  const livePlanId = plan && !noSchedule ? plan.planId : null
+  const livePlanId = plan && plan.planId > 0 && !noSchedule ? plan.planId : null
   // Время идёт: к каким визитам уже выехали (их не сдвинуть) — перечитываем раз в минуту.
   const slotsQuery = useGetPlanSlotsQuery(livePlanId ?? skipToken, { pollingInterval: 60_000 })
   const slotIndex = useMemo(() => indexSlots(slotsQuery.currentData), [slotsQuery.currentData])
@@ -193,8 +196,8 @@ export function usePlanGanttBoard(
   }, [key])
 
   const [loadedKey, setLoadedKey] = useState(key)
-  const [tasks, setTasks] = useState<GanttTask[]>(() => (hasPlan ? dataset.tasks : []))
-  const [unassigned, setUnassigned] = useState<GanttUnassigned[]>(() => (hasPlan ? dataset.unassigned : []))
+  const [tasks, setTasks] = useState<GanttTask[]>(() => dataset.tasks)
+  const [unassigned, setUnassigned] = useState<GanttUnassigned[]>(() => dataset.unassigned)
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null)
   const [change, setChange] = useState<GanttChange | null>(null)
   const [manageId, setManageId] = useState<string | null>(null)
@@ -204,8 +207,8 @@ export function usePlanGanttBoard(
   // Другой регион или день — другой план: сбрасываем всё прямо в рендере.
   if (loadedKey !== key) {
     setLoadedKey(key)
-    setTasks(hasPlan ? dataset.tasks : [])
-    setUnassigned(hasPlan ? dataset.unassigned : [])
+    setTasks(dataset.tasks)
+    setUnassigned(dataset.unassigned)
     setSelectedTicketId(null)
     setChange(null)
     setManageId(null)
