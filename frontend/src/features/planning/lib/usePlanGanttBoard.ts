@@ -1,5 +1,5 @@
 import { skipToken } from '@reduxjs/toolkit/query/react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from '@heroui/react'
 
 import type { GanttEngineer, GanttTask, GanttTicket, GanttUnassigned } from '../ganttTypes'
@@ -225,6 +225,8 @@ export function usePlanGanttBoard(
   useEffect(() => {
     pendingRef.current = pendingMoves
   }, [pendingMoves])
+  // useBlocker читает это синхронно: setState ещё не успел перерисовать, а setPlanId уже меняет URL.
+  const dirtyRef = useRef(false)
 
   // Другой регион или день — другой план: сбрасываем всё прямо в рендере.
   if (loadedKey !== key) {
@@ -236,9 +238,11 @@ export function usePlanGanttBoard(
     setManageId(null)
     setLunches(undefined)
     setPendingMoves([])
+    dirtyRef.current = false
   }
 
   const dirty = pendingMoves.length > 0
+  dirtyRef.current = dirty
   const view = change ? applyChange(tasks, unassigned, change, true) : { tasks, unassigned }
 
   // Загрузка — моковая: к проценту планировщика прибавляем разницу в минутах работ.
@@ -256,12 +260,13 @@ export function usePlanGanttBoard(
     commit,
   })
 
-  /** Локально применяет ход в черновик — на backend уйдёт только по «Сохранить». */
+  /** Локально применяет ход — на backend уйдёт только по «Сохранить». */
   const commit = (next: GanttChange) => {
     const result = applyChange(tasks, unassigned, next, false)
     setTasks(result.tasks)
     setUnassigned(result.unassigned)
     if (next.lunches) setLunches(next.lunches)
+    dirtyRef.current = true
     setPendingMoves((current) => [...current, toMoveItem(next.ticketId, next.placement)])
     setChange(null)
     setSelectedTicketId(null)
@@ -269,6 +274,7 @@ export function usePlanGanttBoard(
 
   /** Вернуть ленту к исходному плану дня — все локальные правки пропадают. */
   const reset = () => {
+    dirtyRef.current = false
     setTasks(dataset.tasks)
     setUnassigned(dataset.unassigned)
     setLunches(undefined)
@@ -278,11 +284,13 @@ export function usePlanGanttBoard(
     setManageId(null)
   }
 
+  const shouldBlockLeave = useCallback(() => dirtyRef.current, [])
+
   /** Отправить накопленные ходы одной новой версией плана. */
   const saveAll = () => {
     if (pendingMoves.length === 0 || saving) return
     if (livePlanId == null) {
-      // Офлайн-моки: черновик «сохраняем» локально, новой версии на сервере нет.
+      dirtyRef.current = false
       setPendingMoves([])
       toast.success('Изменения сохранены локально')
       return
@@ -294,6 +302,8 @@ export function usePlanGanttBoard(
       .unwrap()
       .then((response) => {
         if (response.ok && response.planId != null) {
+          // Сначала снимаем dirty: onSaved меняет ?plan= в URL и иначе ловит useBlocker.
+          dirtyRef.current = false
           if (keyRef.current === committedKey) {
             setPendingMoves([])
             setLunches(lunchesOf(response))
@@ -368,6 +378,8 @@ export function usePlanGanttBoard(
     noSchedule,
     /** Есть локальные правки, ещё не сохранённые новой версией. */
     dirty,
+    /** Для useBlocker: актуальный dirty без ожидания рендера после «Сохранить». */
+    shouldBlockLeave,
     /** Идёт сохранение пакета ходов — новые ходы ждут. */
     saving,
     /** Проверки идут по окнам планировщика, а не приблизительно. */

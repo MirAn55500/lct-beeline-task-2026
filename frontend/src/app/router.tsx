@@ -515,8 +515,9 @@ function PlanGanttPage() {
     readOnly: isFrozenPlan(context),
   })
 
-  // Уход на другую страницу / вкладку вида — предупреждение и сброс черновика.
-  const blocker = useBlocker(board.dirty)
+  // Уход на другую страницу / вкладку вида — предупреждение и сброс правок.
+  // Функция читает dirtyRef: после «Сохранить» setPlanId меняет URL до рендера с dirty=false.
+  const blocker = useBlocker(board.shouldBlockLeave)
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
 
   useEffect(() => {
