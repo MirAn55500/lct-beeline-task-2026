@@ -11,6 +11,7 @@ from modules.planning.schemas import (
     DayOverviewResponse,
     Distribution,
     HealthResponse,
+    MoveBatchRequest,
     MoveRequest,
     MoveResponse,
     PlanExportResponse,
@@ -140,3 +141,16 @@ async def move_request(
     Недопустимый ход плана не меняет: `ok: false` и причина.
     """
     return await service.move(plan_id, body)
+
+
+@router.post("/plan/{plan_id}/moves", response_model=MoveResponse)
+async def move_batch_request(
+    service: PlanningServiceDep, plan_id: int, body: MoveBatchRequest
+) -> MoveResponse:
+    """Пакет ручных ходов: несколько постановок подряд, одна новая версия при commit.
+
+    Нужен черновику Ганта: фронт копит правки и сохраняет их разом.
+    `commit: false` — прогнать цепочку для превью и отбросить доску;
+    `commit: true` — применить все ходы и сохранить одну версию плана.
+    """
+    return await service.move_batch(plan_id, body)

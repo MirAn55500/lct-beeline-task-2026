@@ -32,6 +32,7 @@ from modules.planning.scenario_builder import (
 )
 from modules.planning.schemas import (
     CounterPair,
+    MoveBatchRequest,
     MoveLunchExport,
     MoveRequest,
     MoveResponse,
@@ -1212,6 +1213,149 @@ class PlanningService:
         if outcome.window_shift:
             # Окно заявки в БД сдвинуто, а сценарий доски помнит старое — следующая версия
             # записала бы его. Доска соберётся заново уже с новым окном.
+            boards.drop(plan_id)
+        else:
+            boards.rename(plan_id, saved.plan_id or 0)
+        response = self._move_response(outcome)
+        response.planId = saved.plan_id
+        response.version = saved.version
+        schedule_baseline(saved)
+        return response
+
+    async def move_batch(self, plan_id: int, body: MoveBatchRequest) -> MoveResponse:
+        """Несколько ручных ходов подряд: превью без сохранения или одна новая версия."""
+        frozen = await self._frozen_reason(plan_id)
+        if frozen is not None:
+            raise AppError(frozen, status_code=409)
+        entry = await self._open_board(plan_id)
+
+        def apply():
+            with entry.lock:
+                last: MoveOutcome | None = None
+                changed: set[str] = set()
+                shifts: dict[str, float] = {}
+                for item in body.moves:
+                    last = entry.board.move(
+                        item.requestId,
+                        item.engineerId,
+                        start=item.start,
+                        position=item.position,
+                        release=item.release,
+                        # Цепочка: каждый ход опирается на предыдущий; превью тоже мутирует
+                        # доску — после ответа её сбросим, если commit=false.
+                        commit=True,
+                    )
+                    if not last.ok:
+                        return last, None, None, changed, shifts
+                    changed.update(last.engineers)
+                    if last.window_shift:
+                        shifts[item.requestId] = last.window_shift
+                assert last is not None
+                if not body.commit:
+                    return last, None, None, changed, shifts
+                result = entry.board.result()
+                # Линии по улицам — только изменившимся маршрутам: на весь план это секунды,
+                # а участки остальных переносятся из исходной версии как есть.
+                partial = replace(
+                    result,
+                    routes=tuple(r for r in result.routes if r.engineer_id in changed),
+                    idle_lunches=tuple(item for item in result.idle_lunches if item[0] in changed),
+                )
+                return (
+                    last,
+                    result,
+                    finish_plan(entry.scenario, partial, entry.routing, entry.travel),
+                    changed,
+                    shifts,
+                )
+
+        try:
+            outcome, result, drawn, changed, shifts = await asyncio.to_thread(apply)
+        except Exception:
+            boards.drop(plan_id)
+            raise
+        if result is None:
+            # Превью или отказ посередине пакета — доска уже мутирована, выбрасываем.
+            boards.drop(plan_id)
+            return self._move_response(outcome)
+
+        # Доска уже сделала ходы: если сохранить не вышло, она расходится с БД — выбрасываем.
+        try:
+            reasons = await self._repo.ensure_unassigned_reasons()
+            offset = entry.scenario.settings.timezone_offset_hours
+            rows, _, _ = assignments_from_result(
+                result,
+                transport_by_engineer=entry.transport_of,
+                reason_by_code=reason_index(reasons),
+                offset_hours=offset,
+                scenario=entry.scenario,
+                window_shift=shifts or None,
+            )
+            legs = {
+                request_id: leg
+                for request_id, (engineer_id, leg) in (await self._repo.list_route_legs(plan_id)).items()
+                if engineer_id is not None and str(engineer_id) not in changed
+            }
+            legs.update(
+                route_legs(
+                    drawn,
+                    address_of=entry.address_of,
+                    office_of=entry.office_of,
+                    transport_of=entry.transport_of,
+                    offset_hours=offset,
+                    lunch_address_of=entry.lunch_address_of,
+                )
+            )
+            # Обеды изменившихся маршрутов — из хода, остальные — из исходной версии как есть
+            # (с её линией до места обеда). Если доска держит обед иначе, чем версия (обед
+            # поменяли в карточке), — по доске: строки визитов тоже с неё.
+            source = await self._repo.session.get(Plan, plan_id)
+            kept = {
+                str(item.get("engineer_id")): item
+                for item in (source.lunches if source is not None else None) or []
+            }
+            board_lunches = {str(item["engineer_id"]): item for item in lunch_rows(result, offset)}
+            lunches = lunch_rows(drawn, offset)
+            for engineer_id, item in board_lunches.items():
+                if engineer_id in changed:
+                    continue
+                old = kept.get(engineer_id)
+                same = old is not None and all(
+                    old.get(key) == item[key] for key in ("after_position", "start_at", "place")
+                )
+                lunches.append(old if same else item)
+            # Версию с прежним обедом, который в новые настройки не влез, доска держит без
+            # обеда, но с теми же визитами — обед остаётся прежним, пока план не обновят
+            lunches += [
+                item
+                for engineer_id, item in kept.items()
+                if engineer_id not in changed and engineer_id not in board_lunches
+            ]
+            for request_id, minutes in shifts.items():
+                # Клиент согласился на время вне окна: иначе пересчёт вернул бы заявку в старое.
+                await self._repo.shift_request_window(int(request_id), minutes)
+            latest = await self._repo.find_latest_plan(entry.region_id, entry.day)
+            saved = await self._repo.save_plan(
+                region_id=entry.region_id,
+                day=entry.day,
+                version=(latest.version + 1) if latest is not None else 1,
+                reference_plan_id=plan_id,
+                rows=rows,
+                legs=legs,
+                lunches=lunches,
+                distribution=(
+                    latest.distribution
+                    if latest is not None and latest.distribution
+                    else Distribution.EFFICIENT.value
+                ),
+            )
+            await self._save_snapshot(saved)
+        except Exception:
+            boards.drop(plan_id)
+            raise
+        if shifts:
+            # Окна заявок в БД сдвинуты, а сценарий доски помнит старые — следующая версия
+            # записала бы их. Доска соберётся заново уже с новыми окнами.
             boards.drop(plan_id)
         else:
             boards.rename(plan_id, saved.plan_id or 0)

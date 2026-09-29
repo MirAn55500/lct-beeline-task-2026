@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
 import { I18nProvider, ToastProvider } from '@heroui/react'
 import { Provider } from 'react-redux'
-import { BrowserRouter } from 'react-router'
 
 import { store } from '@/app/store'
 
@@ -13,7 +12,7 @@ export function AppProviders({ children }: AppProvidersProps) {
   return (
     <Provider store={store}>
       <I18nProvider locale="ru-RU">
-        <BrowserRouter>{children}</BrowserRouter>
+        {children}
         <ToastProvider placement="bottom" />
       </I18nProvider>
     </Provider>

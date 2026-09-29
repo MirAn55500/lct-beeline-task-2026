@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { toast } from '@heroui/react'
-import { Navigate, Route, Routes, useSearchParams } from 'react-router'
+import { Navigate, Route, createBrowserRouter, createRoutesFromElements, RouterProvider, useBlocker, useSearchParams } from 'react-router'
 import { getLocalTimeZone, parseDate, today } from '@internationalized/date'
+import { RiAlertFill } from '@remixicon/react'
 
 import {
   HomeAreaLayout,
@@ -45,7 +46,7 @@ import {
 } from '@/features/tickets'
 import type { PlanEventResult } from '@/features/planning'
 import { routes } from '@/shared/config/routes'
-import { AppPanel, ContextHeader, PlanViewTabs } from '@/shared/ui'
+import { AppModal, AppPanel, ContextHeader, PlanViewTabs, buttonClass } from '@/shared/ui'
 
 function OverviewContent({ context }: { context: HomeAreaContext }) {
   const { regionId, date, planId, focusDay } = context
@@ -284,33 +285,56 @@ function PersonnelPage() {
 /**
  * Шапка плана работ — одна на Гант и карту: те же регион, день, версия плана
  * и окна «Загрузить заявки» / «Обновить план», чтобы при переключении вида ничего не менялось.
+ *
+ * `draft` — черновик Ганта: кнопки сброса/сохранения и перехват смены региона/дня/версии,
+ * чтобы несохранённые правки не пропали молча.
  */
-function PlanWorkHeader({ context }: { context: PlanContext }) {
+function PlanWorkHeader({
+  context,
+  draft,
+}: {
+  context: PlanContext
+  draft?: {
+    dirty: boolean
+    saving: boolean
+    onReset: () => void
+    onSave: () => void
+    /** Спросить перед сменой контекста; если true — действие выполнится. */
+    confirmLeave: (action: () => void) => void
+  }
+}) {
   const [uploadOpen, setUploadOpen] = useState(false)
   const [rebuildOpen, setRebuildOpen] = useState(false)
   const exportTickets = useTicketsExport()
   const { regionId, regions, date, planId } = context
   const regionName = regions.find((item) => item.id === regionId)?.name ?? regionId
 
+  const guard = (action: () => void) => {
+    if (draft?.dirty) draft.confirmLeave(action)
+    else action()
+  }
+
   return (
     <>
       <ContextHeader
         regions={regions}
         regionId={regionId}
-        onRegionIdChange={context.setRegionId}
+        onRegionIdChange={(id) => guard(() => context.setRegionId(id))}
         date={date}
-        onDateChange={context.setDate}
+        onDateChange={(next) => guard(() => context.setDate(next))}
         plannedDates={context.plannedDates}
         plans={context.plans}
         planId={planId}
-        onPlanIdChange={context.setPlanId}
+        onPlanIdChange={(id) => guard(() => context.setPlanId(id))}
         isRegionsLoading={context.isRegionsLoading}
         isRegionsError={context.isRegionsError}
-        onUploadClick={() => setUploadOpen(true)}
+        onUploadClick={() => guard(() => setUploadOpen(true))}
         isRecalculating={context.isRebuilding}
         isPlanning={context.isPlanning}
         planningSeconds={context.planningSeconds}
-        onRecalculate={regionId == null ? undefined : () => setRebuildOpen(true)}
+        onRecalculate={
+          regionId == null ? undefined : () => guard(() => setRebuildOpen(true))
+        }
         onExport={
           regionId == null
             ? undefined
@@ -322,6 +346,28 @@ function PlanWorkHeader({ context }: { context: PlanContext }) {
                 )
         }
         center={<PlanViewTabs />}
+        actions={
+          draft?.dirty ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={draft.saving}
+                onClick={draft.onReset}
+                className={buttonClass.outline}
+              >
+                Сбросить
+              </button>
+              <button
+                type="button"
+                disabled={draft.saving}
+                onClick={draft.onSave}
+                className={buttonClass.primary}
+              >
+                {draft.saving ? 'Сохраняем…' : 'Сохранить'}
+              </button>
+            </div>
+          ) : null
+        }
       />
       <TicketsUploadDialog
         isOpen={uploadOpen}
@@ -338,6 +384,37 @@ function PlanWorkHeader({ context }: { context: PlanContext }) {
         onConfirm={(options) => void context.rebuild(options)}
       />
     </>
+  )
+}
+
+/** Предупреждение: уход с Ганта сбросит локальный черновик. */
+function UnsavedGanttDialog({
+  isOpen,
+  onStay,
+  onLeave,
+}: {
+  isOpen: boolean
+  onStay: () => void
+  onLeave: () => void
+}) {
+  return (
+    <AppModal
+      isOpen={isOpen}
+      onClose={onStay}
+      icon={<RiAlertFill size={20} />}
+      title="Несохранённые изменения"
+      description="Если уйти сейчас, правки на Ганте будут удалены. Исходный план останется без новой версии."
+      footer={
+        <>
+          <button type="button" className={buttonClass.outline} onClick={onStay}>
+            Остаться
+          </button>
+          <button type="button" className={buttonClass.primary} onClick={onLeave}>
+            Уйти без сохранения
+          </button>
+        </>
+      }
+    />
   )
 }
 
@@ -433,14 +510,64 @@ function isFrozenPlan(context: PlanContext) {
 function PlanGanttPage() {
   const context = usePlanContext()
   const board = usePlanGanttBoard(context.regionId, context.date.toString(), context.queryPlanId, {
-    // Ручной ход сохранён новой версией — переключаемся на неё.
+    // Пакет ходов сохранён новой версией — переключаемся на неё.
     onSaved: context.setPlanId,
     readOnly: isFrozenPlan(context),
   })
 
+  // Уход на другую страницу / вкладку вида — предупреждение и сброс черновика.
+  const blocker = useBlocker(board.dirty)
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
+
+  useEffect(() => {
+    if (!board.dirty) return
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [board.dirty])
+
+  const confirmLeave = useCallback((action: () => void) => {
+    setPendingAction(() => action)
+  }, [])
+
+  const discardAndLeave = () => {
+    board.reset()
+    const action = pendingAction
+    setPendingAction(null)
+    if (blocker.state === 'blocked') {
+      blocker.proceed()
+      return
+    }
+    action?.()
+  }
+
+  const stay = () => {
+    if (blocker.state === 'blocked') blocker.reset()
+    setPendingAction(null)
+  }
+
+  const leaveOpen = blocker.state === 'blocked' || pendingAction != null
+
   return (
-    <WorkAreaGanttLayout header={<PlanWorkHeader context={context} />}>
+    <WorkAreaGanttLayout
+      header={
+        <PlanWorkHeader
+          context={context}
+          draft={{
+            dirty: board.dirty,
+            saving: board.saving,
+            onReset: board.reset,
+            onSave: board.saveAll,
+            confirmLeave,
+          }}
+        />
+      }
+    >
       <PlanGanttBoard board={board} viewKey={`${context.regionId}:${context.date.toString()}:${context.planId}`} />
+      <UnsavedGanttDialog isOpen={leaveOpen} onStay={stay} onLeave={discardAndLeave} />
     </WorkAreaGanttLayout>
   )
 }
@@ -449,9 +576,9 @@ function PlaceholderPage() {
   return <HomeAreaLayout />
 }
 
-export function AppRouter() {
-  return (
-    <Routes>
+const appRouter = createBrowserRouter(
+  createRoutesFromElements(
+    <>
       <Route path={routes.overview} element={<OverviewPage />} />
       <Route path={routes.compare} element={<ComparePage />} />
 
@@ -467,14 +594,15 @@ export function AppRouter() {
       <Route path="/layouts/gantt" element={<Navigate to={routes.planGantt} replace />} />
       <Route path="/layouts/map" element={<Navigate to={routes.planMap} replace />} />
       <Route path="/layouts/compare" element={<Navigate to={routes.compare} replace />} />
-      <Route
-        path="/layouts/personnel"
-        element={<Navigate to={routes.personnel} replace />}
-      />
+      <Route path="/layouts/personnel" element={<Navigate to={routes.personnel} replace />} />
       <Route path="/layouts/config" element={<Navigate to={routes.config} replace />} />
       <Route path="/layouts/help" element={<Navigate to={routes.help} replace />} />
 
       <Route path="*" element={<Navigate to={routes.overview} replace />} />
-    </Routes>
-  )
+    </>,
+  ),
+)
+
+export function AppRouter() {
+  return <RouterProvider router={appRouter} />
 }

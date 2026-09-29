@@ -205,7 +205,27 @@ class MoveRequest(BaseModel):
     start: float | None = Field(default=None, description="Начало работ; без него — лучшее место в окне клиента")
     position: int | None = Field(default=None, description="Место в маршруте с 0; без него — по времени")
     release: list[str] = Field(default_factory=list, description="Снять с маршрутов, чтобы освободить место")
-    commit: bool = Field(default=False, description="false — только проверка с превью, true — новая версия плана")
+    commit: bool = Field(default=False, description="false — только проверка и новое расписание изменившихся маршрутов; true — новая версия плана")
+
+
+class MoveItem(BaseModel):
+    """Один ход в пакете: те же поля, что у MoveRequest, без commit."""
+
+    requestId: str
+    engineerId: str | None = None
+    start: float | None = None
+    position: int | None = None
+    release: list[str] = Field(default_factory=list)
+
+
+class MoveBatchRequest(BaseModel):
+    """Несколько ручных ходов подряд — одна проверка или одна новая версия плана."""
+
+    moves: list[MoveItem] = Field(min_length=1)
+    commit: bool = Field(
+        default=False,
+        description="false — прогнать ходы без сохранения (доска сбрасывается); true — одна новая версия",
+    )
 
 
 class MoveVisitExport(BaseModel):

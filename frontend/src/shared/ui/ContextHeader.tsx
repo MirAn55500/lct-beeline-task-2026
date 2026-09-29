@@ -100,6 +100,8 @@ type ContextHeaderProps = {
   planningSeconds?: number | null
   /** Блок по центру шапки, например переключатель вида плана. */
   center?: ReactNode
+  /** Кнопки слева от «Заявки» — черновик Ганта: «Сбросить» / «Сохранить». */
+  actions?: ReactNode
   /** Показывать ли день недели рядом с датой; в макетах его нет. */
   showWeekday?: boolean
   /** Экспорт заявок дня; без него пункты экспорта неактивны. */
@@ -126,6 +128,7 @@ export function ContextHeader({
   isPlanning = false,
   planningSeconds = null,
   center,
+  actions,
   showWeekday = false,
   onExport,
 }: ContextHeaderProps) {
@@ -408,6 +411,8 @@ export function ContextHeader({
             ) : null}
           </div>
         ) : null}
+
+        {actions}
 
         <div className="relative">
           <div

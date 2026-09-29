@@ -36,6 +36,22 @@ export type PlanMoveArgs = {
   commit?: boolean
 }
 
+/** Один ход в пакете — те же поля, что у PlanMoveArgs, без commit. */
+export type PlanMoveItem = {
+  requestId: string
+  engineerId: string | null
+  start?: number
+  position?: number
+  release?: string[]
+}
+
+export type PlanMoveBatchArgs = {
+  planId: number
+  moves: PlanMoveItem[]
+  /** false — прогнать цепочку без сохранения; true — одна новая версия. */
+  commit?: boolean
+}
+
 export type PlanMoveVisit = {
   requestId: string
   engineerId: string
@@ -105,7 +121,17 @@ export const planExportApi = baseApi.injectEndpoints({
       invalidatesTags: (result, _error, args) =>
         args.commit && result?.ok ? ['Plan', 'PlanExport'] : [],
     }),
+    movePlanBatch: build.mutation<PlanMoveResponse, PlanMoveBatchArgs>({
+      query: ({ planId, ...body }) => ({ url: `/api/planning/plan/${planId}/moves`, method: 'POST', body }),
+      invalidatesTags: (result, _error, args) =>
+        args.commit && result?.ok ? ['Plan', 'PlanExport'] : [],
+    }),
   }),
 })
 
-export const { useGetPlanExportQuery, useGetPlanSlotsQuery, useMovePlanRequestMutation } = planExportApi
+export const {
+  useGetPlanExportQuery,
+  useGetPlanSlotsQuery,
+  useMovePlanRequestMutation,
+  useMovePlanBatchMutation,
+} = planExportApi
