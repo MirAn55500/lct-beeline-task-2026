@@ -321,7 +321,7 @@ export function ContextHeader({
       {center}
 
       <div className="flex items-center justify-end gap-2">
-        {isPlanning ? (
+        {isPlanning || isRecalculating ? (
           // Рядом с версией плана места мало — там только время, остальное в подсказке
           <Tooltip delay={200}>
             <Tooltip.Trigger
@@ -335,7 +335,7 @@ export function ContextHeader({
               ) : null}
             </Tooltip.Trigger>
             <AppTooltipContent className="max-w-[280px] text-left break-normal">
-              Заявки загружены, считаем новый план
+              {isPlanning ? 'Заявки загружены, считаем новый план' : 'Считаем новый план'}
               {planningSeconds != null ? ` — осталось ${formatWait(planningSeconds)}` : ''}. Он откроется сам
             </AppTooltipContent>
           </Tooltip>
@@ -453,30 +453,23 @@ export function ContextHeader({
               style={{ borderRadius: 16 }}
             >
               {[
-                { label: 'Импорт csv', icon: RiFileDownloadLine, disabled: isUploadDisabled || !onUploadClick, run: onUploadClick },
-                { label: 'Импорт json', icon: RiDownloadFill, disabled: isUploadDisabled || !onUploadClick, run: onUploadClick },
-                null,
                 { label: 'Экспорт csv', icon: RiFileDownloadLine, disabled: !onExport, run: () => onExport?.('csv') },
                 { label: 'Экспорт json', icon: RiDownloadFill, disabled: !onExport, run: () => onExport?.('json') },
-              ].map((item, index) =>
-                item == null ? (
-                  <div key={index} className="mx-2 my-1 h-px bg-separator" />
-                ) : (
-                  <button
-                    key={item.label}
-                    type="button"
-                    disabled={item.disabled}
-                    onClick={() => {
-                      setTicketsOpen(false)
-                      item.run?.()
-                    }}
-                    className="flex h-9 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-left text-sm font-medium text-foreground transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-                  >
-                    <item.icon size={16} className="shrink-0 text-muted" />
-                    {item.label}
-                  </button>
-                ),
-              )}
+              ].map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  disabled={item.disabled}
+                  onClick={() => {
+                    setTicketsOpen(false)
+                    item.run()
+                  }}
+                  className="flex h-9 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-left text-sm font-medium text-foreground transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                >
+                  <item.icon size={16} className="shrink-0 text-muted" />
+                  {item.label}
+                </button>
+              ))}
             </div>
           ) : null}
         </div>

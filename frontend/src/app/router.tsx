@@ -24,9 +24,8 @@ import {
 } from '@/features/personnel'
 import {
   DayOverviewWorkspace,
-  PlanComparisonWorkspace,
   EngineersSidebar,
-  PlanCompareDialog,
+  PlanCompareWorkspace,
   PlanEventReport,
   UnavailableDialog,
   PlanGanttBoard,
@@ -44,7 +43,7 @@ import {
   useTicketsExport,
   useTicketsUpload,
 } from '@/features/tickets'
-import type { PlanComparison, PlanEventResult } from '@/features/planning'
+import type { PlanEventResult } from '@/features/planning'
 import { routes } from '@/shared/config/routes'
 import { AppPanel, ContextHeader, PlanViewTabs } from '@/shared/ui'
 
@@ -81,11 +80,11 @@ function OverviewPage() {
   )
 }
 
-function PlanComparisonPage() {
+function ComparePage() {
   return (
     <HomeAreaLayout>
       {(context) => (
-        <PlanComparisonWorkspace regionId={context.regionId} date={context.date} />
+        <PlanCompareWorkspace regionId={context.regionId} date={context.date} />
       )}
     </HomeAreaLayout>
   )
@@ -97,6 +96,7 @@ const HIGHLIGHT_MS = 4000
 function PersonnelPage() {
   const [params, setParams] = useSearchParams()
   const [isAddOpen, setAddOpen] = useState(false)
+  const [addSingle, setAddSingle] = useState(false)
   const [activeEngineerId, setActiveEngineerId] = useState<number | null>(null)
   // Открытая карточка — в форме редактирования
   const [isEditing, setEditing] = useState(false)
@@ -197,8 +197,15 @@ function PersonnelPage() {
           onAddEngineer={() => {
             setActiveEngineerId(null)
             setEditing(false)
+            setAddSingle(false)
             setAddOpen(true)
-            // Добавленные инженеры подсвечиваются в таблице
+            update({ tab: 'engineers' })
+          }}
+          onAddSingleEngineer={() => {
+            setActiveEngineerId(null)
+            setEditing(false)
+            setAddSingle(true)
+            setAddOpen(true)
             update({ tab: 'engineers' })
           }}
           onExport={(format) =>
@@ -242,8 +249,10 @@ function PersonnelPage() {
 
         {isAddOpen ? (
           <EngineerFormPanel
+            key={addSingle ? 'single' : 'file'}
             brigades={brigades}
             defaultBrigadeId={brigadeId}
+            startInSingle={addSingle}
             onAdd={handleAdded}
             onClose={() => setAddOpen(false)}
           />
@@ -279,7 +288,6 @@ function PersonnelPage() {
 function PlanWorkHeader({ context }: { context: PlanContext }) {
   const [uploadOpen, setUploadOpen] = useState(false)
   const [rebuildOpen, setRebuildOpen] = useState(false)
-  const [comparison, setComparison] = useState<PlanComparison | null>(null)
   const exportTickets = useTicketsExport()
   const { regionId, regions, date, planId } = context
   const regionName = regions.find((item) => item.id === regionId)?.name ?? regionId
@@ -327,12 +335,8 @@ function PlanWorkHeader({ context }: { context: PlanContext }) {
       <PlanRebuildDialog
         isOpen={rebuildOpen}
         onClose={() => setRebuildOpen(false)}
-        onConfirm={async (options) => {
-          const result = await context.rebuild(options)
-          if (result?.comparison) setComparison(result.comparison)
-        }}
+        onConfirm={(options) => void context.rebuild(options)}
       />
-      <PlanCompareDialog comparison={comparison} onClose={() => setComparison(null)} />
     </>
   )
 }
@@ -449,11 +453,11 @@ export function AppRouter() {
   return (
     <Routes>
       <Route path={routes.overview} element={<OverviewPage />} />
+      <Route path={routes.compare} element={<ComparePage />} />
 
       <Route path={routes.plan} element={<Navigate to={routes.planGantt} replace />} />
       <Route path={routes.planGantt} element={<PlanGanttPage />} />
       <Route path={routes.planMap} element={<PlanMapPage />} />
-      <Route path={routes.planComparison} element={<PlanComparisonPage />} />
 
       <Route path={routes.personnel} element={<PersonnelPage />} />
       <Route path={routes.config} element={<PlaceholderPage />} />
@@ -462,6 +466,7 @@ export function AppRouter() {
       <Route path="/layouts/home" element={<Navigate to={routes.overview} replace />} />
       <Route path="/layouts/gantt" element={<Navigate to={routes.planGantt} replace />} />
       <Route path="/layouts/map" element={<Navigate to={routes.planMap} replace />} />
+      <Route path="/layouts/compare" element={<Navigate to={routes.compare} replace />} />
       <Route
         path="/layouts/personnel"
         element={<Navigate to={routes.personnel} replace />}

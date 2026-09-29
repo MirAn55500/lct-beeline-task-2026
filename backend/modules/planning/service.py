@@ -1,10 +1,14 @@
 import asyncio
+import logging
+import math
 from collections.abc import Iterable
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
+from typing import Literal
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from core.database import async_session_factory
 from core.exceptions import AppError
 from modules.algorithm.service import AlgorithmService
 from modules.planning import background
@@ -18,6 +22,8 @@ from modules.planning.scenario_builder import (
     assignments_from_result,
     build_travel,
     finish_plan,
+    lunch_address_ids,
+    lunch_rows,
     route_legs,
     build_scenario,
     reason_index,
@@ -26,6 +32,7 @@ from modules.planning.scenario_builder import (
 )
 from modules.planning.schemas import (
     CounterPair,
+    MoveLunchExport,
     MoveRequest,
     MoveResponse,
     MoveVisitExport,
@@ -33,6 +40,7 @@ from modules.planning.schemas import (
     RequestSlotsExport,
     PlanEngineerExport,
     PlanExportResponse,
+    PlanLunchExport,
     PlanRequestExport,
     PlanRouteExport,
     PlanUnassignedExport,
@@ -49,12 +57,37 @@ from modules.planning.schemas import (
     RemakeLevel,
 )
 from planner import Algorithm
-from planner.dispatch import Board, MoveOutcome, StoredVisit
+from planner.dispatch import Board, MoveOutcome, StoredLunch, StoredVisit
 from planner.enums import EventType, ReasonCode, ReplanScope
 from planner.metrics import compare as compare_plans
 from planner.models import ReplanEvent, Scenario
 from planner.replan import rebuild_unstarted, replan
 from planner.result import PlanResult
+
+logger = logging.getLogger(__name__)
+
+# Базовые планы, которые считаются в фоне: plan_id версии → задача. Сравнение, открытое
+# сразу после «Обновить план», дожидается задачи, а не считает второй раз.
+_baseline_jobs: dict[int, asyncio.Task] = {}
+
+
+def schedule_baseline(plan: Plan) -> None:
+    """Базовый план при версии — в фоне: версия сохранена, ответ не ждёт линий по улицам."""
+    if plan.plan_id is None or plan.distribution == Distribution.EVEN.value:
+        return
+    plan_id = plan.plan_id
+
+    async def job() -> None:
+        try:
+            async with async_session_factory() as session:
+                service = PlanningService(session)
+                source = await session.get(Plan, plan_id)
+                if source is not None:
+                    await service._save_baseline(source)
+        finally:
+            _baseline_jobs.pop(plan_id, None)
+
+    _baseline_jobs[plan_id] = asyncio.create_task(job())
 
 _REMAKE_TO_SCOPE = {
     RemakeLevel.FIX: ReplanScope.LOW,
@@ -76,6 +109,16 @@ def reason_code(label: str) -> str:
 
 def _minutes(value: float) -> float:
     return round(value, 2)
+
+
+def _not_before(value: float) -> float:
+    """Ранний край окна постановки — с округлением вверх: 562,066 → 562,07, а не раньше."""
+    return math.ceil(value * 100 - 1e-6) / 100
+
+
+def _not_after(value: float) -> float:
+    """Поздний край — вниз: 567,998 не должен стать 568,00, в которое заявка уже не встанет."""
+    return math.floor(value * 100 + 1e-6) / 100
 
 
 class PlanningService:
@@ -100,6 +143,7 @@ class PlanningService:
                 plan_id=item.plan_id,
                 version=item.version,
                 created_at=item.created_at,
+                distribution=_plan_distribution(item.distribution),
             )
             for item in plans
             if item.plan_id is not None
@@ -123,6 +167,7 @@ class PlanningService:
                 planning=planning,
                 planning_error=planning_error,
                 planning_eta_seconds=planning_eta,
+                rebuild_eta_seconds=background.rebuild_estimate(),
             )
 
         # Сводка считается из того же вида версии, что показывают карта и Гант: старая —
@@ -147,6 +192,7 @@ class PlanningService:
             planning=planning,
             planning_error=planning_error,
             planning_eta_seconds=planning_eta,
+            rebuild_eta_seconds=background.rebuild_estimate(),
             travel_minutes=round(travel_minutes, 1),
             distance_km=round(distance_km, 1),
         )
@@ -196,7 +242,7 @@ class PlanningService:
 
         «Свободный» пересобирает весь день, но сегодня не трогает начатое: визиты, к которым
         инженер уже выехал, остаются как есть (`_rebuild_unstarted`). Первый план дня,
-        прошедший или будущий день и «Равномерное» — расчёт с нуля. «Фикс» и «Инженерный» берут
+        прошедший или будущий день и «Базовое» — расчёт с нуля. «Фикс» и «Инженерный» берут
         последнюю версию и только ставят в неё заявки, которых там нет: в свободные окна
         или (Инженерный) с вытеснением внутри маршрута одного инженера, см. `Board.place_new`.
         `fresh` — id добавленных и изменённых загрузкой заявок: их прежние визиты
@@ -220,17 +266,33 @@ class PlanningService:
             baseline = await asyncio.to_thread(run_plan, scenario, Algorithm.BASELINE, profiles)
             comparison = _comparison(compare_plans(baseline, result))
         plan, assigned, unassigned = await self._persist(
-            region_id, day, scenario, result, transport_by_engineer
+            region_id,
+            day,
+            scenario,
+            result,
+            transport_by_engineer,
+            distribution=distribution.value,
         )
-        return RecalculateResponse(
+        response = RecalculateResponse(
             plan_id=plan.plan_id or 0,
             version=plan.version,
             assigned=assigned,
             unassigned=unassigned,
             comparison=comparison,
         )
+        schedule_baseline(plan)
+        return response
 
-    async def _persist(self, region_id: int, day: date, scenario, result, transport_by_engineer):
+    async def _persist(
+        self,
+        region_id: int,
+        day: date,
+        scenario,
+        result,
+        transport_by_engineer,
+        *,
+        distribution: str | None = None,
+    ):
         reasons = await self._repo.ensure_unassigned_reasons()
         rows, assigned, unassigned = assignments_from_result(
             result,
@@ -242,28 +304,82 @@ class PlanningService:
         previous = await self._repo.find_latest_plan(region_id, day)
         version = (previous.version + 1) if previous is not None else 1
         requests, engineers = self._rows
+        offset = scenario.settings.timezone_offset_hours
+        # События и ручные правки без явного режима наследуют прошлую версию.
+        saved_distribution = distribution or (
+            previous.distribution if previous is not None else Distribution.EFFICIENT.value
+        )
         plan = await self._repo.save_plan(
             region_id=region_id,
             day=day,
             version=version,
             reference_plan_id=previous.plan_id if previous is not None else None,
             rows=rows,
-            legs=route_legs(
-                result,
-                address_of={r.request_id: r.address_id for r in requests if r.request_id is not None},
-                office_of={
-                    e.engineer_id: e.brigade.office_address_id
-                    for e in engineers
-                    if e.engineer_id is not None and e.brigade is not None
-                },
-                transport_of=transport_by_engineer,
-                offset_hours=scenario.settings.timezone_offset_hours,
-            ),
+            lunches=lunch_rows(result, offset),
+            distribution=saved_distribution,
+            legs=self._legs(result, transport_by_engineer, offset),
         )
         await self._save_snapshot(plan)
         if previous is not None and previous.plan_id is not None:
             boards.drop(previous.plan_id)
         return plan, assigned, unassigned
+
+    def _legs(self, result, transport_by_engineer, offset: float) -> dict[int, dict]:
+        """Участки маршрутов для таблицы `routes` — по заявкам и инженерам последнего сценария."""
+        requests, engineers = self._rows
+        return route_legs(
+            result,
+            address_of={r.request_id: r.address_id for r in requests if r.request_id is not None},
+            office_of={
+                e.engineer_id: e.brigade.office_address_id
+                for e in engineers
+                if e.engineer_id is not None and e.brigade is not None
+            },
+            transport_of=transport_by_engineer,
+            offset_hours=offset,
+            lunch_address_of=lunch_address_ids(engineers),
+        )
+
+    async def _save_baseline(self, plan: Plan) -> Plan | None:
+        """Базовый план при версии: алгоритм ТЗ (п. 2.3) по тем же заявкам и инженерам.
+
+        Для сравнения планов — что дал бы наивный алгоритм на том же дне. Считается с нуля
+        по данным на момент версии (начатые визиты не держит). У «Базовой» версии базовый план —
+        она сама. Сбой не мешает версии: сравнение останется без базового.
+        """
+        if plan.plan_id is None or plan.distribution == Distribution.EVEN.value:
+            return None
+        plan_id, version, region_id, day = plan.plan_id, plan.version, plan.region_id, plan.date
+        try:
+            scenario, transport_by_engineer = await self._scenario(region_id, day)
+            profiles = await transit.load_profiles(self._repo.session, scenario)
+            result = await asyncio.to_thread(run_plan, scenario, Algorithm.BASELINE, profiles)
+            reasons = await self._repo.ensure_unassigned_reasons()
+            offset = scenario.settings.timezone_offset_hours
+            rows, _, _ = assignments_from_result(
+                result,
+                transport_by_engineer=transport_by_engineer,
+                reason_by_code=reason_index(reasons),
+                offset_hours=offset,
+                scenario=scenario,
+            )
+            baseline = await self._repo.save_plan(
+                region_id=region_id,
+                day=day,
+                version=version,
+                reference_plan_id=None,
+                rows=rows,
+                lunches=lunch_rows(result, offset),
+                distribution=Distribution.EVEN.value,
+                baseline_of_id=plan_id,
+                legs=self._legs(result, transport_by_engineer, offset),
+            )
+            await self._save_snapshot(baseline)
+            return baseline
+        except Exception:
+            logger.exception("Базовый план при версии %d не посчитан", plan_id)
+            await self._repo.session.rollback()
+            return None
 
     async def apply_event(
         self, region_id: int, day: date, body: PlanEventRequest
@@ -322,7 +438,7 @@ class PlanningService:
             region_id, day, entry.scenario, result, transport_by_engineer
         )
         summary = result.diff.summary if result.diff is not None else "План пересчитан"
-        return PlanEventResponse(
+        response = PlanEventResponse(
             plan_id=plan.plan_id or 0,
             version=plan.version,
             assigned=assigned,
@@ -330,6 +446,8 @@ class PlanningService:
             summary=summary,
             warnings=_dispatcher_notes(result.warnings),
         )
+        schedule_baseline(plan)
+        return response
 
     async def _extend(
         self,
@@ -350,6 +468,7 @@ class PlanningService:
         visits, unassigned = self._stored_visits(rows, scenario)
         if not visits and any(r.engineer_id is not None for r in rows):
             return None  # в версии нет расписания визитов
+        lunches = await self._stored_lunches(plan_id, scenario)
         in_plan = {v.request_id for v in visits}
         candidates = [r.id for r in scenario.planning_requests() if r.id not in in_plan]
         zone = timezone(timedelta(hours=scenario.settings.timezone_offset_hours))
@@ -361,7 +480,9 @@ class PlanningService:
 
         def compute() -> PlanResult:
             routing, travel = build_travel(scenario, profiles)
-            board = Board(scenario, visits, unassigned=unassigned, travel=travel, now=now)
+            board = Board(
+                scenario, visits, unassigned=unassigned, travel=travel, now=now, lunches=lunches
+            )
             board.place_new(candidates, scope=_REMAKE_TO_SCOPE[remake_level])
             return finish_plan(scenario, board.result(), routing, travel)
 
@@ -389,10 +510,13 @@ class PlanningService:
         visits, unassigned = self._stored_visits(rows, scenario)
         if not visits:
             return None
+        lunches = await self._stored_lunches(plan_id, scenario)
 
         def compute() -> PlanResult:
             routing, travel = build_travel(scenario, profiles)
-            board = Board(scenario, visits, unassigned=unassigned, travel=travel, now=now)
+            board = Board(
+                scenario, visits, unassigned=unassigned, travel=travel, now=now, lunches=lunches
+            )
             result = rebuild_unstarted(board.result(), scenario, now, travel=travel)
             return finish_plan(scenario, result, routing, travel)
 
@@ -435,8 +559,18 @@ class PlanningService:
         }
         return visits, unassigned
 
+    async def _stored_lunches(self, plan_id: int, scenario: Scenario) -> list[StoredLunch]:
+        """Обеды сохранённой версии — начатые доска оставит на месте."""
+        plan = await self._repo.session.get(Plan, plan_id)
+        return stored_lunches(plan.lunches if plan is not None else None, scenario)
+
     async def get_plan(
-        self, region_id: int, day: date, plan_id: int | None = None
+        self,
+        region_id: int,
+        day: date,
+        plan_id: int | None = None,
+        *,
+        baseline: bool = False,
     ) -> PlanExportResponse:
         """План дня с расписанием визитов — для карты и Ганта.
 
@@ -452,7 +586,20 @@ class PlanningService:
             plan = next((item for item in plans if item.plan_id == plan_id), None)
         if plan is None or plan.plan_id is None:
             raise AppError("План не найден", status_code=404)
-        return await self._export(plan, latest=plan is plans[0])
+        latest = plan is plans[0]
+        if baseline and plan.distribution != Distribution.EVEN.value:
+            # Версии до базовых расчётов: последней досчитываем по текущим данным — они те же,
+            # а старую честно не восстановить, заявки с тех пор менялись.
+            job = _baseline_jobs.get(plan.plan_id)
+            if job is not None:
+                await asyncio.shield(job)
+            found = await self._repo.find_baseline(plan.plan_id)
+            if found is None and latest:
+                found = await self._save_baseline(plan)
+            if found is None:
+                raise AppError("Для этой версии базовый план не сохранялся", status_code=404)
+            return await self._export(found, latest=False)
+        return await self._export(plan, latest=latest)
 
     async def _export(self, plan: Plan, *, latest: bool) -> PlanExportResponse:
         """Вид версии. Старая — история: ровно такой, какой была сохранена (снимок)."""
@@ -534,11 +681,36 @@ class PlanningService:
             e.id: sum((w.end - w.start).total_seconds() / 60 for w in e.work_intervals)
             for e in scenario.engineers
         }
+        # Смена в местном времени без пояса — как времена строк плана и обедов
+        shift_spans = {
+            e.id: [
+                (w.start.astimezone(zone).replace(tzinfo=None), w.end.astimezone(zone).replace(tzinfo=None))
+                for w in e.work_intervals
+            ]
+            for e in scenario.engineers
+        }
+
+        def on_shift(engineer_id: str, start: datetime | None, end: datetime | None) -> float:
+            """Минуты отрезка внутри текущей смены инженера.
+
+            Загрузка — доля текущей смены: работа, оставшаяся в версии за пределами смены
+            (смену поменяли после расчёта), её не занимает, и процент не уходит за 100.
+            """
+            if start is None or end is None:
+                return 0.0
+            if start.tzinfo is not None:
+                start = start.astimezone(zone).replace(tzinfo=None)
+            if end.tzinfo is not None:
+                end = end.astimezone(zone).replace(tzinfo=None)
+            return sum(
+                max(0.0, (min(end, to) - max(start, since)).total_seconds() / 60)
+                for since, to in shift_spans.get(engineer_id, [])
+            )
         points = {r.id: [r.point.lon, r.point.lat] for r in scenario.requests}
         starts = {e.id: [e.start_point.lon, e.start_point.lat] for e in scenario.engineers}
-        durations = {r.id: r.duration_minutes for r in scenario.requests}
 
         paths = await self._repo.list_route_paths(plan.plan_id)
+        lunch_of = {str(item.get("engineer_id")): item for item in plan.lunches or []}
         by_engineer: dict[str, list] = {}
         unassigned_out: list[PlanUnassignedExport] = []
         for row in rows:
@@ -556,33 +728,77 @@ class PlanningService:
         routes_out = []
         for engineer_id, rows in by_engineer.items():
             rows.sort(key=lambda r: (r.position or 0, r.planned_start_at))
-            busy = sum(
-                durations.get(str(r.request_id), 0) + (r.travel_minutes or 0) + (r.waiting_minutes or 0)
-                for r in rows
-            )
+            lunch = lunch_of.get(engineer_id)
+            # Занятость — дорога, ожидание и работа: от выезда до конца работ
+            busy = sum(on_shift(engineer_id, r.planned_departure_at, r.planned_end_at) for r in rows)
             shift = shift_minutes.get(engineer_id) or 0
-            # Линия маршрута — участки подряд; у визита — его срез (geometryRange)
+            if lunch is not None:
+                # Час обеда — не рабочее время, а дорога к месту обеда — занятость
+                busy += on_shift(engineer_id, _local(lunch.get("departure_at")), _local(lunch.get("arrival_at")))
+                shift = max(0.0, shift - on_shift(engineer_id, _local(lunch.get("start_at")), _local(lunch.get("end_at"))))
+            detour = lunch is not None and bool(lunch.get("detour")) and lunch.get("path")
+            lunch_at = int(lunch.get("after_position", 0)) if lunch is not None else -1
+            # Линия маршрута — участки подряд; у визита — его срез (geometryRange),
+            # дорога к месту обеда — свой срез между визитами
             geometry: list[list[float]] = []
             ranges: list[list[int] | None] = []
+            lunch_range: list[int] | None = None
             real = 0
-            for r in rows:
-                path = paths.get(r.assignment_id) or {}
+            legs = 0
+
+            def add(path: dict) -> list[int] | None:
+                nonlocal real, legs
+                legs += 1
                 segment = path.get("line") or []
                 if len(segment) < 2:
-                    ranges.append(None)
-                    continue
+                    return None
                 skip = 1 if geometry and geometry[-1] == segment[0] else 0
                 start = len(geometry) - 1 if skip else len(geometry)
                 geometry.extend(segment[skip:])
-                ranges.append([max(0, start), len(geometry) - 1])
                 real += 0 if path.get("straight") else 1
-            source = "ors" if real == len(rows) else ("mixed" if real else "straight")
+                return [max(0, start), len(geometry) - 1]
+
+            polyline = [starts[engineer_id]]
+            for index, r in enumerate(rows):
+                if detour and index == lunch_at:
+                    lunch_range = add(lunch["path"])
+                    polyline.append(lunch["point"])
+                ranges.append(add(paths.get(r.assignment_id) or {}))
+                polyline.append(points[str(r.request_id)])
+            if detour and lunch_at >= len(rows):
+                lunch_range = add(lunch["path"])
+                polyline.append(lunch["point"])
+            source = "ors" if real == legs else ("mixed" if real else "straight")
+            start_at, end_at = rows[0].planned_departure_at, rows[-1].planned_end_at
+            lunch_out = None
+            if lunch is not None:
+                lunch_out = PlanLunchExport(
+                    afterPosition=lunch_at,
+                    departureAt=iso(_local(lunch.get("departure_at"))),
+                    arrivalAt=iso(_local(lunch.get("arrival_at"))),
+                    startAt=iso(_local(lunch.get("start_at"))),
+                    endAt=iso(_local(lunch.get("end_at"))),
+                    travelMinutes=lunch.get("travel_minutes") or 0.0,
+                    distanceKm=lunch.get("distance_km") or 0.0,
+                    place=lunch.get("place") or "last_request",
+                    address=lunch.get("address") or "",
+                    point=lunch.get("point") or starts[engineer_id],
+                    detour=bool(lunch.get("detour")),
+                    locked=bool(lunch.get("locked")),
+                    geometryRange=lunch_range if real else None,
+                    transit=[leg.get("title", "") for leg in (lunch.get("path") or {}).get("transit", [])],
+                )
+                if lunch_at == 0 and _local(lunch.get("departure_at")) is not None:
+                    start_at = min(start_at, _local(lunch.get("departure_at")))
+                if lunch_at >= len(rows) and _local(lunch.get("end_at")) is not None:
+                    end_at = max(end_at, _local(lunch.get("end_at")))
             routes_out.append(PlanRouteExport(
                 engineerId=engineer_id,
-                startAt=iso(rows[0].planned_departure_at),
-                endAt=iso(rows[-1].planned_end_at),
+                startAt=iso(start_at),
+                endAt=iso(end_at),
                 utilization=round(busy / shift, 4) if shift else 0.0,
-                polyline=[starts[engineer_id]] + [points[str(r.request_id)] for r in rows],
+                polyline=polyline,
+                lunch=lunch_out,
                 geometrySource=source,
                 geometry=geometry if real else [],
                 visits=[
@@ -605,6 +821,40 @@ class PlanningService:
                     )
                     for i, r in enumerate(rows)
                 ],
+            ))
+        # Начатый обед инженера, у которого не осталось заявок: маршрут из одного обеда
+        for engineer_id, lunch in lunch_of.items():
+            if engineer_id in by_engineer or engineer_id not in starts or not lunch.get("locked"):
+                continue
+            departure, end = _local(lunch.get("departure_at")), _local(lunch.get("end_at"))
+            if departure is None or end is None:
+                continue
+            detour = bool(lunch.get("detour"))
+            shift = max(0.0, (shift_minutes.get(engineer_id) or 0) - on_shift(engineer_id, _local(lunch.get("start_at")), end))
+            road = on_shift(engineer_id, departure, _local(lunch.get("arrival_at")))
+            routes_out.append(PlanRouteExport(
+                engineerId=engineer_id,
+                startAt=iso(departure),
+                endAt=iso(end),
+                utilization=round(min(road, shift) / shift, 4) if shift else 0.0,
+                polyline=[starts[engineer_id]] + ([lunch["point"]] if detour and lunch.get("point") else []),
+                lunch=PlanLunchExport(
+                    afterPosition=0,
+                    departureAt=iso(departure),
+                    arrivalAt=iso(_local(lunch.get("arrival_at"))),
+                    startAt=iso(_local(lunch.get("start_at"))),
+                    endAt=iso(end),
+                    travelMinutes=lunch.get("travel_minutes") or 0.0,
+                    distanceKm=lunch.get("distance_km") or 0.0,
+                    place=lunch.get("place") or "last_request",
+                    address=lunch.get("address") or "",
+                    point=lunch.get("point") or starts[engineer_id],
+                    detour=detour,
+                    locked=bool(lunch.get("locked")),
+                ),
+                geometrySource="straight",
+                geometry=[],
+                visits=[],
             ))
         order = {e.id: i for i, e in enumerate(scenario.engineers)}
         routes_out.sort(key=lambda r: order.get(r.engineerId, 0))
@@ -652,11 +902,17 @@ class PlanningService:
                 "В этой версии плана нет расписания визитов — обновите план", status_code=409
             )
         profiles = await transit.load_profiles(self._repo.session, scenario)
+        lunches = stored_lunches(plan.lunches, scenario)
 
         def build():
             routing, travel = build_travel(scenario, profiles)
             board = Board(
-                scenario, visits, unassigned=unassigned, travel=travel, now=datetime.now(zone)
+                scenario,
+                visits,
+                unassigned=unassigned,
+                travel=travel,
+                now=datetime.now(zone),
+                lunches=lunches,
             )
             return routing, travel, board
 
@@ -675,6 +931,7 @@ class PlanningService:
                 for e in engineers
                 if e.engineer_id is not None and e.brigade is not None
             },
+            lunch_address_of=lunch_address_ids(engineers),
         )
         boards.put(plan_id, entry)
         return entry
@@ -723,8 +980,8 @@ class PlanningService:
                         engineer_id: [
                             [
                                 slot.position,
-                                _minutes(slot.earliest),
-                                _minutes(slot.latest),
+                                _not_before(slot.earliest),
+                                _not_after(slot.latest),
                                 _minutes(slot.departure),
                                 _minutes(slot.travel_minutes),
                             ]
@@ -757,7 +1014,11 @@ class PlanningService:
                 # Линии по улицам — только изменившимся маршрутам: на весь план это секунды,
                 # а участки остальных переносятся из исходной версии как есть.
                 changed = set(outcome.engineers)
-                partial = replace(result, routes=tuple(r for r in result.routes if r.engineer_id in changed))
+                partial = replace(
+                    result,
+                    routes=tuple(r for r in result.routes if r.engineer_id in changed),
+                    idle_lunches=tuple(item for item in result.idle_lunches if item[0] in changed),
+                )
                 return outcome, result, finish_plan(entry.scenario, partial, entry.routing, entry.travel)
 
         try:
@@ -795,8 +1056,34 @@ class PlanningService:
                     office_of=entry.office_of,
                     transport_of=entry.transport_of,
                     offset_hours=offset,
+                    lunch_address_of=entry.lunch_address_of,
                 )
             )
+            # Обеды изменившихся маршрутов — из хода, остальные — из исходной версии как есть
+            # (с её линией до места обеда). Если доска держит обед иначе, чем версия (обед
+            # поменяли в карточке), — по доске: строки визитов тоже с неё.
+            source = await self._repo.session.get(Plan, plan_id)
+            kept = {
+                str(item.get("engineer_id")): item
+                for item in (source.lunches if source is not None else None) or []
+            }
+            board_lunches = {str(item["engineer_id"]): item for item in lunch_rows(result, offset)}
+            lunches = lunch_rows(drawn, offset)
+            for engineer_id, item in board_lunches.items():
+                if engineer_id in changed:
+                    continue
+                old = kept.get(engineer_id)
+                same = old is not None and all(
+                    old.get(key) == item[key] for key in ("after_position", "start_at", "place")
+                )
+                lunches.append(old if same else item)
+            # Версию с прежним обедом, который в новые настройки не влез, доска держит без
+            # обеда, но с теми же визитами — обед остаётся прежним, пока план не обновят
+            lunches += [
+                item
+                for engineer_id, item in kept.items()
+                if engineer_id not in changed and engineer_id not in board_lunches
+            ]
             if outcome.window_shift:
                 # Клиент согласился на время вне окна: иначе пересчёт вернул бы заявку в старое.
                 await self._repo.shift_request_window(int(body.requestId), outcome.window_shift)
@@ -808,6 +1095,12 @@ class PlanningService:
                 reference_plan_id=plan_id,
                 rows=rows,
                 legs=legs,
+                lunches=lunches,
+                distribution=(
+                    latest.distribution
+                    if latest is not None and latest.distribution
+                    else Distribution.EFFICIENT.value
+                ),
             )
             await self._save_snapshot(saved)
         except Exception:
@@ -822,6 +1115,7 @@ class PlanningService:
         response = self._move_response(outcome)
         response.planId = saved.plan_id
         response.version = saved.version
+        schedule_baseline(saved)
         return response
 
     @staticmethod
@@ -846,6 +1140,17 @@ class PlanningService:
                 for v in outcome.visits
             ],
             released=list(outcome.released),
+            lunches=[
+                MoveLunchExport(
+                    engineerId=lunch.engineer_id,
+                    afterPosition=lunch.after_position,
+                    departure=_minutes(lunch.departure),
+                    arrival=_minutes(lunch.arrival),
+                    start=_minutes(lunch.start),
+                    end=_minutes(lunch.end),
+                )
+                for lunch in outcome.lunches
+            ],
         )
 
 
@@ -874,6 +1179,12 @@ _COMPARE_LINES = (
 )
 
 
+def _plan_distribution(raw: str | None) -> Literal["even", "efficient"] | None:
+    if raw in ("even", "efficient"):
+        return raw  # type: ignore[return-value]
+    return None
+
+
 def _comparison(raw: dict) -> PlanComparison:
     lines: list[ComparisonLine] = []
     metrics = raw["metrics"]
@@ -889,3 +1200,34 @@ def _comparison(raw: dict) -> PlanComparison:
             )
         )
     return PlanComparison(summary=raw["summary"], lines=lines)
+
+
+def _local(value: str | None) -> datetime | None:
+    """Местное время обеда из `plans.lunches` (ISO без пояса)."""
+    return datetime.fromisoformat(value) if value else None
+
+
+def stored_lunches(items: list[dict] | None, scenario: Scenario) -> list[StoredLunch]:
+    """Обеды версии плана → вход доски: начатый обед она оставит на месте."""
+    zone = timezone(timedelta(hours=scenario.settings.timezone_offset_hours))
+    out: list[StoredLunch] = []
+    for item in items or []:
+        moments = [_local(item.get(key)) for key in ("departure_at", "arrival_at", "start_at", "end_at")]
+        if any(moment is None for moment in moments):
+            continue
+        departure, arrival, start, end = (m.replace(tzinfo=zone) for m in moments)
+        out.append(
+            StoredLunch(
+                engineer_id=str(item.get("engineer_id")),
+                departure_at=departure,
+                arrival_at=arrival,
+                start_at=start,
+                end_at=end,
+                travel_minutes=float(item.get("travel_minutes") or 0.0),
+                distance_km=float(item.get("distance_km") or 0.0),
+                after_position=(
+                    int(item["after_position"]) if item.get("after_position") is not None else None
+                ),
+            )
+        )
+    return out

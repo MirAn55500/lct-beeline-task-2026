@@ -18,6 +18,7 @@ import {
   PLANS,
   buildMapDataset,
   getMapDataset,
+  lunchPlaceLabel,
   shortAddress,
   type PlanExport,
 } from './index'
@@ -87,12 +88,27 @@ export function buildGantt(
     }
   }
 
-  const engineers = plan.engineers.map((engineer, index): GanttEngineer => ({
-    ...mapEngineers[index]!,
-    skills: engineer.skills,
-    equipment: engineer.equipment,
-    shifts: engineer.workIntervals.map(([from, to]) => [minutes(from), minutes(to)]),
-  }))
+  const lunchOf = new Map(
+    plan.routes.flatMap((route) => (route.lunch ? [[route.engineerId, route.lunch] as const] : [])),
+  )
+  const engineers = plan.engineers.map((engineer, index): GanttEngineer => {
+    const lunch = lunchOf.get(engineer.id)
+    return {
+      ...mapEngineers[index]!,
+      skills: engineer.skills,
+      equipment: engineer.equipment,
+      shifts: engineer.workIntervals.map(([from, to]) => [minutes(from), minutes(to)]),
+      lunch: lunch
+        ? {
+            departure: minutes(lunch.detour ? lunch.departureAt : lunch.startAt),
+            arrival: minutes(lunch.detour ? lunch.arrivalAt : lunch.startAt),
+            start: minutes(lunch.startAt),
+            end: minutes(lunch.endAt),
+            place: lunchPlaceLabel(lunch),
+          }
+        : null,
+    }
+  })
 
   const tasks = plan.routes.flatMap((route) =>
     route.visits.map((visit): GanttTask => {

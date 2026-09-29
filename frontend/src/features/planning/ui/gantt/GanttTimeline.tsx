@@ -1,12 +1,13 @@
 import { useState, type PointerEvent, type RefObject } from 'react'
 import { Link } from 'react-router'
-import { RiArrowLeftSLine } from '@remixicon/react'
+import { RiArrowLeftSLine, RiCupLine } from '@remixicon/react'
 
 import { routes } from '@/shared/config/routes'
 import { cn } from '@/shared/lib/cn'
 import { AppPanel } from '@/shared/ui'
 
-import type { GanttEngineer, GanttTask } from '../../ganttTypes'
+import type { GanttEngineer, GanttLunch, GanttTask } from '../../ganttTypes'
+import { SNAP_MINUTES, formatClock, formatRange, type FreeCells } from '../../lib/ganttPlacement'
 import { GanttRoadPart, GanttTaskCard } from './cards'
 import { EngineerCell } from './EngineerCell'
 
@@ -17,11 +18,11 @@ export const GANTT_ROW = 60
 /** Ширина раскрытой карточки визита. */
 const FULL_CARD = 204
 
-/** Подсветка часовых ячеек под перетаскиваемой заявкой. */
+/** Подсветка под перетаскиваемой заявкой — ровно её работа, минуты дня. */
 export type GanttTarget = {
   engineerId: string
-  fromHour: number
-  toHour: number
+  from: number
+  to: number
   /** Позиция голубой линии, которая перемещается по 10-минутным шагам. */
   snapStart: number
   /** target — сюда встанет (фиолетовая), danger — замена или нельзя (красная). */
@@ -37,8 +38,8 @@ type GanttTimelineProps = {
   toHour: number
   /** Текущее время для красной линии; null — день не сегодняшний. */
   now: number | null
-  /** Свободные ячейки для выбранной заявки — зелёные; ключ `${engineerId}:${час}`. */
-  freeCells: Map<string, number> | null
+  /** Свободные 10-минутные ячейки для выбранной заявки — зелёные. */
+  freeCells: FreeCells | null
   target: GanttTarget | null
   /** Идёт перетаскивание: наведение отключено, чужие строки приглушены. */
   dragging: boolean
@@ -50,6 +51,105 @@ type GanttTimelineProps = {
   canDrag: (task: GanttTask) => boolean
   onFreeCellClick: (engineerId: string, start: number) => void
   onBackgroundClick: () => void
+}
+
+/**
+ * Зелёные ячейки по 10 минут: подряд идущие — одной полосой, под курсором — своя ячейка.
+ * Зелёная ячейка — начать работу в эти 10 минут можно.
+ */
+function FreeRuns({
+  cells,
+  name,
+  x,
+  onPick,
+}: {
+  cells: Map<number, number>
+  name: string
+  x: (minute: number) => number
+  onPick: (start: number) => void
+}) {
+  const minutes = [...cells.keys()].sort((a, b) => a - b)
+  const runs: number[][] = []
+  for (const minute of minutes) {
+    const run = runs[runs.length - 1]
+    if (run && minute - run[run.length - 1]! === SNAP_MINUTES) run.push(minute)
+    else runs.push([minute])
+  }
+  const cellWidth = x(SNAP_MINUTES) - x(0)
+  return runs.map((run) => (
+    <div
+      key={run[0]}
+      className="absolute top-0 flex h-full overflow-hidden border border-[#22c55e] bg-[#dcfce7]"
+      style={{ left: x(run[0]!), width: cellWidth * run.length }}
+    >
+      {run.map((minute) => {
+        const start = cells.get(minute)!
+        return (
+          <button
+            key={minute}
+            type="button"
+            title={formatClock(start)}
+            aria-label={`Поставить к ${name} в ${formatClock(start)}`}
+            onClick={(event) => {
+              event.stopPropagation()
+              onPick(start)
+            }}
+            className="h-full shrink-0 cursor-pointer transition-colors hover:bg-[#86efac]"
+            style={{ width: cellWidth }}
+          />
+        )
+      })}
+    </div>
+  ))
+}
+
+/** Обед на ленте: дорога к месту обеда штриховкой и сам час — между заявками, под ними. */
+function LunchBar({
+  lunch,
+  transport,
+  x,
+  dimmed,
+  passive,
+}: {
+  lunch: GanttLunch
+  transport: GanttEngineer['transport']
+  x: (minute: number) => number
+  dimmed: boolean
+  /** Идёт постановка заявки: обед не перехватывает клики по зелёным ячейкам под ним. */
+  passive: boolean
+}) {
+  const road = Math.max(0, x(lunch.arrival) - x(lunch.departure))
+  const wait = Math.max(0, x(lunch.start) - x(lunch.arrival))
+  const width = Math.max(x(lunch.end) - x(lunch.start) - 4, 12)
+  const title = `Обед ${formatRange(lunch.start, lunch.end)} · ${lunch.place}`
+  return (
+    <div
+      title={title}
+      className={cn(
+        'absolute top-1 bottom-1 z-[4] flex items-stretch transition-[left] duration-150',
+        dimmed && 'opacity-40',
+        passive && 'pointer-events-none',
+      )}
+      style={{ left: x(lunch.departure) + 2 }}
+    >
+      {road > 0 ? (
+        <GanttRoadPart
+          task={{ status: 'assigned', travel: Math.round(lunch.arrival - lunch.departure) }}
+          transport={transport}
+          width={road}
+        />
+      ) : null}
+      {/* Приехали раньше окна обеда — ждут на месте, без дороги */}
+      {wait > 0 ? <span aria-hidden className="shrink-0" style={{ width: wait }} /> : null}
+      <span
+        className="flex min-w-0 items-center gap-1 overflow-hidden border border-[#fcd34d] bg-[#fef3c7] px-1.5 text-xs leading-4 font-medium text-[#92400e]"
+        style={{ width, borderRadius: road > 0 && wait <= 0 ? '0 6px 6px 0' : 6 }}
+      >
+        <RiCupLine size={12} className="shrink-0" />
+        {width > 40 ? <span className="truncate">Обед</span> : null}
+      </span>
+    </div>
+  )
 }
 
 export function GanttTimeline({
@@ -158,25 +258,14 @@ export function GanttTimeline({
                       backgroundSize: `${GANTT_HOUR}px 100%`,
                     }}
                   >
-                    {freeCells
-                      ? hours.map((hour) => {
-                          const start = freeCells.get(`${engineer.id}:${hour}`)
-                          if (start == null) return null
-                          return (
-                            <button
-                              key={hour}
-                              type="button"
-                              aria-label={`Поставить к ${engineer.name} в ${hour}:00`}
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                onFreeCellClick(engineer.id, start)
-                              }}
-                              className="absolute top-0 h-full cursor-pointer border border-[#22c55e] bg-[#dcfce7] transition-colors hover:bg-[#bbf7d0]"
-                              style={{ left: x(hour * 60), width: GANTT_HOUR }}
-                            />
-                          )
-                        })
-                      : null}
+                    {freeCells?.get(engineer.id) ? (
+                      <FreeRuns
+                        cells={freeCells.get(engineer.id)!}
+                        name={engineer.name}
+                        x={x}
+                        onPick={(start) => onFreeCellClick(engineer.id, start)}
+                      />
+                    ) : null}
 
                     {target?.engineerId === engineer.id ? (
                       <div
@@ -188,8 +277,8 @@ export function GanttTimeline({
                             : 'border-2 border-danger bg-danger-soft',
                         )}
                         style={{
-                          left: x(target.fromHour * 60),
-                          width: (target.toHour - target.fromHour) * GANTT_HOUR,
+                          left: x(target.from),
+                          width: x(target.to) - x(target.from),
                         }}
                       />
                     ) : null}
@@ -203,6 +292,16 @@ export function GanttTimeline({
                         <span className="absolute top-0 left-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--beeline-accent-03-blue-primary)]" />
                         <span className="absolute bottom-0 left-1/2 size-2.5 -translate-x-1/2 translate-y-1/2 rounded-full bg-[var(--beeline-accent-03-blue-primary)]" />
                       </div>
+                    ) : null}
+
+                    {engineer.lunch ? (
+                      <LunchBar
+                        lunch={engineer.lunch}
+                        transport={engineer.transport}
+                        x={x}
+                        dimmed={dimmed}
+                        passive={dragging || freeCells != null}
+                      />
                     ) : null}
 
                     {row.map((task) => {

@@ -167,6 +167,21 @@ def _learn(key: Key, elapsed: float) -> None:
         _rate["base"] = (1 - _LEARN) * _rate["base"] + _LEARN * min(max(elapsed, 2.0), 120.0)
 
 
+_rebuild_seconds: float | None = None
+"""Сколько шёл последний пересчёт по «Обновить план» — для индикатора в шапке."""
+
+
+def rebuild_estimate() -> int:
+    """Примерно секунд на «Обновить план»: адреса дня уже в кэше, поэтому без новых точек."""
+    return round(_rebuild_seconds if _rebuild_seconds is not None else _rate["base"])
+
+
+def learn_rebuild(elapsed: float) -> None:
+    global _rebuild_seconds
+    last = _rebuild_seconds if _rebuild_seconds is not None else _rate["base"]
+    _rebuild_seconds = (1 - _LEARN) * last + _LEARN * min(max(elapsed, 1.0), 120.0)
+
+
 async def _run(key: Key, remake_level: RemakeLevel, fresh: frozenset[int]) -> None:
     from modules.planning.service import PlanningService
 

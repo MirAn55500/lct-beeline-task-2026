@@ -1528,7 +1528,10 @@ def attach_route_geometry(
             routes.append(route)
             continue
 
+        # Участки по порядку: к каждому визиту и, если обедать едут в другое место, к обеду
+        route_legs = route.legs()
         waypoints = route.polyline
+        keys = [key for _a, _b, _when, key in route_legs]
         profile = (client.profiles if client else DEFAULT_PROFILES).get(route.transport_mode)
         transit_mode = route.transport_mode is TransportMode.PUBLIC_TRANSPORT
         if profile is None:
@@ -1536,14 +1539,14 @@ def attach_route_geometry(
             transit: list[list[dict]] = [[] for _ in legs]
         else:
             answers = []
-            for (a, b), visit in zip(zip(waypoints, waypoints[1:]), route.visits):
+            for a, b, departure, _key in route_legs:
                 own = (
-                    transit_legs(a, b, visit.departure_at)
+                    transit_legs(a, b, departure)
                     if transit_mode and transit_legs is not None else None
                 )
                 answers.append(own if own is not None else leg_geometry(
                     profile, a, b,
-                    transit_moment(visit.departure_at) if transit_mode else None,
+                    transit_moment(departure) if transit_mode else None,
                 ))
             legs = [coordinates for coordinates, _ in answers]
             transit = [steps for _, steps in answers]
@@ -1556,7 +1559,7 @@ def attach_route_geometry(
             continue
         if built < len(legs):
             partial.append(route.engineer_id)
-        routes.append(_apply_transit(_apply_geometry(route, waypoints, legs), transit))
+        routes.append(_apply_transit(_apply_geometry(route, waypoints, legs, keys), transit, keys))
 
     if empty:
         # Офлайн-режим и отказ сервиса — разные вещи, и путать их в отчёте нельзя:
@@ -2067,8 +2070,34 @@ def _parse_moment(value: Any, zone: Any = None) -> datetime | None:
     return moment.astimezone(zone) if zone is not None and moment.tzinfo else moment
 
 
-def _apply_transit(route: RouteResult, steps: Sequence[Sequence[Mapping[str, Any]]]) -> RouteResult:
-    """Разложить состав поездок по визитам маршрута.
+def _parsed_transit(legs: Sequence[Mapping[str, Any]], zone: Any) -> tuple[TransitLeg, ...]:
+    return tuple(
+        TransitLeg(
+            kind=str(leg.get("kind") or "walk"),
+            route=str(leg.get("route") or ""),
+            line=str(leg.get("line") or ""),
+            headsign=str(leg.get("headsign") or ""),
+            from_stop=str(leg.get("from") or ""),
+            to_stop=str(leg.get("to") or ""),
+            departure_at=_parse_moment(leg.get("departure"), zone),
+            arrival_at=_parse_moment(leg.get("arrival"), zone),
+            minutes=float(leg.get("minutes") or 0.0),
+            distance_km=float(leg.get("km") or 0.0),
+            stops=int(leg.get("stops") or 0),
+        )
+        for leg in legs
+    )
+
+
+def _apply_transit(
+    route: RouteResult,
+    steps: Sequence[Sequence[Mapping[str, Any]]],
+    keys: Sequence[int | None] | None = None,
+) -> RouteResult:
+    """Разложить состав поездок по визитам маршрута (и по дороге к обеду).
+
+    `keys` — чей это участок: номер визита или `None` для дороги к обеду
+    (`RouteResult.legs`); без них участки идут по визитам подряд.
 
     Пешие участки по краям поездки не выбрасываются намеренно: «идти 12 минут до
     остановки» — половина ответа на вопрос, почему дорога заняла сорок минут, и без
@@ -2076,34 +2105,26 @@ def _apply_transit(route: RouteResult, steps: Sequence[Sequence[Mapping[str, Any
     """
     if not any(steps):
         return route
-    visits = []
-    for visit, legs in zip(route.visits, steps):
-        zone = visit.departure_at.tzinfo
-        visits.append(dc_replace(visit, transit=tuple(
-            TransitLeg(
-                kind=str(leg.get("kind") or "walk"),
-                route=str(leg.get("route") or ""),
-                line=str(leg.get("line") or ""),
-                headsign=str(leg.get("headsign") or ""),
-                from_stop=str(leg.get("from") or ""),
-                to_stop=str(leg.get("to") or ""),
-                departure_at=_parse_moment(leg.get("departure"), zone),
-                arrival_at=_parse_moment(leg.get("arrival"), zone),
-                minutes=float(leg.get("minutes") or 0.0),
-                distance_km=float(leg.get("km") or 0.0),
-                stops=int(leg.get("stops") or 0),
-            )
-            for leg in legs
-        )))
-    return dc_replace(route, visits=tuple(visits))
+    keys = list(keys) if keys is not None else list(range(len(route.visits)))
+    visits = list(route.visits)
+    lunch = route.lunch
+    for key, legs in zip(keys, steps):
+        if key is None:
+            if lunch is not None:
+                lunch = dc_replace(lunch, transit=_parsed_transit(legs, lunch.departure_at.tzinfo))
+            continue
+        visit = visits[key]
+        visits[key] = dc_replace(visit, transit=_parsed_transit(legs, visit.departure_at.tzinfo))
+    return dc_replace(route, visits=tuple(visits), lunch=lunch)
 
 
 def _apply_geometry(
     route: RouteResult,
     waypoints: Sequence[GeoPoint],
     legs: Sequence[Sequence[Sequence[float]] | None],
+    keys: Sequence[int | None] | None = None,
 ) -> RouteResult:
-    """Сшить участки в одну ломаную и разметить по ней визиты."""
+    """Сшить участки в одну ломаную и разметить по ней визиты (и дорогу к обеду)."""
     coordinates: list[Sequence[float]] = []
     bounds: list[int] = [0]
     for index, leg in enumerate(legs):
@@ -2119,13 +2140,20 @@ def _apply_geometry(
         bounds.append(len(coordinates) - 1)
 
     geometry = tuple(GeoPoint(lat=float(c[1]), lon=float(c[0])) for c in coordinates)
-    visits = [
-        dc_replace(visit, geometry_range=(bounds[index], bounds[index + 1]))
-        for index, visit in enumerate(route.visits)
-    ]
+    keys = list(keys) if keys is not None else list(range(len(route.visits)))
+    visits = list(route.visits)
+    lunch = route.lunch
+    for index, key in enumerate(keys):
+        span = (bounds[index], bounds[index + 1])
+        if key is None:
+            if lunch is not None:
+                lunch = dc_replace(lunch, geometry_range=span)
+        else:
+            visits[key] = dc_replace(visits[key], geometry_range=span)
     return dc_replace(
         route,
         visits=tuple(visits),
+        lunch=lunch,
         geometry=geometry,
         geometry_source="ors" if all(leg is not None for leg in legs) else "mixed",
     )

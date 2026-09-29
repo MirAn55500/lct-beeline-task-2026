@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import time
+
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from core.config import get_settings
@@ -23,19 +25,24 @@ from modules.personnel.qualification import (
     qualification_label,
 )
 from modules.personnel.repository import PersonnelRepository
+from modules.personnel.importer import parse_engineers_upload
 from modules.personnel.schemas import (
     AddressSuggestionResponse,
     AreaResponse,
     BrigadeResponse,
+    CreateBrigadeRequest,
     CreateEngineerRequest,
     EngineerFields,
     EngineerResponse,
     EngineersQuery,
+    LunchPlace,
     PersonnelFilterOptions,
+    QualificationFilter,
     ReverseGeocodeResponse,
     UpdateBrigadeRequest,
     UpdateBrigadeResponse,
     UpdateEngineerRequest,
+    UploadEngineersResult,
 )
 from modules.personnel.skills import SKILL_LABELS, map_skill, skill_code
 from modules.personnel.transport import map_transport
@@ -68,6 +75,32 @@ _TRANSPORT_UI_LABEL: dict[str, str] = {
 }
 
 
+LUNCH_MINUTES = 60
+"""Сколько длится обед — окно обеда не может быть короче."""
+
+
+def _minutes(clock: time) -> int:
+    return clock.hour * 60 + clock.minute
+
+
+def check_lunch_window(start: time, end: time, work_start: time, work_end: time) -> None:
+    """Окно обеда — не короче часа и так, чтобы час обеда помещался в рабочий день."""
+    if _minutes(end) - _minutes(start) < LUNCH_MINUTES:
+        raise AppError("Окно обеда должно быть не меньше часа")
+    inside = min(_minutes(end), _minutes(work_end)) - max(_minutes(start), _minutes(work_start))
+    if inside < LUNCH_MINUTES:
+        raise AppError("Час обеда должен помещаться в рабочий день")
+
+
+def _same_point(address: Address | None, text: str, lat: float, lon: float) -> bool:
+    return (
+        address is not None
+        and " ".join(address.address.split()) == text
+        and abs(address.latitude - lat) <= 1e-6
+        and abs(address.longitude - lon) <= 1e-6
+    )
+
+
 OFFICE_FALLBACK_KM = 120.0
 """Без DaData: офис не дальше этого от центра Москвы. Область тянется примерно на
 120–150 км, Тверь, Рязань и Калуга — дальше 150."""
@@ -96,6 +129,66 @@ class PersonnelService:
         areas = await self._repo.list_areas(region_id)
         return [AreaResponse(id=area.id or 0, name=area.area) for area in areas]
 
+    async def create_brigade(self, body: CreateBrigadeRequest) -> BrigadeResponse:
+        """Новая бригада в регионе: офис, смена, рабочие дни. Обед — 13–14 у последней заявки."""
+        region = await self._repo.get_region(body.region_id)
+        if region is None:
+            raise NotFoundError("Регион не найден")
+
+        name = " ".join(body.name.split())
+        if not name:
+            raise AppError("Укажите название бригады")
+        if body.end_work <= body.start_work:
+            raise AppError("Конец рабочего дня должен быть позже начала")
+        days = sorted(set(body.work_days))
+        if not days or any(day < 1 or day > 7 for day in days):
+            raise AppError("Выберите хотя бы один рабочий день")
+
+        address = " ".join(body.office_address.split())
+        if not has_house(address):
+            raise AppError("Укажите адрес офиса с номером дома")
+        point = (body.office_lat, body.office_lon)
+        try:
+            await self._check_office_region(*point)
+        except address_suggest.DadataUnavailable:
+            pass
+
+        office_area = await self._repo.get_or_create_office_area(body.region_id)
+        assert office_area.id is not None
+        office = await self._repo.find_address(office_area.id, address, *point)
+        if office is None:
+            office = await self._repo.add_address(
+                Address(
+                    area_id=office_area.id,
+                    address=address,
+                    latitude=point[0],
+                    longitude=point[1],
+                    geo_precision=HOUSE,
+                    geo_source="map",
+                )
+            )
+        assert office.address_id is not None
+
+        number = await self._repo.next_brigade_number(body.region_id)
+        brigade = Brigade(
+            region_id=body.region_id,
+            name=name,
+            number=number,
+            start_work=body.start_work,
+            end_work=body.end_work,
+            office_address_id=office.address_id,
+            work_days="".join(str(day) for day in days),
+            lunch_start=time(13, 0),
+            lunch_end=time(14, 0),
+            lunch_place=LunchPlace.LAST_REQUEST.value,
+        )
+        brigade = await self._repo.add_brigade(brigade)
+        await self._repo.commit()
+
+        saved = await self._repo.get_brigade_full(brigade.brigade_id or 0)
+        assert saved is not None
+        return self._brigade_response(saved)
+
     async def update_brigade(
         self, brigade_id: int, body: UpdateBrigadeRequest
     ) -> UpdateBrigadeResponse:
@@ -111,6 +204,7 @@ class PersonnelService:
 
         if body.end_work <= body.start_work:
             raise AppError("Конец рабочего дня должен быть позже начала")
+        check_lunch_window(body.lunch_start, body.lunch_end, body.start_work, body.end_work)
         days = sorted(set(body.work_days))
         if not days or any(day < 1 or day > 7 for day in days):
             raise AppError("Выберите хотя бы один рабочий день")
@@ -154,6 +248,20 @@ class PersonnelService:
             ):
                 await self._repo.delete_address(previous)
 
+        previous_lunch = brigade.lunch_address
+        lunch_address = await self._lunch_address(
+            brigade,
+            body.lunch_place,
+            body.lunch_address,
+            body.lunch_lat,
+            body.lunch_lon,
+            current=previous_lunch,
+        )
+        brigade.lunch_start = body.lunch_start
+        brigade.lunch_end = body.lunch_end
+        brigade.lunch_place = body.lunch_place.value
+        brigade.lunch_address_id = lunch_address.address_id if lunch_address is not None else None
+
         rescheduled = 0
         for engineer in brigade.engineers or []:
             if engineer.own_schedule:
@@ -169,6 +277,8 @@ class PersonnelService:
         brigade.work_days = "".join(str(day) for day in days)
         brigade.areas = [areas[area_id] for area_id in dict.fromkeys(body.area_ids)]
         self._session.add(brigade)
+        await self._session.flush()
+        await self._drop_unused_point(previous_lunch, keep=lunch_address)
         await self._repo.commit()
 
         saved = await self._repo.get_brigade_full(brigade_id)
@@ -203,7 +313,7 @@ class PersonnelService:
         return ReverseGeocodeResponse(address=near.address, has_house=near.house)
 
     async def _check_office_region(
-        self, lat: float, lon: float
+        self, lat: float, lon: float, what: str = "Офис должен"
     ) -> address_suggest.PointAddress | None:
         """Офис — только в Москве и области. Прямоугольник вокруг них захватывает Тверь,
         Рязань и Калугу, поэтому регион уточняем у DaData.
@@ -213,27 +323,33 @@ class PersonnelService:
         """
         async with AddressGeocoder(get_settings()) as geocoder:
             if not geocoder.in_region(lat, lon):
-                raise AppError("Офис должен быть в Москве или Московской области")
+                raise AppError(f"{what} быть в Москве или Московской области")
         try:
             near = await address_suggest.locate_point(lat, lon)
             region = near if near is not None else await address_suggest.locate_point(lat, lon, 1000)
         except address_suggest.DadataUnavailable:
             # Без DaData регион не узнать — хотя бы не дальше, чем тянется область
             if distance_km((lat, lon), MOSCOW_CENTRE) > OFFICE_FALLBACK_KM:
-                raise AppError("Офис должен быть в Москве или Московской области") from None
+                raise AppError(f"{what} быть в Москве или Московской области") from None
             raise
         if region is not None and region.region not in address_suggest.MOSCOW_REGIONS:
-            raise AppError("Офис должен быть в Москве или Московской области")
+            raise AppError(f"{what} быть в Москве или Московской области")
         return near
 
     async def _place_office(
         self, brigade: Brigade, address: str, point: tuple[float, float]
     ) -> Address:
         """Офис в выбранной точке (подсказка или карта); адрес — подпись к ней."""
+        return await self._place_address(brigade, address, point, "Офис должен")
+
+    async def _place_address(
+        self, brigade: Brigade, address: str, point: tuple[float, float], what: str
+    ) -> Address:
+        """Адрес в выбранной точке, в служебном районе офиса бригады; адрес — подпись к ней."""
         if brigade.office_address is None:
             raise AppError("У бригады нет офиса, к району которого привязать новый адрес")
         try:
-            await self._check_office_region(*point)
+            await self._check_office_region(*point, what=what)
         except address_suggest.DadataUnavailable:
             pass  # регион не уточнить — прямоугольник Москвы и области уже проверен
         area_id = brigade.office_address.area_id
@@ -250,6 +366,40 @@ class PersonnelService:
                 geo_source="map",
             )
         )
+
+    async def _lunch_address(
+        self,
+        brigade: Brigade,
+        place: LunchPlace | None,
+        address: str | None,
+        lat: float | None,
+        lon: float | None,
+        *,
+        current: Address | None,
+    ) -> Address | None:
+        """Адрес места обеда «в своей точке» — строка `addresses` рядом с офисом бригады.
+
+        Для остальных мест — None: у последней заявки обедают там, где закончили, в офисе —
+        в офисе бригады. Адрес годится любой, лишь бы с точкой: из подсказок или с карты.
+        """
+        if place is not LunchPlace.POINT:
+            return None
+        text = " ".join((address or "").split())
+        if lat is None or lon is None or not text:
+            raise AppError("Выберите место обеда из подсказок или укажите его на карте")
+        if _same_point(current, text, lat, lon):
+            return current
+        return await self._place_address(brigade, text, (lat, lon), "Место обеда должно")
+
+    async def _drop_unused_point(self, address: Address | None, *, keep: Address | None) -> None:
+        """Точка, поставленная здесь же с карты, которая больше никому не нужна, — удаляется."""
+        if address is None or address.address_id is None:
+            return
+        if keep is not None and keep.address_id == address.address_id:
+            return
+        if address.geo_source != "map" or await self._repo.address_in_use(address.address_id):
+            return
+        await self._repo.delete_address(address)
 
     def _brigade_response(self, brigade: Brigade) -> BrigadeResponse:
         assert brigade.brigade_id is not None
@@ -274,6 +424,10 @@ class PersonnelService:
             end_work=brigade.end_work,
             work_days=brigade.weekdays,
             area_ids=sorted(area.id for area in brigade.areas or [] if area.id is not None),
+            lunch_start=brigade.lunch_start,
+            lunch_end=brigade.lunch_end,
+            lunch_place=LunchPlace(brigade.lunch_place),
+            **_point_fields(brigade.lunch_place, brigade.lunch_address),
         )
 
     async def list_engineers(self, query: EngineersQuery) -> list[EngineerResponse]:
@@ -306,6 +460,68 @@ class PersonnelService:
             raise AppError("Не удалось сохранить инженера", status_code=500)
         return self._to_response(refreshed)
 
+    async def upload_engineers(
+        self, *, brigade_id: int, filename: str, raw: bytes
+    ) -> UploadEngineersResult:
+        """Массовая загрузка профилей CSV/JSON в выбранную бригаду."""
+        brigade = await self._repo.get_brigade(brigade_id)
+        if brigade is None:
+            raise NotFoundError("Бригада не найдена")
+
+        try:
+            parsed, skipped = parse_engineers_upload(raw, filename)
+        except ValueError as exc:
+            raise AppError(str(exc)) from exc
+
+        if not parsed and skipped == 0:
+            raise AppError("В файле нет инженеров")
+
+        created_ids: list[int] = []
+        for row in parsed:
+            qualification: QualificationFilter | None = None
+            if row.qualification:
+                code = normalize_qualification(row.qualification)
+                if code is None:
+                    skipped += 1
+                    continue
+                qualification = QualificationFilter(code)
+
+            try:
+                body = CreateEngineerRequest(
+                    name=row.name,
+                    brigade_id=brigade_id,
+                    transport=row.transport,
+                    skills=list(row.skills),
+                    qualification=qualification,
+                    home_address=row.home_address,
+                    start_work=row.start_work,
+                    end_work=row.end_work,
+                    work_days=None,
+                    is_lead=False,
+                )
+                fields, skill_codes = await self._engineer_fields(body, brigade)
+            except AppError:
+                skipped += 1
+                continue
+
+            engineer = Engineer(**fields, is_lead=False)
+            engineer = await self._repo.add_engineer(engineer)
+            assert engineer.engineer_id is not None
+            for code in skill_codes:
+                skill_id = await self._repo.ensure_dict(DictGroup.SKILL, code)
+                await self._repo.add_skill(engineer.engineer_id, skill_id)
+            created_ids.append(engineer.engineer_id)
+
+        await self._repo.commit()
+        engineers = [
+            self._to_response(item)
+            for engineer_id in created_ids
+            if (item := await self._repo.get_engineer(engineer_id)) is not None
+        ]
+        return UploadEngineersResult(
+            created=len(engineers), skipped=skipped, engineers=engineers
+        )
+
     async def update_engineer(
         self, engineer_id: int, body: UpdateEngineerRequest
     ) -> EngineerResponse:
@@ -316,10 +532,16 @@ class PersonnelService:
         brigade = await self._repo.get_brigade(body.brigade_id)
         if brigade is None:
             raise NotFoundError("Бригада не найдена")
-        fields, skill_codes = await self._engineer_fields(body, brigade)
+        previous_lunch = engineer.lunch_address
+        fields, skill_codes = await self._engineer_fields(body, brigade, current_lunch=previous_lunch)
         for key, value in fields.items():
             setattr(engineer, key, value)
         self._session.add(engineer)
+        await self._session.flush()
+        same_spot = previous_lunch if previous_lunch is not None and (
+            previous_lunch.address_id == fields["lunch_address_id"]
+        ) else None
+        await self._drop_unused_point(previous_lunch, keep=same_spot)
 
         wanted = set(skill_codes)
         kept: set[str] = set()
@@ -340,7 +562,7 @@ class PersonnelService:
         return self._to_response(refreshed)
 
     async def _engineer_fields(
-        self, body: EngineerFields, brigade: Brigade
+        self, body: EngineerFields, brigade: Brigade, *, current_lunch: Address | None = None
     ) -> tuple[dict[str, object], list[str]]:
         """Проверенные поля инженера и коды навыков — общие для добавления и правки."""
         name = " ".join(body.name.split())
@@ -391,6 +613,33 @@ class PersonnelService:
 
         home_address = " ".join((body.home_address or "").split()) or None
 
+        # Свой обед — как и смена: только если он задан и отличается от бригадного
+        if (body.lunch_start is None) != (body.lunch_end is None):
+            raise AppError("Укажите и начало, и конец обеда")
+        lunch_start, lunch_end = body.lunch_start, body.lunch_end
+        if lunch_start is not None and lunch_end is not None:
+            if (lunch_start, lunch_end) == (brigade.lunch_start, brigade.lunch_end):
+                lunch_start = lunch_end = None
+            else:
+                check_lunch_window(lunch_start, lunch_end, start_work, end_work)
+        lunch_place = body.lunch_place
+        lunch_address: Address | None = None
+        if lunch_place is not None:
+            lunch_address = await self._lunch_address(
+                brigade,
+                lunch_place,
+                body.lunch_address,
+                body.lunch_lat,
+                body.lunch_lon,
+                current=current_lunch if current_lunch is not None else brigade.lunch_address,
+            )
+            same_as_brigade = lunch_place.value == brigade.lunch_place and (
+                lunch_place is not LunchPlace.POINT
+                or (lunch_address is not None and lunch_address.address_id == brigade.lunch_address_id)
+            )
+            if same_as_brigade:
+                lunch_place, lunch_address = None, None
+
         return (
             {
                 "name": name,
@@ -402,6 +651,10 @@ class PersonnelService:
                 "own_schedule": own_schedule,
                 "work_days": work_days,
                 "home_address": home_address,
+                "lunch_start": lunch_start,
+                "lunch_end": lunch_end,
+                "lunch_place": lunch_place.value if lunch_place is not None else None,
+                "lunch_address_id": lunch_address.address_id if lunch_address is not None else None,
             },
             skill_codes,
         )
@@ -434,6 +687,8 @@ class PersonnelService:
         qualification = normalize_qualification(engineer.qualification)
         position = qualification_label(qualification)
         brigade_name = engineer.brigade.name if engineer.brigade is not None else None
+        lunch_window = engineer.lunch_window()
+        lunch_place, lunch_spot = engineer.lunch_spot()
 
         return EngineerResponse(
             id=engineer.engineer_id or 0,
@@ -453,6 +708,12 @@ class PersonnelService:
             own_schedule=bool(engineer.own_schedule),
             work_days=engineer.weekdays,
             own_work_days=engineer.work_days is not None,
+            lunch_start=lunch_window[0] if lunch_window else None,
+            lunch_end=lunch_window[1] if lunch_window else None,
+            own_lunch_time=engineer.own_lunch_time,
+            lunch_place=LunchPlace(lunch_place),
+            own_lunch_place=engineer.own_lunch_place,
+            **_point_fields(lunch_place, lunch_spot),
             home_address=engineer.home_address,
             brigade_name=brigade_name,
         )
@@ -510,3 +771,14 @@ class PersonnelService:
                 return False
 
         return True
+
+
+def _point_fields(place: str, address: Address | None) -> dict[str, object]:
+    """Адрес и точка места обеда — только для «в своей точке»."""
+    if place != LunchPlace.POINT.value or address is None:
+        return {}
+    return {
+        "lunch_address": address.address,
+        "lunch_lat": address.latitude,
+        "lunch_lon": address.longitude,
+    }

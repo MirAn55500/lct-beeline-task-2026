@@ -47,6 +47,16 @@ export type PlanMoveVisit = {
   travelMinutes: number
 }
 
+/** Обед после хода: заявку поставили на его время — обед уехал сам. */
+export type PlanMoveLunch = {
+  engineerId: string
+  afterPosition: number
+  departure: number
+  arrival: number
+  start: number
+  end: number
+}
+
 export type PlanMoveResponse = {
   ok: boolean
   reason: string
@@ -57,6 +67,8 @@ export type PlanMoveResponse = {
   engineers: string[]
   visits: PlanMoveVisit[]
   released: string[]
+  /** Обеды изменившихся маршрутов; инженер из `engineers` без обеда здесь — обеда нет. */
+  lunches?: PlanMoveLunch[]
   /** Сохранённая версия плана — только при commit. */
   planId: number | null
   version: number | null
@@ -64,10 +76,19 @@ export type PlanMoveResponse = {
 
 export const planExportApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
-    getPlanExport: build.query<PlanExportResponse, { regionId: number; date: string; planId?: number | null }>({
-      query: ({ regionId, date, planId }) => ({
+    getPlanExport: build.query<
+      PlanExportResponse,
+      /** `baseline` — базовый план при версии (алгоритм ТЗ по тем же данным), для сравнения. */
+      { regionId: number; date: string; planId?: number | null; baseline?: boolean }
+    >({
+      query: ({ regionId, date, planId, baseline }) => ({
         url: '/api/planning/plan',
-        params: { region_id: regionId, date, ...(planId != null ? { plan_id: planId } : {}) },
+        params: {
+          region_id: regionId,
+          date,
+          ...(planId != null ? { plan_id: planId } : {}),
+          ...(baseline ? { baseline: true } : {}),
+        },
       }),
       providesTags: ['Plan'],
     }),

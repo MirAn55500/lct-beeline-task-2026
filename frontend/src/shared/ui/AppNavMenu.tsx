@@ -2,6 +2,7 @@ import { NavLink, useLocation, useSearchParams } from 'react-router'
 
 import { isNavItemActive, navMenuGroups, type NavItem } from '@/shared/config/nav'
 import { cn } from '@/shared/lib/cn'
+import { preservedContextSearch } from '@/shared/lib/sessionContext'
 
 function MenuItem({
   item,
@@ -40,10 +41,7 @@ type AppNavMenuProps = {
 export function AppNavMenu({ onNavigate, className }: AppNavMenuProps) {
   const { pathname } = useLocation()
   const [params] = useSearchParams()
-  const preserved = new URLSearchParams()
-  const date = params.get('date')
-  if (date) preserved.set('date', date)
-  const search = preserved.toString() ? `?${preserved.toString()}` : ''
+  const search = preservedContextSearch(params)
 
   return (
     <div

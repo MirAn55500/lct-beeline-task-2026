@@ -48,6 +48,7 @@ from .models import (
     MSK,
     Engineer,
     GeoPoint,
+    Lunch,
     ReplanEvent,
     Request,
     Scenario,
@@ -78,6 +79,7 @@ __all__ = [
     "Settings",
     "GeoPoint",
     "WorkInterval",
+    "Lunch",
     "ReplanEvent",
     "MSK",
     # перечисления

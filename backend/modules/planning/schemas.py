@@ -29,7 +29,7 @@ class RemakeLevel(StrEnum):
 
 
 class Distribution(StrEnum):
-    """Распределение заявок (Figma: Равномерное / Эффективное)."""
+    """Распределение заявок (Figma: Базовое / Эффективное)."""
 
     EVEN = "even"
     EFFICIENT = "efficient"
@@ -61,6 +61,8 @@ class PlanVersionResponse(BaseModel):
     plan_id: int
     version: int
     created_at: datetime
+    """even — базовый, efficient — эффективный; null у старых версий."""
+    distribution: Literal["even", "efficient"] | None = None
 
 
 class DayOverviewResponse(BaseModel):
@@ -77,6 +79,8 @@ class DayOverviewResponse(BaseModel):
     planning_eta_seconds: int | None = None
     """Примерно через сколько секунд фоновый расчёт закончится (с очередью других дней)."""
     """Почему последний фоновый расчёт не удался."""
+    rebuild_eta_seconds: int | None = None
+    """Примерно сколько секунд займёт «Обновить план» — для индикатора, пока он идёт."""
     travel_minutes: float | None = None
     distance_km: float | None = None
 
@@ -124,6 +128,27 @@ class PlanVisitExport(BaseModel):
     explanation: str = ""
 
 
+class PlanLunchExport(BaseModel):
+    """Обед в маршруте: после скольких визитов, когда и где."""
+
+    afterPosition: int
+    departureAt: str
+    arrivalAt: str
+    startAt: str
+    endAt: str
+    travelMinutes: float = 0.0
+    distanceKm: float = 0.0
+    place: str = "last_request"
+    """last_request — у последней заявки, office — в офисе, point — в своей точке."""
+    address: str = ""
+    point: list[float]
+    detour: bool = False
+    """К месту обеда своя дорога (офис, своя точка) — у неё свой срез линии маршрута."""
+    locked: bool = False
+    geometryRange: list[int] | None = None
+    transit: list[str] = Field(default_factory=list)
+
+
 class PlanRouteExport(BaseModel):
     engineerId: str
     startAt: str | None
@@ -133,6 +158,7 @@ class PlanRouteExport(BaseModel):
     polyline: list[list[float]]
     geometry: list[list[float]] = Field(default_factory=list)
     visits: list[PlanVisitExport]
+    lunch: PlanLunchExport | None = None
 
 
 class PlanUnassignedExport(BaseModel):
@@ -193,6 +219,17 @@ class MoveVisitExport(BaseModel):
     travelMinutes: float
 
 
+class MoveLunchExport(BaseModel):
+    """Обед после хода: обед сам уезжает, если заявку поставили на его время."""
+
+    engineerId: str
+    afterPosition: int
+    departure: float
+    arrival: float
+    start: float
+    end: float
+
+
 class MoveResponse(BaseModel):
     ok: bool
     reason: str = ""
@@ -204,6 +241,10 @@ class MoveResponse(BaseModel):
     engineers: list[str] = Field(default_factory=list)
     visits: list[MoveVisitExport] = Field(default_factory=list)
     released: list[str] = Field(default_factory=list)
+    lunches: list[MoveLunchExport] = Field(
+        default_factory=list,
+        description="Обеды изменившихся маршрутов; у кого из engineers обеда здесь нет — обеда нет",
+    )
     planId: int | None = None
     version: int | None = None
 

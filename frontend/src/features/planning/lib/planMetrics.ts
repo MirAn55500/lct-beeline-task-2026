@@ -1,63 +1,37 @@
-import type { PlanExport } from '../mocks'
+import type { PlanExportResponse } from '../planApi'
 
-export type PlanMetrics = {
-  assigned: number
-  unassigned: number
-  engaged: number
-  engineers: number
-  averageLoad: number
-  averageTravelMinutes: number
+/** Средняя загрузка задействованных инженеров, %; без маршрутов — null. */
+export function avgLoad(plan: PlanExportResponse | undefined): number | null {
+  if (!plan?.routes.length) return null
+  const active = plan.routes.filter((route) => route.visits.length > 0)
+  const sample = active.length > 0 ? active : plan.routes
+  if (sample.length === 0) return null
+  const sum = sample.reduce((acc, route) => acc + route.utilization, 0)
+  return Math.round((sum / sample.length) * 100)
 }
 
-export function getPlanMetrics(plan: PlanExport | null | undefined): PlanMetrics | null {
-  if (!plan) return null
-
-  const activeRoutes = plan.routes.filter((route) => route.visits.length > 0)
-  const visits = activeRoutes.flatMap((route) => route.visits)
-  const travelMinutes = visits.reduce((sum, visit) => sum + (visit.travelMinutes ?? 0), 0)
-  const utilization = activeRoutes.reduce((sum, route) => sum + route.utilization, 0)
-
-  return {
-    assigned: visits.length,
-    unassigned: plan.unassigned.length,
-    engaged: activeRoutes.length,
-    engineers: plan.engineers.length,
-    averageLoad: activeRoutes.length > 0 ? Math.round((utilization / activeRoutes.length) * 100) : 0,
-    averageTravelMinutes: visits.length > 0 ? Math.round(travelMinutes / visits.length) : 0,
-  }
+/** Среднее время в пути до заявки, минуты; без визитов — null. */
+export function avgTravel(plan: PlanExportResponse | undefined): number | null {
+  const visits = plan?.routes.flatMap((route) => route.visits) ?? []
+  if (visits.length === 0) return null
+  return Math.round(visits.reduce((acc, visit) => acc + (visit.travelMinutes ?? 0), 0) / visits.length)
 }
 
-function hour(iso: string) {
-  const match = /T(\d{2}):(\d{2})/.exec(iso)
-  return match ? Number(match[1]) + Number(match[2]) / 60 : null
+/** Пробег плана до заявок, км — сумма участков визитов. */
+export function totalDistance(plan: PlanExportResponse | undefined): number | null {
+  const visits = plan?.routes.flatMap((route) => route.visits) ?? []
+  if (visits.length === 0) return null
+  return visits.reduce((acc, visit) => acc + (visit.distanceKm ?? 0), 0)
 }
 
-export type OverviewPlanRow = {
-  id: string
-  name: string
-  blocks: { from: number; to: number; tone: 'soft' | 'strong' }[]
+/** Средний пробег на назначенную заявку, км. */
+export function avgDistance(plan: PlanExportResponse | undefined): number | null {
+  const total = totalDistance(plan)
+  const visits = plan?.routes.reduce((acc, route) => acc + route.visits.length, 0) ?? 0
+  return total != null && visits > 0 ? total / visits : null
 }
 
-export function getOverviewPlanRows(plan: PlanExport | null | undefined): OverviewPlanRow[] {
-  if (!plan) return []
-  const engineerById = new Map(plan.engineers.map((engineer) => [engineer.id, engineer.name]))
-  const requestById = new Map(plan.requests.map((request) => [request.id, request]))
-
-  return plan.routes
-    .filter((route) => route.visits.length > 0)
-    .map((route) => ({
-      id: route.engineerId,
-      name: engineerById.get(route.engineerId) ?? route.engineerId,
-      blocks: route.visits.flatMap((visit) => {
-        const from = hour(visit.serviceStartAt)
-        const to = hour(visit.serviceEndAt)
-        if (from == null || to == null || to <= from) return []
-        const request = requestById.get(visit.requestId)
-        return [{
-          from,
-          to,
-          tone: request?.type.toLowerCase().includes('авар') ? 'strong' as const : 'soft' as const,
-        }]
-      }),
-    }))
+/** «12,3» — километры с одним знаком, как в остальном интерфейсе. */
+export function formatKm(value: number): string {
+  return value.toFixed(1).replace('.', ',')
 }

@@ -25,10 +25,17 @@ class Plan(BaseTable, table=True):
     region_id: int = Field(foreign_key="regions.region_id", index=True)
     created_at: datetime
     reference_plan_id: Optional[int] = Field(default=None, foreign_key="plans.plan_id")
+    # even = равномерное (базовый), efficient = эффективное; пусто у старых версий.
+    distribution: Optional[str] = Field(default=None, max_length=20)
+    # Базовый расчёт (алгоритм ТЗ) при версии `baseline_of_id` — для сравнения планов.
+    # Сам версией не считается: списки версий, последняя версия и даты с планом его не видят.
+    baseline_of_id: Optional[int] = Field(default=None, foreign_key="plans.plan_id", index=True)
     # Версия так, как её показывали при сохранении (`PlanExportResponse`). Заявки и инженеры
     # потом меняются — переносятся на другой день, отменяются, правятся, — а старая версия
     # плана остаётся историей. Пусто у планов до миграции 0016: их собирают по текущим данным.
     snapshot: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSONB, nullable=True))
+    # Обеды версии: по инженеру — когда, где и дорога к месту обеда (`service._lunch_rows`)
+    lunches: Optional[list[dict[str, Any]]] = Field(default=None, sa_column=Column(JSONB, nullable=True))
 
     region: Optional["Region"] = Relationship(back_populates="plans")
 

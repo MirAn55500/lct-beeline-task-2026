@@ -20,6 +20,7 @@ from planner import (  # noqa: E402
 from planner import (  # noqa: E402
     Algorithm,
     GeoPoint,
+    Lunch,
     OrsTravelModel,
     Priority,
     Request as PlannerRequest,
@@ -122,6 +123,51 @@ def _at(day: date, clock: time) -> datetime:
     return datetime.combine(day, clock, tzinfo=_MSK)
 
 
+LUNCH_MINUTES = 60
+
+
+def _lunch(day: date, engineer: Engineer, office) -> Lunch | None:
+    """Обед инженера на день: окно и место — свои или бригады (`Engineer.lunch_window`)."""
+    window = engineer.lunch_window()
+    if window is None or window[1] <= window[0]:
+        return None
+    start, end = _at(day, window[0]), _at(day, window[1])
+    if (end - start).total_seconds() / 60 < LUNCH_MINUTES:
+        return None
+    place, spot = engineer.lunch_spot()
+    if place == "office" and office is not None:
+        point, address = GeoPoint(lat=office.latitude, lon=office.longitude), office.address
+    elif place == "point" and spot is not None:
+        point, address = GeoPoint(lat=spot.latitude, lon=spot.longitude), spot.address
+    else:
+        place, point, address = "last_request", None, ""
+    return Lunch(
+        window_start=start,
+        window_end=end,
+        minutes=LUNCH_MINUTES,
+        point=point,
+        place=place,
+        address=address,
+    )
+
+
+def lunch_address_ids(engineers: list[Engineer]) -> dict[int, int]:
+    """Адрес места обеда по инженеру — откуда начинается дорога после обеда (`routes`).
+
+    Только для обеда в офисе или в своей точке: у последней заявки дорога идёт с её адреса.
+    """
+    out: dict[int, int] = {}
+    for engineer in engineers:
+        if engineer.engineer_id is None or engineer.brigade is None:
+            continue
+        place, spot = engineer.lunch_spot()
+        if place == "office":
+            out[engineer.engineer_id] = engineer.brigade.office_address_id
+        elif place == "point" and spot is not None and spot.address_id is not None:
+            out[engineer.engineer_id] = spot.address_id
+    return out
+
+
 def _is_closed(request: Request) -> bool:
     status = request.status.value.strip().lower() if request.status else ""
     return status in _CLOSED_STATUS
@@ -218,6 +264,7 @@ def build_scenario(
                 region_key=region_key,
                 equipment=equipment,
                 input_order=index,
+                lunch=_lunch(day, engineer, office),
             )
         )
         transport_by_engineer[engineer.engineer_id] = engineer.transport_id
@@ -326,18 +373,25 @@ def route_legs(
     office_of: dict[int, int],
     transport_of: dict[int, int],
     offset_hours: float = 3.0,
+    lunch_address_of: dict[int, int] | None = None,
 ) -> dict[int, dict]:
     """Участок до каждого визита — для таблицы `routes`: откуда, когда, линия, состав поездки.
 
     Ключ — request_id. `path` — линия участка [[lon, lat], …] из общей геометрии маршрута
     (`Visit.geometry_range`) и состав поездки на общественном транспорте (`Visit.transit`).
+    После обеда в офисе или своей точке визит едет от места обеда (`lunch_address_of`);
+    дорога к самому обеду хранится в обедах плана (`lunch_rows`).
     """
     legs: dict[int, dict] = {}
+    lunch_address_of = lunch_address_of or {}
     for route in result.routes:
         engineer_id = int(route.engineer_id)
         previous = office_of.get(engineer_id)
         line = [[p.lon, p.lat] for p in route.geometry]
-        for visit in route.visits:
+        lunch = route.lunch
+        for index, visit in enumerate(route.visits):
+            if lunch is not None and lunch.is_detour and lunch.after_position == index:
+                previous = lunch_address_of.get(engineer_id, previous)
             request_id = int(visit.request_id)
             here = address_of.get(request_id)
             if visit.geometry_range is not None and line:
@@ -360,6 +414,72 @@ def route_legs(
                 }
             previous = here
     return legs
+
+
+def lunch_rows(result: PlanResult, offset_hours: float = 3.0) -> list[dict]:
+    """Обеды плана для `plans.lunches`: когда, где и дорога к месту обеда. Времена — местные."""
+
+    def clock(moment: datetime | None) -> str | None:
+        value = local_time(moment, offset_hours)
+        return value.isoformat(timespec="seconds") if value is not None else None
+
+    rows: list[dict] = []
+    # Начатый обед инженера без заявок — без маршрута, дорога к обеду по прямой
+    for engineer_id, lunch in result.idle_lunches:
+        rows.append({
+            "engineer_id": int(engineer_id),
+            "after_position": 0,
+            "departure_at": clock(lunch.departure_at),
+            "arrival_at": clock(lunch.arrival_at),
+            "start_at": clock(lunch.start_at),
+            "end_at": clock(lunch.end_at),
+            "travel_minutes": round(lunch.travel_minutes, 2),
+            "distance_km": round(lunch.distance_km, 3),
+            "place": lunch.place,
+            "address": lunch.address,
+            "point": [lunch.point.lon, lunch.point.lat],
+            "detour": lunch.is_detour,
+            "locked": True,
+            "path": {
+                "line": [[lunch.from_point.lon, lunch.from_point.lat], [lunch.point.lon, lunch.point.lat]],
+                "straight": True,
+                "transit": [],
+            } if lunch.is_detour else None,
+        })
+    for route in result.routes:
+        lunch = route.lunch
+        if lunch is None:
+            continue
+        line = [[p.lon, p.lat] for p in route.geometry]
+        path = None
+        if lunch.is_detour:
+            if lunch.geometry_range is not None and line:
+                lo, hi = lunch.geometry_range
+                segment = line[lo : hi + 1]
+            else:
+                segment = [[lunch.from_point.lon, lunch.from_point.lat], [lunch.point.lon, lunch.point.lat]]
+            path = {
+                "line": segment,
+                "straight": lunch.geometry_range is None or route.geometry_source == "straight",
+                "transit": [leg.to_dict() for leg in lunch.transit],
+            }
+        rows.append({
+            "engineer_id": int(route.engineer_id),
+            "after_position": lunch.after_position,
+            "departure_at": clock(lunch.departure_at),
+            "arrival_at": clock(lunch.arrival_at),
+            "start_at": clock(lunch.start_at),
+            "end_at": clock(lunch.end_at),
+            "travel_minutes": round(lunch.travel_minutes, 2),
+            "distance_km": round(lunch.distance_km, 3),
+            "place": lunch.place,
+            "address": lunch.address,
+            "point": [lunch.point.lon, lunch.point.lat],
+            "detour": lunch.is_detour,
+            "locked": lunch.locked,
+            "path": path,
+        })
+    return rows
 
 
 def reason_index(dicts: list) -> dict[str, int]:

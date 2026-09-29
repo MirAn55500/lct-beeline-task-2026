@@ -111,20 +111,21 @@ function addLayers(map: MapLibreMap) {
   })
 }
 
-/** Участки маршрутов фичами: сплошные по улицам отдельно от прямых. */
+/** Участки маршрутов фичами: сплошные по улицам отдельно от прямых. Дорога к обеду — тоже. */
 function legFeatures(route: EngineerRoute, properties: Record<string, unknown>): LineFeature[] {
+  const legs = [...route.stops.map((stop) => stop.leg), ...(route.lunch?.leg ? [route.lunch.leg] : [])]
   const byKind = (straight: boolean) =>
-    route.stops.filter((stop) => stop.leg.straight === straight && stop.leg.line.length > 1)
+    legs.filter((leg) => leg.straight === straight && leg.line.length > 1)
   return [false, true].flatMap((straight) => {
-    const stops = byKind(straight)
-    if (stops.length === 0) return []
+    const lines = byKind(straight)
+    if (lines.length === 0) return []
     return [
       {
         type: 'Feature' as const,
         properties: { ...properties, straight },
         geometry: {
           type: 'MultiLineString' as const,
-          coordinates: stops.map((stop) => stop.leg.line),
+          coordinates: lines.map((leg) => leg.line),
         },
       },
     ]
@@ -164,6 +165,20 @@ function pointElement(options: {
       options.onClick?.()
     })
   }
+  return root
+}
+
+/** Место обеда: чашка в кружке цвета маршрута. */
+function lunchElement(color: string, title: string, dim = false) {
+  const root = document.createElement('div')
+  root.title = title
+  root.style.cssText = `width:20px;height:20px;border-radius:9999px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center`
+  if (dim) root.style.filter = `opacity(${DIM_OPACITY})`
+  const inner = document.createElement('span')
+  inner.style.cssText = `width:14px;height:14px;border-radius:9999px;background:${color};display:flex;align-items:center;justify-content:center`
+  inner.innerHTML =
+    '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="#FFFFFF" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9h12v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M16 11h1.5a2.5 2.5 0 0 1 0 5H16"/></svg>'
+  root.append(inner)
   return root
 }
 
@@ -338,6 +353,13 @@ export function PlanMap({
             stop.coord,
           ),
         )
+        // Место обеда — там, куда на обед едут; у последней заявки оно совпадает с ней
+        if (route.lunch?.leg) {
+          add(
+            lunchElement(engineer.color, `${engineer.name} · обед ${route.lunch.from}–${route.lunch.to}`, dim),
+            route.lunch.coord,
+          )
+        }
       }
       // Старт у бригад общий — одна точка «A» поверх остальных.
       const starts = new Map(engineers.map((engineer) => [engineer.start.coord.join(','), engineer]))
@@ -372,6 +394,12 @@ export function PlanMap({
             stop.coord,
           )
         })
+        if (route.lunch?.leg) {
+          add(
+            lunchElement(engineer.color, `Обед ${route.lunch.from}–${route.lunch.to} · ${route.lunch.place}`),
+            route.lunch.coord,
+          )
+        }
         // Раскрытая заявка последней — поверх соседних точек.
         if (active >= 0) add(activeStopElement(String(active + 1)), route.stops[active].coord)
       }

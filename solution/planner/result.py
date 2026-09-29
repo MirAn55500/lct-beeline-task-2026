@@ -17,6 +17,7 @@ from .models import GeoPoint
 __all__ = [
     "TransitLeg",
     "Visit",
+    "LunchStop",
     "RouteResult",
     "Assignment",
     "EngineerMetrics",
@@ -200,6 +201,60 @@ class Visit:
 
 
 @dataclass(frozen=True, slots=True)
+class LunchStop:
+    """Обед в маршруте: час, который планировщик поставил между визитами.
+
+    `after_position` — после скольких визитов обед (0 — до первого). Если обедают не там,
+    где закончили работу (`point` не совпадает с `from_point`), к месту обеда своя дорога,
+    и следующий визит едет уже от места обеда.
+    """
+
+    after_position: int
+    departure_at: datetime
+    arrival_at: datetime
+    start_at: datetime
+    end_at: datetime
+    travel_minutes: float
+    distance_km: float
+    from_point: GeoPoint
+    point: GeoPoint
+    place: str = "last_request"
+    address: str = ""
+    locked: bool = False
+    """Обед уже начался — при перепланировании он факт, как начатый визит."""
+    geometry_range: tuple[int, int] | None = None
+    """Участок дороги к месту обеда в `RouteResult.geometry`, как у `Visit`."""
+    transit: tuple["TransitLeg", ...] = ()
+
+    @property
+    def is_detour(self) -> bool:
+        """Обедать едут в другое место: к нему и от него — свои участки маршрута."""
+        return not self.point.is_same_as(self.from_point)
+
+    @property
+    def minutes(self) -> float:
+        return (self.end_at - self.start_at).total_seconds() / 60.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "after_position": self.after_position,
+            "departure_at": _iso(self.departure_at),
+            "arrival_at": _iso(self.arrival_at),
+            "start_at": _iso(self.start_at),
+            "end_at": _iso(self.end_at),
+            "travel_minutes": _r(self.travel_minutes, 1),
+            "distance_km": _r(self.distance_km),
+            "from_point": self.from_point.to_dict(),
+            "point": self.point.to_dict(),
+            "place": self.place,
+            "address": self.address,
+            "locked": self.locked,
+            "geometry_range": list(self.geometry_range) if self.geometry_range else None,
+            "transit": [leg.to_dict() for leg in self.transit],
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class RouteResult:
     """Маршрут одного инженера за день."""
 
@@ -229,6 +284,8 @@ class RouteResult:
 
     Поле существует, чтобы интерфейс не выдавал прямую за реальный маршрут.
     """
+    lunch: LunchStop | None = None
+    """Обед инженера в этот день; `None` — обед не планировался."""
 
     @property
     def busy_minutes(self) -> float:
@@ -244,8 +301,27 @@ class RouteResult:
 
     @property
     def polyline(self) -> tuple[GeoPoint, ...]:
-        """Точки для отрисовки на карте: старт и далее адреса в порядке посещения."""
-        return (self.start_point,) + tuple(v.to_point for v in self.visits)
+        """Точки для отрисовки на карте: старт и далее адреса в порядке посещения.
+
+        Место обеда входит сюда, только если к нему своя дорога (`LunchStop.is_detour`).
+        """
+        return (self.start_point,) + tuple(to for _from, to, _when, _key in self.legs())
+
+    def legs(self) -> list[tuple[GeoPoint, GeoPoint, datetime, int | None]]:
+        """Участки маршрута по порядку: (откуда, куда, выезд, номер визита в `visits`).
+
+        Номер `None` — дорога к месту обеда. Обед там же, где кончилась работа, участка
+        не даёт: ехать никуда не нужно.
+        """
+        lunch = self.lunch if self.lunch is not None and self.lunch.is_detour else None
+        out: list[tuple[GeoPoint, GeoPoint, datetime, int | None]] = []
+        for index, visit in enumerate(self.visits):
+            if lunch is not None and lunch.after_position == index:
+                out.append((lunch.from_point, lunch.point, lunch.departure_at, None))
+            out.append((visit.from_point, visit.to_point, visit.departure_at, index))
+        if lunch is not None and lunch.after_position >= len(self.visits):
+            out.append((lunch.from_point, lunch.point, lunch.departure_at, None))
+        return out
 
     @property
     def request_ids(self) -> tuple[str, ...]:
@@ -273,6 +349,7 @@ class RouteResult:
             "polyline": [p.as_geojson() for p in self.polyline],
             "geometry": [p.as_geojson() for p in self.geometry],
             "geometry_source": self.geometry_source,
+            "lunch": self.lunch.to_dict() if self.lunch is not None else None,
         }
 
 
@@ -458,6 +535,12 @@ class PlanResult:
     план после события — расписание остатка дня, а не задним числом переписанное утро.
     У расчёта с нуля этого ограничения нет, там `None`.
     """
+    idle_lunches: tuple[tuple[str, "LunchStop"], ...] = ()
+    """Начатые обеды инженеров, у которых не осталось заявок: (инженер, обед).
+
+    Маршрута у такого инженера нет, а обед — факт: без него после новой заявки
+    планировщик поставил бы инженеру второй обед.
+    """
 
     @property
     def unassigned(self) -> tuple[Assignment, ...]:
@@ -505,4 +588,9 @@ class PlanResult:
             "metrics": self.metrics.to_dict(),
             "warnings": list(self.warnings),
             "diff": self.diff.to_dict() if self.diff else None,
+            **(
+                {"idle_lunches": [{"engineer_id": e, **lunch.to_dict()} for e, lunch in self.idle_lunches]}
+                if self.idle_lunches
+                else {}
+            ),
         }

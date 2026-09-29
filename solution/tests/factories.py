@@ -387,18 +387,32 @@ def _same_point(a, b) -> bool:
     return a.lat == b.lat and a.lon == b.lon
 
 
+def _oracle_pair(a, b, mode, cfg) -> tuple[float, float]:
+    """(км, минуты): haversine * detour / speed * 60 + overhead.
+
+    Общественный транспорт — меньшее по времени из городской поездки и электрички
+    (`suburban_*`): вне расписания далёкий адрес иначе был бы недостижим.
+    """
+    if _same_point(a, b):
+        return 0.0, 0.0
+    straight = oracle_haversine_km(a, b)
+    km = straight * cfg.detour_factor[mode]
+    city = (km, km / cfg.speed_kmh[mode] * 60.0 + cfg.overhead_minutes[mode])
+    if mode is not TransportMode.PUBLIC_TRANSPORT:
+        return city
+    rail = straight * cfg.suburban_detour_factor
+    suburban = (rail, rail / cfg.suburban_speed_kmh * 60.0 + cfg.suburban_overhead_minutes)
+    return suburban if suburban[1] < city[1] else city
+
+
 def oracle_distance_km(a, b, mode, cfg) -> float:
     """distance_km = haversine * detour_factor[mode]; 0.0 для совпадающих точек."""
-    if _same_point(a, b):
-        return 0.0
-    return oracle_haversine_km(a, b) * cfg.detour_factor[mode]
+    return _oracle_pair(a, b, mode, cfg)[0]
 
 
 def oracle_travel_minutes(a, b, mode, cfg) -> float:
     """travel = distance/speed*60 + overhead; 0.0 для совпадающих точек."""
-    if _same_point(a, b):
-        return 0.0
-    return oracle_distance_km(a, b, mode, cfg) / cfg.speed_kmh[mode] * 60.0 + cfg.overhead_minutes[mode]
+    return _oracle_pair(a, b, mode, cfg)[1]
 
 
 class OracleCalendar:

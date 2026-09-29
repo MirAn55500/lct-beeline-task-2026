@@ -64,6 +64,8 @@ from .travel import TravelModel
 __all__ = ["replan", "rebuild_unstarted", "apply_event", "seed_from_previous", "build_diff"]
 
 _EPS_MINUTES = 1e-6
+_SECOND_MINUTES = 1 / 60
+"""Времена в БД хранятся с разной точностью (обеды — до секунды): расхождение в секунду — не противоречие."""
 
 
 def replan(
@@ -795,6 +797,13 @@ def seed_from_previous(
     orphans: list[Request] = []
     touched: set[str] = set()
 
+    # Начатый обед инженера без заявок — факт и в новом плане
+    for engineer_id, idle in previous.idle_lunches:
+        state = solution.routes.get(engineer_id)
+        fact = _lunch_fact(ctx, idle, frozen_before)
+        if state is not None and state.lunch is not None and fact is not None:
+            state.adopt([], 0, (), fact)
+
     for route in previous.routes:
         state = solution.routes.get(route.engineer_id)
         if state is None:
@@ -841,7 +850,17 @@ def seed_from_previous(
             if frozen and len(kept) == locked_count:
                 fact = facts.get(visit.request_id) if facts else None
                 actual = _visit_schedule(ctx, visit, state.engineer, request, fact)
-                if frozen_cursor is not None and actual[2] < frozen_cursor - _EPS_MINUTES:
+                started_lunch = _lunch_fact(ctx, route.lunch, frozen_before)
+                if (
+                    fact is None
+                    and started_lunch is not None
+                    and actual[2] >= started_lunch[2]
+                    and actual[0] < started_lunch[3] - _SECOND_MINUTES
+                ):
+                    # Визит после начатого обеда, а выезд к нему — раньше конца обеда: пока
+                    # инженер обедает, к нему не выехать. Работа не начата, её место — после обеда.
+                    touched.add(route.engineer_id)
+                elif frozen_cursor is not None and actual[2] < frozen_cursor - _EPS_MINUTES:
                     # Противоречие с фактом: эту работу нельзя считать начатой. Она и всё,
                     # что за ней, возвращаются в расчёт и поедут от фактического времени.
                     touched.add(route.engineer_id)
@@ -864,13 +883,21 @@ def seed_from_previous(
                 continue
             kept.append(request)
 
-        if not state.adopt(kept, locked_count, schedule):
+        # Начатый обед — такой же факт, как начатая работа: переставлять его нельзя.
+        lunch = _lunch_fact(ctx, route.lunch, frozen_before)
+        if lunch is not None:
+            # По факту инженер уехал на заявку раньше планового конца обеда: обед кончился тогда
+            early = [leg[0] for leg in schedule if leg[2] >= lunch[2] and leg[0] < lunch[3]]
+            if early:
+                end = max(lunch[2], min(early))
+                lunch = (lunch[0], lunch[1], lunch[2], end, *lunch[4:])
+        if not state.adopt(kept, locked_count, schedule, lunch):
             # Обрезанная смена или изменившаяся длительность: факты по начатым работам
             # остаются на месте, остальное честно отправляем на перераспределение.
             touched.add(route.engineer_id)
             head = kept[:locked_count]
             tail = kept[locked_count:]
-            if not state.adopt(head, locked_count, schedule):
+            if not state.adopt(head, locked_count, schedule, lunch):
                 # Недостижимо, пока префикс состоит из фактов, но молча терять заявки нельзя.
                 state.adopt([], 0, ())
                 orphans.extend(head)
@@ -881,6 +908,26 @@ def seed_from_previous(
 
     orphans.sort(key=lambda r: (-r.priority.rank, r.input_order, r.id))
     return solution, orphans, touched
+
+
+def _lunch_fact(
+    ctx: PlanContext, lunch, frozen_before: datetime | None
+) -> tuple[float, float, float, float, float, float, float] | None:
+    """Расписание обеда прошлого плана в минутах, если обед уже начался (или выехали на него)."""
+    if lunch is None:
+        return None
+    if not lunch.locked and (frozen_before is None or lunch.departure_at >= frozen_before):
+        return None
+    m = ctx.to_minutes
+    return (
+        m(lunch.departure_at),
+        m(lunch.arrival_at),
+        m(lunch.start_at),
+        m(lunch.end_at),
+        0.0,
+        lunch.travel_minutes,
+        lunch.distance_km,
+    )
 
 
 def _already_committed(

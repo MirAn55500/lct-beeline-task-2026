@@ -35,6 +35,7 @@ class OpenBoard:
     transport_of: dict[int, int]
     address_of: dict[int, int]
     office_of: dict[int, int]
+    lunch_address_of: dict[int, int] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
     opened: float = field(default_factory=time.monotonic)
 
@@ -70,3 +71,9 @@ def rename(old_plan_id: int, new_plan_id: int) -> None:
 def drop(plan_id: int) -> None:
     with _guard:
         _boards.pop(plan_id, None)
+
+
+def clear() -> None:
+    """Все доски — заново: поменялись инженеры или бригады (смена, обед, офис)."""
+    with _guard:
+        _boards.clear()

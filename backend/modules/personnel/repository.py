@@ -8,6 +8,7 @@ from modules.catalogs.enums import DictGroup
 from modules.catalogs.models.address import Address
 from modules.catalogs.models.area import Area
 from modules.catalogs.models.dictionary import Dictionary
+from modules.catalogs.models.region import Region
 from modules.personnel.models.brigade import Brigade
 from modules.personnel.models.engineer import Engineer
 from modules.personnel.models.engineer_skill import EngineerSkill
@@ -28,6 +29,7 @@ class PersonnelRepository:
             select(Brigade)
             .options(
                 selectinload(Brigade.office_address),
+                selectinload(Brigade.lunch_address),
                 selectinload(Brigade.areas),
                 selectinload(Brigade.engineers).selectinload(Engineer.transport),
                 selectinload(Brigade.engineers)
@@ -42,7 +44,13 @@ class PersonnelRepository:
         return list(result.all())
 
     async def get_brigade(self, brigade_id: int) -> Brigade | None:
-        return await self._session.get(Brigade, brigade_id)
+        """Бригада с офисом и местом обеда — от них считаются настройки инженера."""
+        result = await self._session.exec(
+            select(Brigade)
+            .where(Brigade.brigade_id == brigade_id)
+            .options(selectinload(Brigade.office_address), selectinload(Brigade.lunch_address))
+        )
+        return result.first()
 
     async def get_brigade_full(self, brigade_id: int) -> Brigade | None:
         """Бригада со всем, что показывает карточка: офис, районы, состав."""
@@ -51,6 +59,7 @@ class PersonnelRepository:
             .where(Brigade.brigade_id == brigade_id)
             .options(
                 selectinload(Brigade.office_address).selectinload(Address.area_ref),
+                selectinload(Brigade.lunch_address),
                 selectinload(Brigade.areas),
                 selectinload(Brigade.engineers),
             )
@@ -67,6 +76,37 @@ class PersonnelRepository:
         )
         return list(result.all())
 
+    async def get_region(self, region_id: int) -> Region | None:
+        result = await self._session.exec(select(Region).where(Region.region_id == region_id))
+        return result.first()
+
+    async def get_or_create_office_area(self, region_id: int) -> Area:
+        """Служебный район «Офис» региона — к нему привязывают адрес офиса бригады."""
+        found = (
+            await self._session.exec(
+                select(Area).where(Area.region_id == region_id, Area.area == OFFICE_AREA)
+            )
+        ).first()
+        if found is not None:
+            return found
+        area = Area(area=OFFICE_AREA, region_id=region_id)
+        self._session.add(area)
+        await self._session.flush()
+        return area
+
+    async def next_brigade_number(self, region_id: int) -> str:
+        count = (
+            await self._session.exec(
+                select(func.count()).select_from(Brigade).where(Brigade.region_id == region_id)
+            )
+        ).one()
+        return f"{int(count) + 1:02d}"
+
+    async def add_brigade(self, brigade: Brigade) -> Brigade:
+        self._session.add(brigade)
+        await self._session.flush()
+        return brigade
+
     async def find_address(
         self, area_id: int, address: str, lat: float, lon: float
     ) -> Address | None:
@@ -82,9 +122,15 @@ class PersonnelRepository:
         return result.first()
 
     async def address_in_use(self, address_id: int) -> bool:
-        """На адрес ссылаются бригады, заявки или маршруты."""
+        """На адрес ссылаются бригады (офис, обед), инженеры (обед), заявки или маршруты."""
         for statement in (
-            select(func.count()).select_from(Brigade).where(Brigade.office_address_id == address_id),
+            select(func.count())
+            .select_from(Brigade)
+            .where(
+                (Brigade.office_address_id == address_id)
+                | (Brigade.lunch_address_id == address_id)
+            ),
+            select(func.count()).select_from(Engineer).where(Engineer.lunch_address_id == address_id),
             select(func.count()).select_from(Request).where(Request.address_id == address_id),
             select(func.count())
             .select_from(Route)
@@ -114,7 +160,8 @@ class PersonnelRepository:
             .options(
                 selectinload(Engineer.transport),
                 selectinload(Engineer.skills).selectinload(EngineerSkill.skill),
-                selectinload(Engineer.brigade),
+                selectinload(Engineer.brigade).selectinload(Brigade.lunch_address),
+                selectinload(Engineer.lunch_address),
             )
             .order_by(col(Engineer.is_lead).desc(), Engineer.name)
         )
@@ -136,7 +183,8 @@ class PersonnelRepository:
                 selectinload(Engineer.transport),
                 selectinload(Engineer.skills).selectinload(EngineerSkill.skill),
                 selectinload(Engineer.equipment),
-                selectinload(Engineer.brigade),
+                selectinload(Engineer.brigade).selectinload(Brigade.lunch_address),
+                selectinload(Engineer.lunch_address),
             )
             # Сессия не сбрасывает объекты при коммите — иначе после правки старые навыки
             .execution_options(populate_existing=True)

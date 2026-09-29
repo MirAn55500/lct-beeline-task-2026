@@ -77,7 +77,25 @@ export type MapEngineer = {
   start: { address: string; coord: LngLat }
 }
 
+/** Обед в маршруте: час между заявками, который поставил планировщик. */
+export type RouteLunch = {
+  /** После скольких заявок обед: 0 — до первой. */
+  afterPosition: number
+  /** «12:20»–«13:20». */
+  from: string
+  to: string
+  /** «У последней заявки», «В офисе» или адрес своего места. */
+  place: string
+  coord: LngLat
+  /** Дорога к месту обеда — только если обедают не там, где закончили работу. */
+  leg: RouteLeg | null
+  travelMinutes: number
+  /** Дорога к месту обеда, км; у последней заявки — 0. */
+  distanceKm: number
+}
+
 export type EngineerRoute = {
   engineerId: string
   stops: RouteStop[]
+  lunch?: RouteLunch | null
 }

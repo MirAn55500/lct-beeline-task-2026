@@ -7,6 +7,7 @@ import {
   type NavItem,
 } from '@/shared/config/nav'
 import { cn } from '@/shared/lib/cn'
+import { preservedContextSearch } from '@/shared/lib/sessionContext'
 import { AppPanel } from '@/shared/ui/AppPanel'
 
 function NavItemLink({
@@ -19,7 +20,7 @@ function NavItemLink({
   search: string
 }) {
   const Icon = item.icon
-  // Сохраняем date (и прочие query) при переходах по разделам в рамках сессии.
+  // Регион и день из адреса или sessionStorage — чтобы не сбрасывались между разделами.
   const to = search ? `${item.to}${search}` : item.to
 
   return (
@@ -39,10 +40,7 @@ function NavItemLink({
 export function AppNav({ className }: { className?: string }) {
   const { pathname } = useLocation()
   const [params] = useSearchParams()
-  const preserved = new URLSearchParams()
-  const date = params.get('date')
-  if (date) preserved.set('date', date)
-  const search = preserved.toString() ? `?${preserved.toString()}` : ''
+  const search = preservedContextSearch(params)
 
   return (
     <AppPanel className={cn('flex min-h-0 flex-1 flex-col p-3', className)}>

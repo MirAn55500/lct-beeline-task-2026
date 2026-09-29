@@ -27,7 +27,10 @@ class Address(BaseTable, table=True):
     geo_source: Optional[str] = None
 
     area_ref: Optional["Area"] = Relationship(back_populates="addresses")
-    brigades: list["Brigade"] = Relationship(back_populates="office_address")
+    brigades: list["Brigade"] = Relationship(
+        back_populates="office_address",
+        sa_relationship_kwargs={"foreign_keys": "Brigade.office_address_id"},
+    )
     requests: list["Request"] = Relationship(back_populates="address_ref")
     routes_as_start: list["Route"] = Relationship(
         back_populates="start_point",

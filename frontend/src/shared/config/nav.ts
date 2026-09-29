@@ -1,7 +1,7 @@
 import type { ComponentType } from 'react'
 import {
+  RiCalendarEventFill,
   RiCalendarScheduleLine,
-  RiCalendarEventLine,
   RiGroupLine,
   RiHome5Line,
   RiQuestionLine,
@@ -29,12 +29,12 @@ export const navPrimaryItems: NavItem[] = [
     to: routes.planGantt,
     label: 'План работ',
     icon: RiCalendarScheduleLine,
-    match: (pathname) => pathname === routes.plan || pathname.startsWith(`${routes.plan}/`),
+    match: (pathname) => pathname.startsWith(routes.plan),
   },
   {
-    to: routes.planComparison,
+    to: routes.compare,
     label: 'Сравнение планов',
-    icon: RiCalendarEventLine,
+    icon: RiCalendarEventFill,
   },
   {
     to: routes.personnel,

@@ -15,6 +15,16 @@ class QualificationFilter(StrEnum):
     NOVICE = "novice"
 
 
+class LunchPlace(StrEnum):
+    """Где обедают."""
+
+    LAST_REQUEST = "last_request"
+    """У последней заявки — там, где закончили работу, без лишней дороги."""
+    OFFICE = "office"
+    POINT = "point"
+    """В своей точке: адрес или место на карте."""
+
+
 class BrigadeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -33,6 +43,14 @@ class BrigadeResponse(BaseModel):
     work_days: list[int] = Field(default_factory=list)
     """ISO-номера рабочих дней недели: 1 — понедельник, 7 — воскресенье."""
     area_ids: list[int] = Field(default_factory=list)
+    lunch_start: time | None = None
+    lunch_end: time | None = None
+    """Окно обеда: час внутри него, когда именно — решает планировщик."""
+    lunch_place: LunchPlace = LunchPlace.LAST_REQUEST
+    lunch_address: str | None = None
+    lunch_lat: float | None = None
+    lunch_lon: float | None = None
+    """Место обеда «в своей точке»; для остальных мест пусто."""
 
 
 class AreaResponse(BaseModel):
@@ -52,6 +70,26 @@ class UpdateBrigadeRequest(BaseModel):
     work_days: list[int] = Field(min_length=1)
     start_work: time
     end_work: time
+    lunch_start: time = time(13, 0)
+    lunch_end: time = time(14, 0)
+    lunch_place: LunchPlace = LunchPlace.LAST_REQUEST
+    # Для «в своей точке»: адрес из подсказок или точка на карте
+    lunch_address: str | None = Field(default=None, max_length=300)
+    lunch_lat: float | None = Field(default=None, ge=-90, le=90)
+    lunch_lon: float | None = Field(default=None, ge=-180, le=180)
+
+
+class CreateBrigadeRequest(BaseModel):
+    """Новая бригада в регионе: офис, смена и рабочие дни. Обед — по умолчанию 13–14 у последней заявки."""
+
+    region_id: int = Field(ge=1)
+    name: str = Field(min_length=1, max_length=200)
+    office_address: str = Field(min_length=3, max_length=300)
+    office_lat: float = Field(ge=-90, le=90)
+    office_lon: float = Field(ge=-180, le=180)
+    work_days: list[int] = Field(default_factory=lambda: [1, 2, 3, 4, 5, 6, 7], min_length=1)
+    start_work: time = time(9, 0)
+    end_work: time = time(22, 0)
 
 
 class AddressSuggestionResponse(BaseModel):
@@ -102,6 +140,16 @@ class EngineerResponse(BaseModel):
     """Рабочие дни инженера (ISO): свои или бригады."""
     own_work_days: bool = False
     """Свой график; без него дни идут за бригадой."""
+    lunch_start: time | None = None
+    lunch_end: time | None = None
+    own_lunch_time: bool = False
+    """Своё окно обеда; без него — как у бригады."""
+    lunch_place: LunchPlace = LunchPlace.LAST_REQUEST
+    own_lunch_place: bool = False
+    """Своё место обеда; без него — как у бригады."""
+    lunch_address: str | None = None
+    lunch_lat: float | None = None
+    lunch_lon: float | None = None
     home_address: str | None = None
     brigade_name: str | None = None
 
@@ -130,6 +178,13 @@ class EngineerFields(BaseModel):
     end_work: time | None = None
     # Без дней — рабочие дни бригады
     work_days: list[int] | None = None
+    # Без окна обеда — окно бригады, без места — место бригады
+    lunch_start: time | None = None
+    lunch_end: time | None = None
+    lunch_place: LunchPlace | None = None
+    lunch_address: str | None = Field(default=None, max_length=300)
+    lunch_lat: float | None = Field(default=None, ge=-90, le=90)
+    lunch_lon: float | None = Field(default=None, ge=-180, le=180)
 
 
 class CreateEngineerRequest(EngineerFields):
@@ -138,6 +193,14 @@ class CreateEngineerRequest(EngineerFields):
 
 class UpdateEngineerRequest(EngineerFields):
     """Карточка инженера целиком: не переданные часы и дни — как у бригады."""
+
+
+class UploadEngineersResult(BaseModel):
+    """Результат загрузки CSV/JSON профилей в бригаду."""
+
+    created: int
+    skipped: int
+    engineers: list[EngineerResponse] = Field(default_factory=list)
 
 
 class PersonnelFilterOptions(BaseModel):

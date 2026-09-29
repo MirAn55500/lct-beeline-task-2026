@@ -6,7 +6,7 @@ export type RemakeLevel = RebuildLevel
 /** Алиас для UI-диалога перестроения плана. */
 export type PlanRebuildLevel = RemakeLevel
 
-/** Распределение: Равномерное / Эффективное. */
+/** Распределение: Базовое (алгоритм ТЗ) / Эффективное. */
 export type PlanDistribution = 'even' | 'efficient'
 
 export type ComparisonLine = {
@@ -47,6 +47,8 @@ export type PlanVersion = {
   plan_id: number
   version: number
   created_at: string
+  /** even — базовый, efficient — эффективный; null у старых версий. */
+  distribution?: PlanDistribution | null
 }
 
 export type DayOverview = {
@@ -69,6 +71,8 @@ export type DayOverview = {
   planning_error?: string | null
   /** Примерно через сколько секунд фоновый расчёт закончится. */
   planning_eta_seconds?: number | null
+  /** Примерно сколько секунд займёт «Обновить план». */
+  rebuild_eta_seconds?: number | null
   travel_minutes?: number | null
   distance_km?: number | null
 }

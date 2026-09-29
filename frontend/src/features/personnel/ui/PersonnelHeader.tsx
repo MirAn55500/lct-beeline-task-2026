@@ -23,11 +23,13 @@ const MENU_ITEM =
   'flex h-9 cursor-pointer items-center gap-2 px-3 text-sm font-medium leading-5 text-foreground outline-none data-[focused]:bg-surface-hover'
 
 type PersonnelHeaderProps = {
-  /** Название выбранной бригады. */
   title: string
   tab: PersonnelTab
   onTabChange: (tab: PersonnelTab) => void
+  /** Жёлтая кнопка — зона загрузки файла. */
   onAddEngineer: () => void
+  /** Пункт «Добавить» — форма одного инженера. */
+  onAddSingleEngineer: () => void
   onExport: (format: EngineersExportFormat) => void
 }
 
@@ -36,6 +38,7 @@ export function PersonnelHeader({
   tab,
   onTabChange,
   onAddEngineer,
+  onAddSingleEngineer,
   onExport,
 }: PersonnelHeaderProps) {
   return (
@@ -86,7 +89,7 @@ export function PersonnelHeader({
                 aria-label="Действия с инженерами"
                 className="flex flex-col outline-none"
                 onAction={(key) => {
-                  if (key === 'add') onAddEngineer()
+                  if (key === 'add') onAddSingleEngineer()
                   else if (key === 'csv' || key === 'json') onExport(key)
                 }}
               >

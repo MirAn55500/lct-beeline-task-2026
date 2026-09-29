@@ -31,7 +31,7 @@ class PlanningRepository:
     async def find_latest_plan(self, region_id: int, day: date) -> Plan | None:
         result = await self._session.exec(
             select(Plan)
-            .where(Plan.region_id == region_id, Plan.date == day)
+            .where(Plan.region_id == region_id, Plan.date == day, col(Plan.baseline_of_id).is_(None))
             .order_by(col(Plan.version).desc(), col(Plan.created_at).desc())
             .limit(1)
         )
@@ -40,10 +40,20 @@ class PlanningRepository:
     async def list_plans(self, region_id: int, day: date) -> list[Plan]:
         result = await self._session.exec(
             select(Plan)
-            .where(Plan.region_id == region_id, Plan.date == day)
+            .where(Plan.region_id == region_id, Plan.date == day, col(Plan.baseline_of_id).is_(None))
             .order_by(col(Plan.version).desc(), col(Plan.created_at).desc())
         )
         return list(result.all())
+
+    async def find_baseline(self, plan_id: int) -> Plan | None:
+        """Базовый расчёт при версии плана; пересчитанный позже — свежее."""
+        result = await self._session.exec(
+            select(Plan)
+            .where(Plan.baseline_of_id == plan_id)
+            .order_by(col(Plan.created_at).desc())
+            .limit(1)
+        )
+        return result.first()
 
     async def count_requests(self, region_id: int, day: date) -> int:
         result = await self._session.exec(
@@ -65,7 +75,7 @@ class PlanningRepository:
     async def list_planned_dates(self, region_id: int) -> list[date]:
         result = await self._session.exec(
             select(Plan.date)
-            .where(Plan.region_id == region_id)
+            .where(Plan.region_id == region_id, col(Plan.baseline_of_id).is_(None))
             .distinct()
             .order_by(col(Plan.date).asc())
         )
@@ -95,6 +105,8 @@ class PlanningRepository:
             .options(
                 selectinload(Engineer.transport),
                 selectinload(Engineer.brigade).selectinload(Brigade.office_address),
+                selectinload(Engineer.brigade).selectinload(Brigade.lunch_address),
+                selectinload(Engineer.lunch_address),
                 selectinload(Engineer.skills).selectinload(EngineerSkill.skill),
                 selectinload(Engineer.equipment).selectinload(EngineerEquipment.item),
             )
@@ -267,6 +279,9 @@ class PlanningRepository:
         reference_plan_id: int | None,
         rows: list[Assignment],
         legs: dict[int, dict] | None = None,
+        lunches: list[dict] | None = None,
+        distribution: str | None = None,
+        baseline_of_id: int | None = None,
     ) -> Plan:
         plan = Plan(
             version=version,
@@ -274,6 +289,9 @@ class PlanningRepository:
             region_id=region_id,
             created_at=datetime.now(),
             reference_plan_id=reference_plan_id,
+            distribution=distribution,
+            baseline_of_id=baseline_of_id,
+            lunches=lunches,
         )
         self._session.add(plan)
         await self._session.flush()

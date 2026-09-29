@@ -5,13 +5,14 @@ import {
   RiArrowRightUpLine,
   RiArrowUpSLine,
   RiBuilding2Fill,
+  RiCupLine,
   RiMapPinAddLine,
 } from '@remixicon/react'
 
 import { cn } from '@/shared/lib/cn'
 
 import { legSteps } from '../../lib/routeSteps'
-import type { EngineerRoute, MapEngineer } from '../../mapTypes'
+import type { EngineerRoute, MapEngineer, RouteLunch } from '../../mapTypes'
 import { ExplanationPopover, MetaSeparator, TicketTags } from './parts'
 import { RouteStepChip } from './RouteSteps'
 
@@ -33,6 +34,29 @@ function StopMarker({ children, active }: { children: ReactNode; active: boolean
         {children}
       </span>
     </span>
+  )
+}
+
+/** Строка обеда между заявками: когда и где, дорога к месту обеда. */
+function LunchRow({ lunch }: { lunch: RouteLunch }) {
+  return (
+    <div className="flex items-center gap-2 border-b border-border bg-surface-secondary px-3 py-2">
+      <span
+        className="flex size-6 shrink-0 items-center justify-center border border-border bg-surface"
+        style={{ borderRadius: 8, margin: -2 }}
+      >
+        <RiCupLine size={14} className="text-muted" />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="text-sm leading-5 font-medium text-foreground">
+          Обед {lunch.from}–{lunch.to}
+        </span>
+        <span className="truncate text-xs leading-5 text-muted">
+          {lunch.place}
+          {lunch.leg && lunch.travelMinutes > 0 ? ` · ${lunch.travelMinutes} мин в пути` : ''}
+        </span>
+      </span>
+    </div>
   )
 }
 
@@ -79,7 +103,9 @@ export function RouteDetailsPanel({
   listRef,
 }: RouteDetailsPanelProps) {
   const stops = route.stops
-  const distanceKm = stops.reduce((sum, stop) => sum + (stop.distanceKm ?? 0), 0)
+  // Дорога к месту обеда — тоже пробег маршрута
+  const distanceKm =
+    stops.reduce((sum, stop) => sum + (stop.distanceKm ?? 0), 0) + (route.lunch?.leg ? route.lunch.distanceKm : 0)
 
   return (
     <div
@@ -138,12 +164,17 @@ export function RouteDetailsPanel({
             </p>
           ) : null}
 
+          {route.lunch && route.lunch.afterPosition === 0 && stops.length > 0 ? (
+            <LunchRow lunch={route.lunch} />
+          ) : null}
+
           {stops.map((stop, index) => {
             const expanded = stop.id === activeStopId
             const Chevron = expanded ? RiArrowUpSLine : RiArrowDownSLine
+            const lunchAfter = route.lunch && route.lunch.afterPosition === index + 1 ? route.lunch : null
             return (
+              <Fragment key={stop.id}>
               <div
-                key={stop.id}
                 data-stop-index={index}
                 className="relative border-b border-border"
               >
@@ -210,6 +241,8 @@ export function RouteDetailsPanel({
                   </div>
                 ) : null}
               </div>
+              {lunchAfter ? <LunchRow lunch={lunchAfter} /> : null}
+              </Fragment>
             )
           })}
         </div>

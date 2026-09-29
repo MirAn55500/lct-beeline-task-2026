@@ -30,7 +30,7 @@ class TicketsRepository:
     async def find_latest_plan_id(self, *, region_id: int, day: date) -> int | None:
         result = await self._session.exec(
             select(Plan.plan_id)
-            .where(Plan.region_id == region_id, Plan.date == day)
+            .where(Plan.region_id == region_id, Plan.date == day, col(Plan.baseline_of_id).is_(None))
             .order_by(col(Plan.version).desc(), col(Plan.created_at).desc())
             .limit(1)
         )

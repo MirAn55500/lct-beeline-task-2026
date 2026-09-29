@@ -27,9 +27,21 @@ class Brigade(BaseTable, table=True):
     office_address_id: int = Field(foreign_key="addresses.address_id")
     # Рабочие дни — ISO-номера дней недели подряд: «12345» — с понедельника по пятницу
     work_days: str = Field(default="1234567")
+    # Обед: час в этом окне, когда именно — решает планировщик
+    lunch_start: time = Field(default=time(13, 0))
+    lunch_end: time = Field(default=time(14, 0))
+    # Где обедают: last_request — у последней заявки, office — в офисе, point — в своей точке
+    lunch_place: str = Field(default="last_request", max_length=20)
+    lunch_address_id: Optional[int] = Field(default=None, foreign_key="addresses.address_id")
 
     region: Optional["Region"] = Relationship(back_populates="brigades")
-    office_address: Optional["Address"] = Relationship(back_populates="brigades")
+    office_address: Optional["Address"] = Relationship(
+        back_populates="brigades",
+        sa_relationship_kwargs={"foreign_keys": "[Brigade.office_address_id]"},
+    )
+    lunch_address: Optional["Address"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[Brigade.lunch_address_id]"},
+    )
     engineers: list["Engineer"] = Relationship(back_populates="brigade")
     areas: list["Area"] = Relationship(link_model=BrigadeArea)
 

@@ -18,7 +18,10 @@ import {
   findFreeCellsBySlots,
   formatClock,
   formatRange,
+  lunchesOf,
   magnetStart,
+  withLunches,
+  type LunchPatch,
   type Placement,
   type TicketSlots,
 } from './ganttPlacement'
@@ -35,6 +38,8 @@ export type GanttChange = {
   placement: Placement
   /** swap — поповер «Подтвердите изменения», approve — окно согласования с клиентом. */
   step: 'swap' | 'approve'
+  /** Куда уедут обеды — по превью хода; пока ход висит, лента показывает их там. */
+  lunches?: LunchPatch
 }
 
 /** Поля заявки, которые меняет «Управление заявкой». */
@@ -193,6 +198,8 @@ export function usePlanGanttBoard(
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null)
   const [change, setChange] = useState<GanttChange | null>(null)
   const [manageId, setManageId] = useState<string | null>(null)
+  // Обеды после сохранённого хода — пока не пришла новая версия плана
+  const [lunches, setLunches] = useState<LunchPatch | undefined>(undefined)
 
   // Другой регион или день — другой план: сбрасываем всё прямо в рендере.
   if (loadedKey !== key) {
@@ -202,12 +209,14 @@ export function usePlanGanttBoard(
     setSelectedTicketId(null)
     setChange(null)
     setManageId(null)
+    setLunches(undefined)
   }
 
   const view = change ? applyChange(tasks, unassigned, change, true) : { tasks, unassigned }
 
   // Загрузка — моковая: к проценту планировщика прибавляем разницу в минутах работ.
-  const engineers = dataset.engineers.map((engineer): GanttEngineer => {
+  const lunchPatch = change?.lunches ?? lunches
+  const engineers = withLunches(dataset.engineers, lunchPatch).map((engineer): GanttEngineer => {
     if (!hasPlan) return { ...engineer, load: 0 }
     const shift = engineer.shifts.reduce((sum, [from, to]) => sum + to - from, 0) || 1
     const delta = busyMinutes(view.tasks, engineer.id) - busyMinutes(dataset.tasks, engineer.id)
@@ -226,9 +235,10 @@ export function usePlanGanttBoard(
 
   const commit = (next: GanttChange) => {
     const result = applyChange(tasks, unassigned, next, false)
-    const previous = { tasks, unassigned }
+    const previous = { tasks, unassigned, lunches }
     setTasks(result.tasks)
     setUnassigned(result.unassigned)
+    if (next.lunches) setLunches(next.lunches)
     setChange(null)
     setSelectedTicketId(null)
     if (livePlanId == null) return
@@ -239,12 +249,14 @@ export function usePlanGanttBoard(
       if (keyRef.current !== committedKey) return
       setTasks(previous.tasks)
       setUnassigned(previous.unassigned)
+      setLunches(previous.lunches)
     }
     setSaving(true)
     moveRequest(moveArgs(next.ticketId, next.placement, true))
       .unwrap()
       .then((response) => {
         if (response.ok && response.planId != null) {
+          if (keyRef.current === committedKey) setLunches(lunchesOf(response))
           toast.success(`План №${response.version} сохранён`, {
             description: `Заявка №${next.ticketId} — ${formatClock(next.placement.start)}`,
           })
@@ -269,10 +281,15 @@ export function usePlanGanttBoard(
       : evaluatePlacement({ ticket, engineer, start, tasks, now, movingId })
   }
 
-  /** Бросили заявку на ленту: сразу ставим или просим подтверждения. */
-  const place = (ticketId: string, source: GanttChange['source'], placement: Placement) => {
+  /** Бросили заявку на ленту: сразу ставим или просим подтверждения. `checked` — превью хода. */
+  const place = (
+    ticketId: string,
+    source: GanttChange['source'],
+    placement: Placement,
+    checked?: PlanMoveResponse | null,
+  ) => {
     if (placement.state === 'invalid' || change || saving) return
-    const next: GanttChange = { ticketId, source, placement, step: 'swap' }
+    const next: GanttChange = { ticketId, source, placement, step: 'swap', lunches: lunchesOf(checked) }
     if (placement.state === 'swap') setChange(next)
     else if (placement.outsideWindow) setChange({ ...next, step: 'approve' })
     else commit(next)
@@ -303,7 +320,8 @@ export function usePlanGanttBoard(
   return {
     date: dataset.date || date,
     hasPlan,
-    isLoading: query.isFetching && !plan,
+    /** Грузится версия плана — в том числе другая, пока на экране прежняя. */
+    isLoading: query.isFetching,
     noSchedule,
     /** Идёт сохранение хода — новые ходы ждут. */
     saving,

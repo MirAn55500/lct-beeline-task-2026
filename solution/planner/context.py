@@ -14,10 +14,10 @@ from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 
 from .calendar import WorkCalendar
-from .models import Engineer, Request, Scenario, Settings
+from .models import Engineer, GeoPoint, Request, Scenario, Settings
 from .travel import HaversineTravelModel, TravelModel
 
-__all__ = ["RequestTiming", "PlanContext"]
+__all__ = ["RequestTiming", "LunchTiming", "PlanContext"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,10 +35,24 @@ class RequestTiming:
         return self.window_start if self.window_start >= self.available_from else self.available_from
 
 
+@dataclass(frozen=True, slots=True)
+class LunchTiming:
+    """Обед инженера в минутах: окно **начала** обеда, длительность и где обедать.
+
+    `timing` устроен как у заявки — окно `[window_start, window_end]` здесь ограничивает
+    начало обеда, поэтому расписание обеда считает та же функция, что и визиты
+    (`route.schedule_leg`): доехать, дождаться начала окна, провести на месте `duration`.
+    """
+
+    timing: RequestTiming
+    point: GeoPoint | None
+    """`None` — у последней заявки, без дороги."""
+
+
 class PlanContext:
     """Неизменяемое окружение расчёта."""
 
-    __slots__ = ("scenario", "settings", "travel", "origin", "_calendars", "_timings")
+    __slots__ = ("scenario", "settings", "travel", "origin", "_calendars", "_timings", "_lunches")
 
     def timed_for(self, mode):
         """Модель со временем от момента выезда для этого способа передвижения, или None.
@@ -60,6 +74,7 @@ class PlanContext:
         self._timings: dict[str, RequestTiming] = {
             r.id: self._timing_of(r) for r in scenario.requests
         }
+        self._lunches: dict[str, LunchTiming | None] = {}
 
     # ------------------------------------------------------------------ точка отсчёта
 
@@ -100,6 +115,34 @@ class PlanContext:
             cal = WorkCalendar(engineer.work_intervals, self.origin)
             self._calendars[engineer.id] = cal
         return cal
+
+    def lunch(self, engineer: Engineer) -> LunchTiming | None:
+        """Обед инженера в минутах; `None` — обеда нет или он не помещается в смену.
+
+        Окно обеда обрезается сменой: у того, кто выходит в 13:00, обед 12–14 остаётся
+        часом 13–14 и сдвигаться ему некуда. Если от окна остаётся меньше самого обеда
+        (смена кончается в 12:30), обеда в этот день нет.
+        """
+        if engineer.id in self._lunches:
+            return self._lunches[engineer.id]
+        found: LunchTiming | None = None
+        lunch = engineer.lunch
+        cal = self.calendar(engineer)
+        if lunch is not None and not cal.is_empty:
+            low = max(self._minutes(lunch.window_start), cal.start_m or 0.0)
+            high = min(self._minutes(lunch.window_end), cal.end_m or 0.0)
+            if high - low >= lunch.minutes - 1e-9:
+                found = LunchTiming(
+                    RequestTiming(
+                        window_start=low,
+                        window_end=high - lunch.minutes,
+                        duration=float(lunch.minutes),
+                        available_from=low,
+                    ),
+                    lunch.point,
+                )
+        self._lunches[engineer.id] = found
+        return found
 
     def _timing_of(self, request: Request) -> RequestTiming:
         available = (
