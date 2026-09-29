@@ -3,8 +3,6 @@ import { createPortal } from 'react-dom'
 import { ScrollShadow } from '@heroui/react'
 import {
   RiRouterLine,
-  RiTimeLine,
-  RiToolsFill,
   RiTvLine,
 } from '@remixicon/react'
 
@@ -14,7 +12,7 @@ import { AppPanel } from '@/shared/ui'
 
 import type { MapEngineer, MapTransport } from '../../mapTypes'
 import { EngineerSearchFilters, filterEngineers } from '../EngineerSearchFilters'
-import { EngineerAvatar, LoadRing, MetaSeparator } from './parts'
+import { EngineerSummary, MetaSeparator } from './parts'
 
 type HoverCard = { engineer: MapEngineer; top: number; left: number }
 
@@ -86,33 +84,11 @@ export function EngineersSidebar({
                     }}
                     onMouseLeave={leave}
                     className={cn(
-                      'flex w-full cursor-pointer items-center gap-3 border-b border-border p-3 text-left outline-none transition-colors focus-visible:bg-surface-hover',
+                      'flex h-[60px] w-full cursor-pointer items-center border-b border-border px-3 py-2 text-left outline-none transition-colors focus-visible:bg-surface-hover',
                       selected ? 'bg-surface-tertiary' : hovered ? 'bg-surface-hover' : 'bg-surface',
                     )}
                   >
-                    <EngineerAvatar engineer={engineer} muted={selected} />
-                    <span className="flex min-w-0 flex-1 flex-col gap-1">
-                      <span className="flex items-center gap-1">
-                        <span className="min-w-0 flex-1 truncate text-base leading-6 font-semibold text-foreground">
-                          {engineer.name}
-                        </span>
-                        <LoadRing
-                          value={engineer.load}
-                          trackColor={selected ? 'var(--surface)' : 'var(--surface-tertiary)'}
-                        />
-                      </span>
-                      <span className="flex items-center gap-2 text-sm leading-5 font-medium text-muted">
-                        <span className="flex items-center gap-0.5">
-                          <RiToolsFill size={14} />
-                          {engineer.qualification}
-                        </span>
-                        <MetaSeparator />
-                        <span className="flex items-center gap-0.5">
-                          <RiTimeLine size={14} />
-                          {engineer.routeFrom ? `${engineer.routeFrom}-${engineer.routeTo}` : engineer.shift}
-                        </span>
-                      </span>
-                    </span>
+                    <EngineerSummary engineer={engineer} muted={selected} className="flex-1" />
                   </button>
                   {selected && onUnavailable ? (
                     <button
