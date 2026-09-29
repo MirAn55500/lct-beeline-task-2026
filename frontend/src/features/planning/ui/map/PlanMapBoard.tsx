@@ -127,19 +127,30 @@ export function PlanMapBoard({ board, onCancelStop, readOnly = false }: PlanMapB
         onSelectEngineer={board.select}
         onSelectStop={board.toggleStop}
       >
-        {selectedEngineer && selectedRoute ? (
-          <RouteDetailsPanel
-            engineer={selectedEngineer}
-            route={selectedRoute}
-            activeStopId={board.activeStopId}
-            onToggleStop={board.toggleStop}
-            onAddTicket={readOnly ? undefined : () => setHint(true)}
-            onEditParams={() => setParamsOpen(true)}
-            onCancelStop={onCancelStop}
-            dropIndex={drag?.index ?? null}
-            listRef={listRef}
-          />
-        ) : null}
+        {selectedEngineer ? (
+          selectedRoute ? (
+            <RouteDetailsPanel
+              engineer={selectedEngineer}
+              route={selectedRoute}
+              activeStopId={board.activeStopId}
+              onToggleStop={board.toggleStop}
+              onAddTicket={readOnly ? undefined : () => setHint(true)}
+              onEditParams={() => setParamsOpen(true)}
+              onCancelStop={onCancelStop}
+              dropIndex={drag?.index ?? null}
+              listRef={listRef}
+            />
+          ) : null
+        ) : (
+          <div
+            aria-live="polite"
+            className="absolute bottom-3 left-3 z-10 flex h-9 items-center gap-2 bg-surface px-3 text-sm leading-5 text-foreground shadow-lg"
+            style={{ borderRadius: 8 }}
+          >
+            <span>Нераспределённые заявки</span>
+            <span className="font-semibold">{board.unassigned.length}</span>
+          </div>
+        )}
       </PlanMap>
 
       {selectedEngineer ? (
