@@ -1,4 +1,13 @@
 @import "tailwindcss";
+
+.onboarding-popover--centered {
+  position: fixed !important;
+  inset: auto !important;
+  top: 50% !important;
+  left: 50% !important;
+  margin: 0 !important;
+  transform: translate(-50%, -50%) !important;
+}
 @import "@fontsource-variable/inter/wght.css";
 @import "@heroui/styles";
 @import "./theme/beeline.css";

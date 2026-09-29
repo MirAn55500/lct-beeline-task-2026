@@ -190,7 +190,7 @@ export function ContextHeader({
         className,
       )}
     >
-      <div className="flex items-center gap-4 px-1">
+      <div data-onboarding="planning-context" className="flex items-center gap-4 px-1">
         <ContextSelect
           label={regionLabel}
           muted={!region}
@@ -414,7 +414,7 @@ export function ContextHeader({
 
         {actions}
 
-        <div className="relative">
+        <div data-onboarding="tickets-actions" className="relative">
           <div
             className="flex h-9 items-stretch overflow-hidden bg-accent"
             style={{ borderRadius: 8 }}

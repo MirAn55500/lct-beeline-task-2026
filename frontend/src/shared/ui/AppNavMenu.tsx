@@ -3,6 +3,8 @@ import { NavLink, useLocation, useSearchParams } from 'react-router'
 import { isNavItemActive, navMenuGroups, type NavItem } from '@/shared/config/nav'
 import { cn } from '@/shared/lib/cn'
 import { preservedContextSearch } from '@/shared/lib/sessionContext'
+import { routes } from '@/shared/config/routes'
+import { startGeneralOnboarding } from '@/shared/ui/GeneralOnboarding'
 
 function MenuItem({
   item,
@@ -17,15 +19,32 @@ function MenuItem({
 }) {
   const Icon = item.icon
   const to = search ? `${item.to}${search}` : item.to
+  const className = cn(
+    'flex h-9 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-left text-sm font-medium text-foreground transition-colors hover:bg-surface-hover',
+    active && 'bg-surface-hover',
+  )
+
+  if (item.to === routes.help) {
+    return (
+      <button
+        type="button"
+        className={className}
+        onClick={() => {
+          startGeneralOnboarding()
+          onNavigate?.()
+        }}
+      >
+        <Icon size={16} className="shrink-0 text-muted" />
+        <span>{item.label}</span>
+      </button>
+    )
+  }
 
   return (
     <NavLink
       to={to}
       onClick={onNavigate}
-      className={cn(
-        'flex h-9 cursor-pointer items-center gap-3 rounded-lg px-3 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover',
-        active && 'bg-surface-hover',
-      )}
+      className={className}
     >
       <Icon size={16} className="shrink-0 text-muted" />
       <span>{item.label}</span>
