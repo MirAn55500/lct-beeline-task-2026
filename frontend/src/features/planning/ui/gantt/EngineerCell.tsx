@@ -2,9 +2,9 @@ import type { GanttEngineer } from '../../ganttTypes'
 import { formatRange } from '../../lib/ganttPlacement'
 import { EngineerSummary } from '../map/parts'
 
-function Summary({ engineer }: { engineer: GanttEngineer }) {
+function Summary({ engineer, className }: { engineer: GanttEngineer; className: string }) {
   return (
-    <EngineerSummary engineer={engineer} className="w-[282px] shrink-0" />
+    <EngineerSummary engineer={engineer} className={className} />
   )
 }
 
@@ -34,13 +34,16 @@ export function EngineerCell({
       onPointerEnter={() => onHover(engineer.id)}
       onPointerLeave={() => onHover(null)}
     >
-      <Summary engineer={engineer} />
+      <Summary engineer={engineer} className="min-w-0 flex-1" />
       {hovered ? (
         <div
           className="pointer-events-none absolute top-0 left-0 z-10 flex h-[60px] items-center gap-3 border-2 border-border bg-surface-hover px-3 py-2 shadow-[0_8px_16px_rgb(15_23_42/0.08)]"
           style={{ borderRadius: 12 }}
         >
-          <Summary engineer={engineer} />
+          <Summary
+            engineer={engineer}
+            className="w-[282px] shrink-0 min-[1440px]:w-[322px]"
+          />
           <div className="flex flex-col border-l border-border pl-3 whitespace-nowrap">
             <p className="text-sm leading-5 font-semibold text-foreground">
               График: {engineer.shifts.map(([from, to]) => formatRange(from, to)).join(', ')}
