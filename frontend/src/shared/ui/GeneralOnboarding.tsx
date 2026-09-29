@@ -186,26 +186,12 @@ export function GeneralOnboarding() {
   if (!step || stepIndex === null) return null
 
   const triggerStyle = anchor
-    ? step.placement === 'right'
-      ? {
-          top: anchor.top + anchor.height / 2,
-          left: anchor.left + anchor.width,
-          width: 1,
-          height: 1,
-        }
-      : step.placement === 'left'
-        ? {
-            top: anchor.top + anchor.height / 2,
-            left: anchor.left,
-            width: 1,
-            height: 1,
-          }
-        : {
-            top: anchor.top + anchor.height,
-            left: anchor.left + anchor.width / 2,
-            width: 1,
-            height: 1,
-          }
+    ? {
+        top: anchor.top,
+        left: anchor.left,
+        width: anchor.width,
+        height: anchor.height,
+      }
     : {
         top: '50%',
         left: '50%',
