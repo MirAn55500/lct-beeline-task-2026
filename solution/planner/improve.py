@@ -8,7 +8,8 @@
 * `exchange` — обмен двумя заявками между маршрутами.
 
 Ход принимается, только если он уменьшает (время в пути, пробег) и **не ухудшает** ничего
-более важного: не теряет заявок и не добавляет задействованных инженеров. Допустимость
+более важного: не отодвигает аварии, не теряет заявок и не добавляет задействованных
+инженеров. Ход, после которого аварии начинаются раньше, — улучшение сам по себе. Допустимость
 каждого хода проверяет тот же `RouteState`, что и первичную вставку, — отдельной
 «упрощённой» проверки для локального поиска нет принципиально, иначе оптимизатор рано или
 поздно начнёт выдавать планы, которые проходят его собственную проверку и не проходят общую.
@@ -34,34 +35,41 @@ __all__ = ["local_search"]
 _EPS = 1e-7
 
 
-def _route_key(route: RouteState) -> tuple[float, float]:
-    return (route.travel_minutes, route.distance_km)
+def _route_key(route: RouteState) -> tuple[float, float, float]:
+    return (route.emergency_minutes, route.travel_minutes, route.distance_km)
 
 
-def _pair_key(a: RouteState, b: RouteState) -> tuple[float, float]:
-    return (a.travel_minutes + b.travel_minutes, a.distance_km + b.distance_km)
+def _pair_key(a: RouteState, b: RouteState) -> tuple[float, float, float]:
+    return (
+        a.emergency_minutes + b.emergency_minutes,
+        a.travel_minutes + b.travel_minutes,
+        a.distance_km + b.distance_km,
+    )
 
 
-def _better(new: tuple[float, float], old: tuple[float, float], eps: float = _EPS) -> bool:
-    """Строгое улучшение: сначала время в пути, затем пробег.
+def _better(new: tuple[float, ...], old: tuple[float, ...], eps: float = _EPS) -> bool:
+    """Строгое улучшение: сначала начала аварий, затем время в пути, затем пробег.
 
     Сравнение с допуском обязательно: без него ход, улучшающий результат на 1e-15,
     принимается, тут же откатывается обратным ходом, и поиск зацикливается.
     """
-    if new[0] < old[0] - eps:
-        return True
-    if new[0] > old[0] + eps:
-        return False
-    return new[1] < old[1] - eps
+    for a, b in zip(new, old):
+        if a < b - eps:
+            return True
+        if a > b + eps:
+            return False
+    return False
 
 
 def _move_better(
-    new: tuple[int, float, float], old: tuple[int, float, float], eps: float = _EPS
+    new: tuple[float, int, float, float], old: tuple[float, int, float, float], eps: float = _EPS
 ) -> bool:
-    """То же сравнение с ведущим признаком «ход освобождает инженера»."""
-    if new[0] != old[0]:
+    """То же сравнение; после аварий — признак «ход освобождает инженера»."""
+    if abs(new[0] - old[0]) > eps:
         return new[0] < old[0]
-    return _better((new[1], new[2]), (old[1], old[2]), eps)
+    if new[1] != old[1]:
+        return new[1] < old[1]
+    return _better(new[2:], old[2:], eps)
 
 
 def local_search(
@@ -121,7 +129,7 @@ def _or_opt(route: RouteState, max_segment: int) -> int:
     """Перенос сегмента из 1..max_segment заявок в другое место того же маршрута."""
     base_key = _route_key(route)
     n = route.size
-    best: tuple[tuple[float, float], list] | None = None
+    best: tuple[tuple[float, float, float], list] | None = None
 
     for length in range(1, min(max_segment, n) + 1):
         for start in range(route.locked_count, n - length + 1):
@@ -148,7 +156,7 @@ def _two_opt(route: RouteState) -> int:
     """Разворот участка. На маршрутах с окнами срабатывает редко, но стоит копейки."""
     base_key = _route_key(route)
     n = route.size
-    best: tuple[tuple[float, float], list] | None = None
+    best: tuple[tuple[float, float, float], list] | None = None
 
     for i in range(route.locked_count, n - 1):
         for j in range(i + 2, n + 1):
@@ -200,18 +208,18 @@ def _relocate(source: RouteState, target: RouteState, max_segment: int) -> int:
     """Перенос сегмента из одного маршрута в другой.
 
     Открывать нового инженера ради экономии километров нельзя: число задействованных
-    исполнителей — критерий более высокого порядка. Исключение одно — если маршрут-донор
-    при этом опустошается, то есть людей становится не больше, а меньше. Такой ход
-    принимается, даже если километры немного выросли.
+    исполнителей — критерий более высокого порядка. Исключений два: маршрут-донор при
+    этом опустошается (людей становится не больше, а меньше) — такой ход принимается,
+    даже если километры немного выросли; или свободный инженер начнёт аварию раньше.
     """
     if source.is_empty:
         return 0
 
-    base_travel, base_distance = _pair_key(source, target)
-    base_key = (1, base_travel, base_distance)
+    base_emergency, base_travel, base_distance = _pair_key(source, target)
+    base_key = (base_emergency, 1, base_travel, base_distance)
     target_was_empty = target.is_empty
     n = source.size
-    best: tuple[tuple[int, float, float], list, list] | None = None
+    best: tuple[tuple[float, int, float, float], list, list] | None = None
 
     for length in range(1, min(max_segment, n) + 1):
         for start in range(source.locked_count, n - length + 1):
@@ -219,7 +227,8 @@ def _relocate(source: RouteState, target: RouteState, max_segment: int) -> int:
             if any(not target.accepts(r) for r in segment):
                 continue
             remainder = source.stops[:start] + source.stops[start + length :]
-            if target_was_empty and remainder:
+            opens = target_was_empty and bool(remainder)
+            if opens and not any(r.is_emergency for r in segment):
                 continue  # новый инженер появился бы, а старый не освободился
             for position in range(target.locked_count, target.size + 1):
                 candidate = target.stops[:position] + segment + target.stops[position:]
@@ -230,9 +239,14 @@ def _relocate(source: RouteState, target: RouteState, max_segment: int) -> int:
                 if not target.try_sequence(candidate):
                     source.try_sequence(src_snapshot)
                     continue
-                travel, distance = _pair_key(source, target)
+                emergency, travel, distance = _pair_key(source, target)
                 frees_engineer = not remainder and not target_was_empty
-                key = (0 if frees_engineer else 1, travel, distance)
+                key = (emergency, 0 if frees_engineer else 1, travel, distance)
+                if opens and not emergency < base_emergency - _EPS:
+                    # Нового человека открывает только авария, которая так начнётся раньше
+                    source.try_sequence(src_snapshot)
+                    target.try_sequence(tgt_snapshot)
+                    continue
                 if _move_better(key, base_key) and (best is None or _move_better(key, best[0])):
                     best = (key, remainder, candidate)
                 source.try_sequence(src_snapshot)
@@ -252,7 +266,7 @@ def _exchange(source: RouteState, target: RouteState) -> int:
         return 0
 
     base_key = _pair_key(source, target)
-    best: tuple[tuple[float, float], list, list] | None = None
+    best: tuple[tuple[float, float, float], list, list] | None = None
 
     for i in range(source.locked_count, source.size):
         moved_out = source.stops[i]

@@ -33,6 +33,7 @@ __all__ = [
     "place_single",
     "place_with_ejection",
     "reclaim_emergencies",
+    "advance_emergency",
 ]
 
 
@@ -314,6 +315,62 @@ def place_single(
     return route, best[1]
 
 
+def place_shifting_lunch(
+    ctx: PlanContext,
+    solution: Solution,
+    request: Request,
+    *,
+    allowed_engineers: Sequence[str] | None = None,
+) -> tuple[RouteState, int] | None:
+    """Ставит аварию туда, где ей мешает только обед: обед сдвигается, никто не вытеснен.
+
+    Быстрая оценка вставки считает обед в его окне и такую позицию отбрасывает, поэтому
+    здесь каждая позиция проверяется полным пересчётом — он и раздвигает окно обеда
+    (`RouteState.recompute`). Из допустимых — где меньше всего прибавилось дороги.
+    """
+    if request.priority is not Priority.EMERGENCY or request.id in solution.assigned_ids():
+        return None
+    if ctx.settings.emergency_lunch_shift_minutes <= 0:
+        return None
+    candidates = allowed_engineers if allowed_engineers is not None else solution.order
+    best: tuple[tuple[float, float, str], int] | None = None
+    for engineer_id in candidates:
+        route = solution.routes.get(engineer_id)
+        if route is None or route.lunch is None or route.lunch_fact is not None:
+            continue
+        if not route.accepts(request):
+            continue
+        found = _shifted_fit(route, request)
+        if found is not None and (best is None or (*found[0], engineer_id) < best[0]):
+            best = ((*found[0], engineer_id), found[1])
+    if best is None:
+        return None
+    route = solution.routes[best[0][2]]
+    allowed = route.lunch_shift_allowed
+    route.lunch_shift_allowed = True
+    if not route.insert_checked(request, best[1]):
+        route.lunch_shift_allowed = allowed
+        return None
+    solution.clear_unassigned(request.id)
+    return route, best[1]
+
+
+def _shifted_fit(route: RouteState, request: Request) -> tuple[tuple[float, float], int] | None:
+    """Лучшая позиция для аварии, если обеду маршрута разрешён сдвиг: ((+минуты, +км), позиция).
+
+    Каждая позиция — полным пересчётом: быстрая оценка считает обед в его окне."""
+    best: tuple[tuple[float, float], int] | None = None
+    for position in range(route.locked_count, route.size + 1):
+        probe = route.clone()
+        probe.lunch_shift_allowed = True
+        if not probe.insert_checked(request, position):
+            continue
+        key = (probe.travel_minutes - route.travel_minutes, probe.distance_km - route.distance_km)
+        if best is None or key < best[0]:
+            best = (key, position)
+    return best
+
+
 def place_with_ejection(
     ctx: PlanContext,
     solution: Solution,
@@ -321,6 +378,7 @@ def place_with_ejection(
     *,
     allowed_engineers: Sequence[str] | None = None,
     touched: set[str] | None = None,
+    shift_lunch: bool = False,
 ) -> tuple[RouteState, int] | None:
     """Ставит заявку, вытесняя до `ejection_depth` менее приоритетных, если прямой вставки нет.
 
@@ -366,7 +424,13 @@ def place_with_ejection(
                 if index < 0 or index < route.locked_count:
                     continue
                 removed.append(route.remove_at(index))
-                placed = route.best_insertion(request)
+                if shift_lunch:
+                    # Со сдвигом обеда: авария важнее и обычной заявки, и обеда по расписанию
+                    fit = _shifted_fit(route, request) if route.lunch is not None else None
+                    route.lunch_shift_allowed = fit is not None
+                    placed = (None, fit[1]) if fit is not None else None
+                else:
+                    placed = route.best_insertion(request)
                 if placed is not None and route.insert_checked(request, placed[1]):
                     position = placed[1]
                     break
@@ -436,6 +500,9 @@ def reclaim_emergencies(
         if place_single(ctx, solution, request, allowed_engineers=allowed_engineers) is not None:
             placed += 1
             continue
+        if place_shifting_lunch(ctx, solution, request, allowed_engineers=allowed_engineers) is not None:
+            placed += 1
+            continue
         found = place_with_ejection(
             ctx,
             solution,
@@ -443,6 +510,104 @@ def reclaim_emergencies(
             allowed_engineers=allowed_engineers,
             touched=touched,
         )
+        if found is None and ctx.settings.emergency_lunch_shift_minutes > 0:
+            # Последняя ступень: и вытеснить менее важное, и сдвинуть обед
+            found = place_with_ejection(
+                ctx,
+                solution,
+                request,
+                allowed_engineers=allowed_engineers,
+                touched=touched,
+                shift_lunch=True,
+            )
         if found is not None:
             placed += 1
     return placed
+
+
+def _start_of(solution: Solution, request_id: str) -> float | None:
+    route = solution.route_of(request_id)
+    return None if route is None else route.schedule_at(route.index_of(request_id))[2]
+
+
+def advance_emergency(
+    ctx: PlanContext,
+    solution: Solution,
+    request: Request,
+    *,
+    allowed_engineers: Sequence[str] | None = None,
+    touched: set[str] | None = None,
+) -> bool:
+    """Ставит уже назначенную аварию раньше, снимая обычные работы перед ней.
+
+    Точечная вставка ставит аварию в самое раннее свободное место, но посреди дня оно
+    бывает только в конце маршрута: сдвинуть обычные работы вправо не дают окна клиентов.
+    Авария важнее: у одного инженера снимаются до `ejection_depth` менее приоритетных
+    работ подряд, авария встаёт на освободившееся место, снятые ищут окно у других.
+    Из вариантов — где авария начнётся раньше всего, при равенстве — где меньше потерь
+    и дороги. Возвращает, стала ли авария раньше.
+    """
+    current = _start_of(solution, request.id)
+    depth = max(0, ctx.settings.ejection_depth)
+    if current is None or depth <= 0:
+        return False
+    candidates = allowed_engineers if allowed_engineers is not None else solution.order
+    best: tuple[tuple[float, int, float], Solution, set[str]] | None = None
+    for engineer_id in candidates:
+        probe = solution.routes.get(engineer_id)
+        if probe is None or probe.is_empty or not probe.accepts(request):
+            continue
+        victims = [
+            r.id
+            for r in probe.stops[probe.locked_count :]
+            if r.priority.rank < request.priority.rank
+        ]
+        for first in range(len(victims)):
+            trial = solution.clone()
+            home = trial.route_of(request.id)
+            if home is None or home.remove_request(request.id) is None:
+                break  # авария уже начата — двигать нечего
+            route = trial.routes[engineer_id]
+            removed: list[Request] = []
+            start = None
+            for victim_id in victims[first : first + depth]:
+                index = route.index_of(victim_id)
+                if index < route.locked_count:
+                    continue
+                removed.append(route.remove_at(index))
+                placed = route.best_insertion(request)
+                if placed is None:
+                    continue
+                probe_route = route.clone()
+                if not probe_route.insert_checked(request, placed[1]):
+                    continue
+                at = probe_route.schedule_at(placed[1])[2]
+                if at < current - 1.0:
+                    route.insert_checked(request, placed[1])
+                    start = at
+                    break
+            if start is None:
+                continue
+            trial.clear_unassigned(request.id)
+            changed = {engineer_id}
+            lost = 0
+            for victim in removed:
+                rehomed = place_single(ctx, trial, victim)
+                if rehomed is None:
+                    lost += 1
+                    trial.mark_unassigned(
+                        victim,
+                        ReasonCode.TIME_CONFLICT,
+                        [f"место освобождено, чтобы аварийная заявка {request.id} началась раньше"],
+                    )
+                else:
+                    changed.add(rehomed[0].engineer.id)
+            key = (round(start), lost, round(trial.total_travel_minutes, 6))
+            if best is None or key < best[0]:
+                best = (key, trial, changed)
+    if best is None:
+        return False
+    solution.restore_from(best[1])
+    if touched is not None:
+        touched.update(best[2])
+    return True

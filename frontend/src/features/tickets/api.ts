@@ -43,6 +43,8 @@ export type UploadTicketsResult = {
   planning: boolean
   /** Примерно сколько секунд считаться плану на `date`. */
   planning_eta_seconds?: number | null
+  /** Пропущенные строки с ошибками и адреса без точной точки — первые несколько. */
+  warnings?: string[]
 }
 
 /** Окно «Добавить заявку». Время — «ЧЧ:ММ», тип работ — из WORK_TYPE_OPTIONS. */

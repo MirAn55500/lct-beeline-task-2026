@@ -163,7 +163,7 @@ def test_solve_returns_solution_with_quality_key(algorithm):
     solution = solve(ctx, algorithm)
     assert hasattr(solution, "quality_key")
     key = solution.quality_key()
-    assert isinstance(key, tuple) and len(key) == 6
+    assert isinstance(key, tuple) and len(key) == 7
 
 
 @pytest.mark.parametrize("algorithm", [Algorithm.BASELINE, Algorithm.OPTIMIZED])

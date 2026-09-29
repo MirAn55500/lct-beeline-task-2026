@@ -187,6 +187,9 @@ class Board:
         self._lunch_dropped: dict[str, object] = {}
         for state in self.solution.routes.values():
             state.floor_m = self.floor
+            # На Ганте авария, поставленная на время обеда, сдвигает его, как и в расчёте;
+            # и сохранённый план с таким сдвигом восстанавливается как есть
+            state.lunch_shift_allowed = True
 
         by_engineer: dict[str, list[StoredVisit]] = {}
         for visit in visits:
@@ -689,7 +692,7 @@ class Board:
 
         Весь день заново («Свободный») считает `planner.plan`, а не доска.
         """
-        from .construct import place_single, place_with_ejection
+        from .construct import advance_emergency, place_single, place_with_ejection
 
         scope = ReplanScope(scope)
         ctx, solution = self.ctx, self.solution
@@ -723,6 +726,9 @@ class Board:
                 found = place_with_ejection(ctx, solution, request)
             if found is not None:
                 placed.append(request.id)
+                if request.is_emergency and scope.allows_ejection:
+                    # Авария — как можно раньше, даже ценой обычных работ бригады
+                    advance_emergency(ctx, solution, request)
         return placed
 
     def _restore_lunches(self, *, eject: bool) -> list[str]:

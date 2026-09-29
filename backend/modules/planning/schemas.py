@@ -126,6 +126,9 @@ class PlanVisitExport(BaseModel):
     idleMinutes: float
     transit: list[str] = Field(default_factory=list)
     explanation: str = ""
+    cancelled: bool = False
+    """Заявку отменили, когда инженер уже ехал к ней: поездка состоялась, работы не было.
+    В «назначено» такой визит не считается."""
 
 
 class PlanLunchExport(BaseModel):
@@ -145,6 +148,8 @@ class PlanLunchExport(BaseModel):
     detour: bool = False
     """К месту обеда своя дорога (офис, своя точка) — у неё свой срез линии маршрута."""
     locked: bool = False
+    shifted: bool = False
+    """Обед вне своего окна: его сдвинула авария."""
     geometryRange: list[int] | None = None
     transit: list[str] = Field(default_factory=list)
 

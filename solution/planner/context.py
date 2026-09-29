@@ -47,12 +47,16 @@ class LunchTiming:
     timing: RequestTiming
     point: GeoPoint | None
     """`None` — у последней заявки, без дороги."""
+    shifted: bool = False
+    """Окно раздвинуто ради аварии (`PlanContext.lunch_shifted`)."""
 
 
 class PlanContext:
     """Неизменяемое окружение расчёта."""
 
-    __slots__ = ("scenario", "settings", "travel", "origin", "_calendars", "_timings", "_lunches")
+    __slots__ = (
+        "scenario", "settings", "travel", "origin", "_calendars", "_timings", "_lunches", "_shifted",
+    )
 
     def timed_for(self, mode):
         """Модель со временем от момента выезда для этого способа передвижения, или None.
@@ -75,6 +79,7 @@ class PlanContext:
             r.id: self._timing_of(r) for r in scenario.requests
         }
         self._lunches: dict[str, LunchTiming | None] = {}
+        self._shifted: dict[str, LunchTiming | None] = {}
 
     # ------------------------------------------------------------------ точка отсчёта
 
@@ -142,6 +147,30 @@ class PlanContext:
                     lunch.point,
                 )
         self._lunches[engineer.id] = found
+        return found
+
+    def lunch_shifted(self, engineer: Engineer) -> LunchTiming | None:
+        """Обед, который авария может сдвинуть: окно шире на `emergency_lunch_shift_minutes`
+        в обе стороны, в пределах смены. `None` — обеда нет или сдвигать не разрешено."""
+        if engineer.id in self._shifted:
+            return self._shifted[engineer.id]
+        found: LunchTiming | None = None
+        base = self.lunch(engineer)
+        shift = float(self.settings.emergency_lunch_shift_minutes)
+        cal = self.calendar(engineer)
+        if base is not None and shift > 0:
+            timing = base.timing
+            low = max(timing.window_start - shift, cal.start_m or 0.0)
+            high = min(timing.window_end + shift, (cal.end_m or 0.0) - timing.duration)
+            if high >= low:
+                found = LunchTiming(
+                    RequestTiming(
+                        window_start=low, window_end=high, duration=timing.duration, available_from=low
+                    ),
+                    base.point,
+                    shifted=True,
+                )
+        self._shifted[engineer.id] = found
         return found
 
     def _timing_of(self, request: Request) -> RequestTiming:

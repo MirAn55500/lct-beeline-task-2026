@@ -1,5 +1,10 @@
 import type { PlanExportResponse } from '../planApi'
 
+/** Визиты к заявкам; отменённая в пути заявка — только поездка, не назначенная работа. */
+export function planVisits(plan: PlanExportResponse | undefined) {
+  return plan?.routes.flatMap((route) => route.visits.filter((visit) => !visit.cancelled)) ?? []
+}
+
 /** Средняя загрузка задействованных инженеров, %; без маршрутов — null. */
 export function avgLoad(plan: PlanExportResponse | undefined): number | null {
   if (!plan?.routes.length) return null
@@ -12,7 +17,7 @@ export function avgLoad(plan: PlanExportResponse | undefined): number | null {
 
 /** Среднее время в пути до заявки, минуты; без визитов — null. */
 export function avgTravel(plan: PlanExportResponse | undefined): number | null {
-  const visits = plan?.routes.flatMap((route) => route.visits) ?? []
+  const visits = planVisits(plan)
   if (visits.length === 0) return null
   return Math.round(visits.reduce((acc, visit) => acc + (visit.travelMinutes ?? 0), 0) / visits.length)
 }
@@ -27,7 +32,7 @@ export function totalDistance(plan: PlanExportResponse | undefined): number | nu
 /** Средний пробег на назначенную заявку, км. */
 export function avgDistance(plan: PlanExportResponse | undefined): number | null {
   const total = totalDistance(plan)
-  const visits = plan?.routes.reduce((acc, route) => acc + route.visits.length, 0) ?? 0
+  const visits = planVisits(plan).length
   return total != null && visits > 0 ? total / visits : null
 }
 

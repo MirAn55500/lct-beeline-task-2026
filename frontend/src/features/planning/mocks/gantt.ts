@@ -121,7 +121,7 @@ export function buildGantt(
         start,
         end,
         travel: Math.max(0, start - departure),
-        status: statusAt(minutes(visit.departureAt), start, end, now),
+        status: visit.cancelled ? 'cancelled' : statusAt(minutes(visit.departureAt), start, end, now),
       }
     }),
   )

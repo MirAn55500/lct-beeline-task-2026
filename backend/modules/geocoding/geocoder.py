@@ -194,6 +194,32 @@ def has_house(address: str) -> bool:
     return bool(_HOUSE_MARK.search(address))
 
 
+_WORD = re.compile(r"[a-zа-яё]{4,}", re.IGNORECASE)
+_GENERIC = frozenset({
+    "город", "москва", "московская", "область", "улица", "проспект", "переулок", "проезд",
+    "шоссе", "бульвар", "набережная", "площадь", "тупик", "аллея", "линия", "просек",
+    "район", "поселок", "посёлок", "деревня", "село", "корпус", "строение", "владение",
+    "микрорайон", "квартал", "территория",
+})
+
+
+def _stems(text: str) -> set[str]:
+    """Значимые слова адреса — первые пять букв: окончания у OSM и в выгрузке разные."""
+    words = (w.lower().replace("ё", "е") for w in _WORD.findall(text))
+    return {w[:5] for w in words if w not in _GENERIC}
+
+
+def names_match(address: str, found: str) -> bool:
+    """Найденный объект OSM — тот, что спрашивали: совпало хоть одно значимое слово.
+
+    Photon и Nominatim на любой запрос отвечают ближайшим похожим объектом: «абвгд 123» —
+    каким-то домом 123 в Москве с точностью «дом», и заявка уезжала в случайную точку.
+    DaData так не делает, её ответы не проверяются.
+    """
+    wanted = _stems(address)
+    return bool(wanted) and bool(wanted & _stems(found))
+
+
 class OsmProvider:
     """Photon, затем Nominatim — по лестнице запросов «дом → улица → населённый пункт».
 
@@ -260,7 +286,7 @@ class OsmProvider:
     def _lookup(self, address: str) -> GeoHit | None:
         best: GeoHit | None = None
         for query in build_queries(address):
-            for hit in (self._ask_photon(query), self._ask_nominatim(query)):
+            for hit in (self._ask_photon(query, address), self._ask_nominatim(query, address)):
                 if self.broken:
                     return best
                 if hit is not None and (best is None or hit.rank < best.rank):
@@ -269,7 +295,7 @@ class OsmProvider:
                     return best
         return best
 
-    def _ask_photon(self, query: str) -> GeoHit | None:
+    def _ask_photon(self, query: str, address: str) -> GeoHit | None:
         try:
             found = self._photon.geocode(query, bbox=self._box)
         except GeopyError as exc:
@@ -277,11 +303,16 @@ class OsmProvider:
             return None
         if found is None:
             return None
-        kind = found.raw.get("properties", {}).get("type", "")
+        parts = found.raw.get("properties", {})
+        text = " ".join(str(parts.get(k, "")) for k in ("name", "street", "city", "district", "locality"))
+        if not names_match(address, text):
+            logger.info("Photon: %s → «%s» — другой объект, отброшено", address, text.strip())
+            return None
+        kind = parts.get("type", "")
         precision = HOUSE if kind == "house" else STREET if kind == "street" else SETTLEMENT
         return GeoHit(found.latitude, found.longitude, precision, "photon")
 
-    def _ask_nominatim(self, query: str) -> GeoHit | None:
+    def _ask_nominatim(self, query: str, address: str) -> GeoHit | None:
         try:
             found = self._nominatim(
                 query, country_codes="ru", viewbox=self._box, bounded=True, language="ru"
@@ -293,6 +324,9 @@ class OsmProvider:
             return None
         self._failures = 0
         if found is None:
+            return None
+        if not names_match(address, found.raw.get("display_name") or found.address or ""):
+            logger.info("Nominatim: %s → «%s» — другой объект, отброшено", address, found.address)
             return None
         kind = found.raw.get("addresstype", "")
         if kind in ("building", "house") or found.raw.get("type") == "house":

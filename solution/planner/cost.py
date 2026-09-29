@@ -4,10 +4,12 @@
 работает, но держится на подобранной константе: стоит пробегу вырасти на порядок,
 и приоритеты молча меняются местами. Здесь порядок критериев выражен структурой
 данных, а не величиной весов, поэтому его нельзя нарушить случайно и легко объяснить
-диспетчеру: «сначала не открываем нового человека, потом экономим время, потом — километры».
+диспетчеру: «сначала авария — как можно раньше, потом не открываем нового человека,
+потом экономим время, потом — километры».
 
 Порядок соответствует базе знаний («Правила расчёта»): число исполнителей важнее,
-время перемещения важнее пробега.
+время перемещения важнее пробега. Раньше всего этого — время начала аварий: аварию
+устраняют как можно раньше, даже если ради этого выйдет лишний инженер или крюк.
 """
 
 from __future__ import annotations
@@ -30,10 +32,13 @@ class InsertionCost:
     delta_travel_minutes: float = 0.0
     delta_distance_km: float = 0.0
     delta_waiting_minutes: float = 0.0
+    delta_emergency_minutes: float = 0.0
+    """На сколько позже в сумме начнутся аварии маршрута (у вставляемой аварии — её начало)."""
 
     @property
-    def key(self) -> tuple[int, float, float, float]:
+    def key(self) -> tuple[float, int, float, float, float]:
         return (
+            round(self.delta_emergency_minutes, _ROUND),
             self.opens_new_engineer,
             round(self.delta_travel_minutes, _ROUND),
             round(self.delta_distance_km, _ROUND),
@@ -65,6 +70,7 @@ class InsertionCost:
             self.delta_travel_minutes - other.delta_travel_minutes,
             self.delta_distance_km - other.delta_distance_km,
             self.delta_waiting_minutes - other.delta_waiting_minutes,
+            self.delta_emergency_minutes - other.delta_emergency_minutes,
         )
 
     def to_dict(self) -> dict[str, float]:
@@ -73,12 +79,13 @@ class InsertionCost:
             "delta_travel_minutes": round(self.delta_travel_minutes, 3),
             "delta_distance_km": round(self.delta_distance_km, 3),
             "delta_waiting_minutes": round(self.delta_waiting_minutes, 3),
+            "delta_emergency_minutes": round(self.delta_emergency_minutes, 3),
         }
 
 
-BEST_POSSIBLE = InsertionCost(-1, -math.inf, -math.inf, -math.inf)
+BEST_POSSIBLE = InsertionCost(-1, -math.inf, -math.inf, -math.inf, -math.inf)
 """Нижняя граница: ничего не может быть дешевле."""
 
-WORST_POSSIBLE = InsertionCost(1 << 30, math.inf, math.inf, math.inf)
+WORST_POSSIBLE = InsertionCost(1 << 30, math.inf, math.inf, math.inf, math.inf)
 """Верхняя граница. Также играет роль «бесконечного сожаления»: если допустимая
 позиция ровно одна, отложить заявку — значит с большой вероятностью потерять её."""

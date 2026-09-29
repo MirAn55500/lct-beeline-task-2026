@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from .calendar import WorkCalendar
-from .enums import AssignmentStatus
+from .enums import AssignmentStatus, Priority
 from .feasibility import check_static
 from .models import Scenario
 from .result import PlanResult
@@ -112,6 +112,18 @@ def _check_route(
 
     lunch = route.lunch
     window = _lunch_window(engineer, calendar)
+    if lunch is not None and lunch.shifted and not lunch.locked and window is not None:
+        # Сдвинуть обед за окно вправе только авария в этом же маршруте,
+        # и только вплотную к ней: сразу до или сразу после
+        neighbours = route.visits[max(0, lunch.after_position - 1) : lunch.after_position + 1]
+        emergency = any(
+            requests.get(v.request_id) is not None
+            and requests[v.request_id].priority is Priority.EMERGENCY
+            for v in neighbours
+        )
+        if not emergency:
+            problems.append(f"Инженер {engineer.id}: обед сдвинут за окно не рядом с аварией")
+        window = _shifted_window(window, calendar, settings.emergency_lunch_shift_minutes)
     if lunch is None and window is not None and route.visits and not_before is None:
         problems.append(f"Инженер {engineer.id}: в маршруте нет обеда")
     if lunch is not None and window is None:
@@ -335,6 +347,13 @@ def _lunch_window(engineer, calendar: WorkCalendar):
     if (high - low).total_seconds() / 60.0 < lunch.minutes - 1e-6:
         return None
     return low, high, lunch.minutes
+
+
+def _shifted_window(window, calendar: WorkCalendar, shift_minutes: int):
+    """Окно обеда, раздвинутое аварией, — как `PlanContext.lunch_shifted`."""
+    low, high, minutes = window
+    shift = timedelta(minutes=shift_minutes)
+    return max(low - shift, calendar.shift_start), min(high + shift, calendar.shift_end), minutes
 
 
 def _compare_moment(request_id: str, label: str, declared, computed) -> list[str]:

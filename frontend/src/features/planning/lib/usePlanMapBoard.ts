@@ -1,10 +1,11 @@
 import { toast } from '@heroui/react'
 import { skipToken } from '@reduxjs/toolkit/query/react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import type { EngineerRoute, MapEngineer, RouteStop, UnassignedTicket } from '../mapTypes'
 import { buildMapDataset, getMapDataset, type MapDataset } from '../mocks'
-import { useGetPlanExportQuery, useMovePlanRequestMutation } from '../planApi'
+import type { PlanExportResponse } from '../planApi'
+import { planExportApi, useGetPlanExportQuery, useMovePlanRequestMutation } from '../planApi'
 import { isOfflineError } from './offline'
 import { straightLeg } from './routeGeometry'
 import { estimateMinutes } from './routeSteps'
@@ -24,6 +25,31 @@ const LOAD_PER_MANUAL_STOP = 8
 type MapBoardDataset = Pick<MapDataset, 'engineers' | 'routes' | 'unassigned'>
 
 const EMPTY: MapBoardDataset = { engineers: [], routes: [], unassigned: [] }
+
+/** Линии новых участков backend достраивает в фоне после сохранения версии. */
+const LINES_POLL_MS = 5000
+/** Сколько ждать линий: участок, который сервис маршрутов так и не построил, остаётся прямым. */
+const LINES_WAIT_MS = 120_000
+
+/** Маршруты с заявками, у которых есть прямые участки: линии ещё строятся или не построятся вовсе. */
+const straightRoutes = (plan: PlanExportResponse | undefined) =>
+  plan ? plan.routes.filter((route) => route.visits.length > 0 && route.geometrySource !== 'ors').length : 0
+
+/** Достроенные в фоне линии — в показанные маршруты; выбор и вариант транспорта не сбрасываются. */
+function withFreshLegs(current: EngineerRoute[], fresh: EngineerRoute[]): EngineerRoute[] {
+  const byEngineer = new Map(fresh.map((route) => [route.engineerId, route]))
+  return current.map((route) => {
+    const next = byEngineer.get(route.engineerId)
+    if (!next || next.stops.length !== route.stops.length) return route
+    return {
+      ...route,
+      stops: route.stops.map((stop, index) =>
+        next.stops[index]?.id === stop.id ? { ...stop, leg: next.stops[index].leg } : stop,
+      ),
+      lunch: route.lunch && next.lunch ? { ...route.lunch, leg: next.lunch.leg } : route.lunch,
+    }
+  })
+}
 
 /** План региона на моках; в другие дни плана нет — инженеры без маршрутов, как пустой Гант. */
 function mockDatasetFor(regionId: number | null, date: string): MapBoardDataset {
@@ -49,12 +75,24 @@ export function usePlanMapBoard(
   /** `readOnly` — старая версия плана или прошедший день: руками не правится. */
   options?: { onSaved?: (planId: number) => void; readOnly?: boolean },
 ) {
-  const query = useGetPlanExportQuery(regionId != null ? { regionId, date, planId } : skipToken, {
+  const args = regionId != null ? { regionId, date, planId } : skipToken
+  // Пока у версии есть прямые участки, план переспрашивается, но не дольше LINES_WAIT_MS
+  const { currentData: shown } = planExportApi.endpoints.getPlanExport.useQueryState(args)
+  const linesKey = straightRoutes(shown) > 0 ? `${shown?.planId}` : null
+  const [linesExpired, setLinesExpired] = useState<string | null>(null)
+  useEffect(() => {
+    if (linesKey == null) return
+    const timer = setTimeout(() => setLinesExpired(linesKey), LINES_WAIT_MS)
+    return () => clearTimeout(timer)
+  }, [linesKey])
+  const query = useGetPlanExportQuery(args, {
     refetchOnMountOrArgChange: true,
+    pollingInterval: linesKey != null && linesExpired !== linesKey ? LINES_POLL_MS : 0,
   })
   const offline = isOfflineError(query.isError, query.error)
   // Пока грузится другая версия, держим прежние маршруты, а не мигаем пустой картой.
   const plan = query.currentData ?? (query.isFetching ? query.data : undefined)
+  const geometrySize = plan ? plan.routes.reduce((sum, route) => sum + route.geometry.length, 0) : 0
   const dataset = useMemo(
     () => (plan ? buildMapDataset(plan) : offline ? mockDatasetFor(regionId, date) : EMPTY),
     [plan, offline, regionId, date],
@@ -64,6 +102,7 @@ export function usePlanMapBoard(
   const viewKey = `${regionId}:${date}:${plan ? `plan-${plan.planId}` : offline ? 'mock' : 'none'}`
 
   const [loadedKey, setLoadedKey] = useState(viewKey)
+  const [loadedGeometry, setLoadedGeometry] = useState(geometrySize)
   const [engineers, setEngineers] = useState<MapEngineer[]>(dataset.engineers)
   const [routes, setRoutes] = useState<EngineerRoute[]>(dataset.routes)
   const [unassigned, setUnassigned] = useState<UnassignedTicket[]>(dataset.unassigned)
@@ -83,6 +122,11 @@ export function usePlanMapBoard(
     setHoveredId(null)
     setActiveStopId(null)
     setPendingDrop(null)
+    setLoadedGeometry(geometrySize)
+  } else if (loadedGeometry !== geometrySize) {
+    // Та же версия, но backend достроил линии по улицам
+    setLoadedGeometry(geometrySize)
+    setRoutes((current) => withFreshLegs(current, dataset.routes))
   }
 
   const selectedEngineer = engineers.find((item) => item.id === selectedId) ?? null

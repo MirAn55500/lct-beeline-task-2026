@@ -1671,6 +1671,9 @@ def test_refusal_on_the_way_keeps_the_trip_and_zeroes_the_work():
     assert visit.distance_km == pytest.approx(visit_before.distance_km)
     assert visit.service_end_at == visit.service_start_at, "работы не было"
     assert validate_plan(after, scenario_after(scenario, before, ev)) == []
+    assert not any("неположительная длительность" in w for w in after.warnings), (
+        "нулевая работа — факт события, а не ошибка входа"
+    )
 
 
 def test_status_outside_the_shift_is_reported_to_the_dispatcher():

@@ -46,6 +46,7 @@ from datetime import datetime
 from typing import Mapping, Sequence
 
 from .construct import (
+    advance_emergency,
     insert_regret,
     place_single,
     place_with_ejection,
@@ -146,6 +147,10 @@ def replan(
             )
         else:
             touched.add(placed[0].engineer.id)
+            if allowed.allows_ejection:
+                # Свободное место нашлось, но может быть только в конце дня: авария важнее
+                # обычных работ, и ради раннего начала они уступают ей место
+                advance_emergency(ctx, solution, urgent_request, touched=touched)
 
     # Пул собирается ПОСЛЕ размещения аварии: вытеснение второй ступени само добавляет
     # в него заявки, и собранный заранее список прошёл бы мимо них.
@@ -186,12 +191,18 @@ def replan(
         if _prefer_rebuilt(rebuilt, solution, previous):
             solution = rebuilt
 
+    checks = new_scenario.validate()
+    if event.target_request_id is not None:
+        # Нулевая длительность у заявки события (отменена в пути, отказ на адресе) — не
+        # ошибка входа, а сам факт события: о нём уже есть своё предупреждение
+        noise = f"Заявка {event.target_request_id}: неположительная длительность"
+        checks = [w for w in checks if not w.startswith(noise)]
     elapsed_ms = (_time.monotonic() - started) * 1000.0
     result = build_result(
         ctx,
         solution,
         Algorithm.OPTIMIZED,
-        warnings=tuple(new_scenario.validate()) + tuple(extra_warnings),
+        warnings=tuple(checks) + tuple(extra_warnings),
         elapsed_ms=elapsed_ms,
         plan_id=plan_id,
     )
@@ -806,6 +817,8 @@ def seed_from_previous(
 
     for route in previous.routes:
         state = solution.routes.get(route.engineer_id)
+        if state is not None and route.lunch is not None and route.lunch.shifted:
+            state.lunch_shift_allowed = True  # обед сдвинула авария — план держит сдвиг
         if state is None:
             # Инженер выбыл из расчёта целиком: все его заявки ищут нового исполнителя.
             orphans.extend(

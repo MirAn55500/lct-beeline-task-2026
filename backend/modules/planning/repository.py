@@ -261,6 +261,10 @@ class PlanningRepository:
             )
         )
         request.status_id = new_status_id
+        # Связь `status` загружена раньше и сама за status_id не обновится: снимок версии,
+        # который сохраняется тут же, в этой сессии, считал бы заявку открытой — без визита
+        # и без причины (заявка «терялась» в истории версий)
+        request.status = await self._session.get(Dictionary, new_status_id)
         self._session.add(request)
 
     async def add_replan_event(

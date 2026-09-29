@@ -41,7 +41,7 @@ from planner.ors import (  # noqa: E402
     Routing,
     RoutingCache,
     collect_points,
-    point_key,
+    covers,
     scenario_modes,
 )
 from planner.travel import HaversineTravelModel, TravelModel  # noqa: E402
@@ -175,6 +175,12 @@ def lunch_address_ids(engineers: list[Engineer]) -> dict[int, int]:
         elif place == "point" and spot is not None and spot.address_id is not None:
             out[engineer.engineer_id] = spot.address_id
     return out
+
+
+def is_cancelled(request: Request) -> bool:
+    """Заявку отменили: визит к ней, оставшийся в версии, — только состоявшаяся поездка."""
+    status = request.status.value.strip().lower() if request.status else ""
+    return status in {"cancelled", "отменена"}
 
 
 def _is_closed(request: Request) -> bool:
@@ -323,13 +329,12 @@ _fetch_lock = threading.Lock()
 
 def _covered(scenario: Scenario, cache: RoutingCache) -> bool:
     """Все матрицы сценария уже в кэше — в ORS идти не за чем."""
-    keys = [point_key(p) for p in collect_points(scenario)]
+    points = collect_points(scenario)
     for mode in scenario_modes(scenario):
         profile = DEFAULT_PROFILES.get(mode)
         if profile is None or profile in NO_MATRIX_PROFILES:
             continue
-        table = cache.legs_of(profile)
-        if any(a != b and (a, b) not in table for a in keys for b in keys):
+        if not covers(cache.legs_of(profile), points, profile):
             return False
     return True
 
@@ -411,9 +416,21 @@ def run_plan(
     lines: Lines = "ors",
 ) -> PlanResult:
     """Расчёт плана. `profiles` — профили rRAPTOR пар сценария (modules/planning/transit)."""
+    return run_plan_routed(scenario, algorithm, profiles, lines=lines)[0]
+
+
+def run_plan_routed(
+    scenario: Scenario,
+    algorithm: Algorithm = Algorithm.OPTIMIZED,
+    profiles: tuple[dict[tuple[str, str], Profile], int, int] | None = None,
+    *,
+    lines: Lines = "cache",
+) -> tuple[PlanResult, Routing]:
+    """`run_plan` и маршрутизация, с которой он считался: по ней `fetch_lines` достроит
+    в фоне линии, которых не было в кэше."""
     routing, travel = build_travel(scenario, profiles)
     result = plan(scenario, algorithm, travel=travel)
-    return finish_plan(scenario, result, routing, travel, lines=lines)
+    return finish_plan(scenario, result, routing, travel, lines=lines), routing
 
 
 def fetch_lines(routing: Routing, result: PlanResult) -> bool:
@@ -567,6 +584,7 @@ def lunch_rows(result: PlanResult, offset_hours: float = 3.0) -> list[dict]:
             "point": [lunch.point.lon, lunch.point.lat],
             "detour": lunch.is_detour,
             "locked": lunch.locked,
+            "shifted": lunch.shifted,
             "path": path,
         })
     return rows

@@ -222,6 +222,8 @@ class LunchStop:
     address: str = ""
     locked: bool = False
     """Обед уже начался — при перепланировании он факт, как начатый визит."""
+    shifted: bool = False
+    """Обед вне своего окна: его сдвинула авария (`Settings.emergency_lunch_shift_minutes`)."""
     geometry_range: tuple[int, int] | None = None
     """Участок дороги к месту обеда в `RouteResult.geometry`, как у `Visit`."""
     transit: tuple["TransitLeg", ...] = ()
@@ -249,6 +251,7 @@ class LunchStop:
             "place": self.place,
             "address": self.address,
             "locked": self.locked,
+            "shifted": self.shifted,
             "geometry_range": list(self.geometry_range) if self.geometry_range else None,
             "transit": [leg.to_dict() for leg in self.transit],
         }

@@ -344,6 +344,9 @@ def _build_lunch(ctx: PlanContext, state: RouteState) -> LunchStop | None:
         place=source.place if source is not None else "last_request",
         address=source.address if source is not None else "",
         locked=state.lunch_fact is not None,
+        shifted=state.lunch_shift_minutes(start) > 0 and any(
+            r.priority is Priority.EMERGENCY for r in state.stops[max(0, gap - 1) : gap + 1]
+        ),
     )
 
 

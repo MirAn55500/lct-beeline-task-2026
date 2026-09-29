@@ -254,3 +254,24 @@ def test_place_new_engineer_may_shift_one_route_within_windows():
     after = starts(board)
     assert after["R1"] == before["R1"]
     assert before["R2"] < after["R2"] <= minutes(t("13:00")) + 1e-6
+
+
+def test_board_keeps_an_emergency_that_shifted_the_lunch():
+    """Сохранённый план с аварией на месте обеда доска восстанавливает, а не роняет."""
+    from dataclasses import replace
+
+    from planner import Lunch
+
+    engineer = replace(
+        eng("E1", shift=("09:00", "18:00"), at=HOME, skills=["emergency"]),
+        lunch=Lunch(window_start=t("13:00"), window_end=t("14:00")),
+    )
+    scenario = sc(
+        [req("E", window=("12:00", "14:00"), dur=80, at=A, skill="emergency", priority="emergency")],
+        [engineer],
+    )
+    result = plan(scenario)
+    assert result.routes[0].lunch.shifted
+    board = Board(scenario, stored(result))
+    assert "E" in starts(board)
+    assert board.result().routes[0].lunch.shifted

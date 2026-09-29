@@ -62,6 +62,8 @@ export type PlanExport = {
       distanceKm?: number
       explanation?: string
       transit: string[]
+      /** Заявку отменили, когда инженер уже ехал: поездка состоялась, работы нет. */
+      cancelled?: boolean
     }[]
     /** Обед: есть в ответе backend, в старых выгрузках — нет. */
     lunch?: PlanLunchExport | null
@@ -85,6 +87,8 @@ export type PlanLunchExport = {
   /** К месту обеда своя дорога — у неё свой срез geometry. */
   detour: boolean
   locked: boolean
+  /** Обед вне своего окна: его сдвинула авария. */
+  shifted?: boolean
   geometryRange: [number, number] | null
   transit: string[]
 }
@@ -96,9 +100,10 @@ const LUNCH_PLACE_LABEL: Record<PlanLunchExport['place'], string> = {
 }
 
 /** Где обед — подписью: у своего места — его адрес. */
-export function lunchPlaceLabel(lunch: Pick<PlanLunchExport, 'place' | 'address'>) {
-  if (lunch.place === 'point' && lunch.address) return shortAddress(lunch.address)
-  return LUNCH_PLACE_LABEL[lunch.place] ?? 'Обед'
+export function lunchPlaceLabel(lunch: Pick<PlanLunchExport, 'place' | 'address' | 'shifted'>) {
+  const place =
+    lunch.place === 'point' && lunch.address ? shortAddress(lunch.address) : (LUNCH_PLACE_LABEL[lunch.place] ?? 'Обед')
+  return lunch.shifted ? `${place} · сдвинут из-за аварии` : place
 }
 
 export const PLANS = [planEast, planSoutheast, planSouthcentral] as unknown as PlanExport[]

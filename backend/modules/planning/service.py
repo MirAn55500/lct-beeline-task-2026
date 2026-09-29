@@ -23,6 +23,7 @@ from modules.planning.scenario_builder import (
     build_travel,
     fetch_lines,
     finish_plan,
+    is_cancelled,
     lunch_address_ids,
     lunch_rows,
     route_legs,
@@ -30,6 +31,7 @@ from modules.planning.scenario_builder import (
     reason_index,
     restrict_availability,
     run_plan,
+    run_plan_routed,
     street_path,
 )
 from modules.planning import routing_cache
@@ -135,17 +137,32 @@ def schedule_lines(plan_id: int, routing: Routing, result: PlanResult) -> None:
     Версия сохранена с прямыми участками там, где линии ещё не было (`lines="cache"`).
     Выдача плана подхватит линии из кэша (`street_path`), а снимок — вид версии в
     истории — пересохраняется, когда они готовы.
+
+    Линии уступают ORS фоновому расчёту плана: его ждёт диспетчер, а очередь линий после
+    серии правок — минуты поисков пешехода. Версию, которую уже сменила следующая, не
+    дорисовывают: на карте её не покажут, а общие участки достроит job новой версии.
     """
 
     async def job() -> None:
         async with _drawing:
             try:
+                while background.busy():
+                    await asyncio.sleep(1.0)
+                async with async_session_factory() as session:
+                    repo = PlanningRepository(session)
+                    plan = await repo.get_plan(plan_id)
+                    latest = await repo.find_latest_plan(plan.region_id, plan.date) if plan else None
+                if latest is None or latest.plan_id != plan_id:
+                    return
                 if not await asyncio.to_thread(fetch_lines, routing, result):
                     return
                 async with async_session_factory() as session:
                     service = PlanningService(session)
                     plan = await service._repo.get_plan(plan_id)
-                    if plan is not None:
+                    latest = await service._repo.find_latest_plan(plan.region_id, plan.date) if plan else None
+                    # Снимок строится по текущим данным: пока шли линии, могла появиться
+                    # новая версия и новые заявки — в историю старой версии они не входят
+                    if plan is not None and latest is not None and latest.plan_id == plan_id:
                         await service._save_snapshot(plan)
             except Exception:
                 logger.exception("Линии по улицам версии %d не достроены", plan_id)
@@ -165,6 +182,11 @@ _DISTRIBUTION_TO_ALGORITHM = {
     Distribution.EVEN: Algorithm.BASELINE,
     Distribution.EFFICIENT: Algorithm.OPTIMIZED,
 }
+
+
+_CANCELLED_EN_ROUTE = (
+    "Заявку отменили, когда инженер уже ехал к ней: поездка состоялась, работы не было"
+)
 
 
 def reason_code(label: str) -> str:
@@ -241,8 +263,10 @@ class PlanningService:
         # (заявка, перенесённая на другой день, оставалась в «назначено»).
         shown = await self._export(plan, latest=plan is plans[0])
         visits = [v for route in shown.routes for v in route.visits]
-        tickets_total = len(shown.requests)
-        assigned = len(visits)
+        # Отменённая в пути заявка — поездка в пробеге, но не заявка «назначено»
+        cancelled = sum(1 for v in visits if v.cancelled)
+        tickets_total = len(shown.requests) - cancelled
+        assigned = len(visits) - cancelled
         engaged = sum(1 for route in shown.routes if route.visits)
         travel_minutes = sum(v.travelMinutes for v in visits)
         distance_km = sum(v.distanceKm for v in visits)
@@ -320,13 +344,16 @@ class PlanningService:
 
         previous = await self._repo.find_latest_plan(region_id, day)
         profiles = await transit.load_profiles(self._repo.session, scenario)
-        result = None
+        # Линии по улицам — из кэша, недостающие достраиваются в фоне (`schedule_lines`):
+        # после «Свободного» новых участков десятки, и на стенде ORS строил бы их минутами
+        planned = None
         if remake_level is not RemakeLevel.FREE and previous is not None:
-            result = await self._extend(previous.plan_id or 0, day, scenario, profiles, fresh, remake_level)
+            planned = await self._extend(previous.plan_id or 0, day, scenario, profiles, fresh, remake_level)
         elif previous is not None and algorithm is Algorithm.OPTIMIZED:
-            result = await self._rebuild_unstarted(previous.plan_id or 0, day, scenario, profiles, fresh)
-        if result is None:
-            result = await asyncio.to_thread(run_plan, scenario, algorithm, profiles)
+            planned = await self._rebuild_unstarted(previous.plan_id or 0, day, scenario, profiles, fresh)
+        if planned is None:
+            planned = await asyncio.to_thread(run_plan_routed, scenario, algorithm, profiles)
+        result, routing = planned
         comparison = None
         if compare and algorithm is Algorithm.OPTIMIZED:
             baseline = await asyncio.to_thread(
@@ -349,6 +376,7 @@ class PlanningService:
             comparison=comparison,
         )
         schedule_baseline(plan)
+        schedule_lines(plan.plan_id or 0, routing, result)
         return response
 
     async def _persist(
@@ -559,7 +587,7 @@ class PlanningService:
         profiles,
         fresh: Iterable[int],
         remake_level: RemakeLevel,
-    ) -> PlanResult | None:
+    ) -> tuple[PlanResult, Routing] | None:
         """Версия плана + заявки, которых в ней нет. None — восстановить нечего, считать с нуля.
 
         Кандидаты — новые и изменённые заявки, а также оставшиеся в версии без инженера:
@@ -580,13 +608,13 @@ class PlanningService:
         if now.date() != day:
             now = None
 
-        def compute() -> PlanResult:
+        def compute() -> tuple[PlanResult, Routing]:
             routing, travel = build_travel(scenario, profiles)
             board = Board(
                 scenario, visits, unassigned=unassigned, travel=travel, now=now, lunches=lunches
             )
             board.place_new(candidates, scope=_REMAKE_TO_SCOPE[remake_level])
-            return finish_plan(scenario, board.result(), routing, travel)
+            return finish_plan(scenario, board.result(), routing, travel, lines="cache"), routing
 
         return await asyncio.to_thread(compute)
 
@@ -597,7 +625,7 @@ class PlanningService:
         scenario: Scenario,
         profiles,
         fresh: Iterable[int],
-    ) -> PlanResult | None:
+    ) -> tuple[PlanResult, Routing] | None:
         """«Свободный» посреди дня: начатое и выполненное на месте, остальное — заново.
 
         Начатым считается визит, к которому инженер выехал до «сейчас». None — замораживать
@@ -614,13 +642,13 @@ class PlanningService:
             return None
         lunches = await self._stored_lunches(plan_id, scenario)
 
-        def compute() -> PlanResult:
+        def compute() -> tuple[PlanResult, Routing]:
             routing, travel = build_travel(scenario, profiles)
             board = Board(
                 scenario, visits, unassigned=unassigned, travel=travel, now=now, lunches=lunches
             )
             result = rebuild_unstarted(board.result(), scenario, now, travel=travel)
-            return finish_plan(scenario, result, routing, travel)
+            return finish_plan(scenario, result, routing, travel, lines="cache"), routing
 
         return await asyncio.to_thread(compute)
 
@@ -816,13 +844,17 @@ class PlanningService:
 
     async def _save_snapshot(self, plan: Plan) -> None:
         """Запоминает вид версии на момент сохранения — потом она из него и показывается."""
-        export = await self._build_export(plan)
+        export = await self._build_export(plan, only_planned=True)
         plan.snapshot = export.model_dump(mode="json")
         self._repo.session.add(plan)
         await self._repo.session.commit()
 
-    async def _build_export(self, plan: Plan) -> PlanExportResponse:
-        """Вид версии плана по текущим данным БД: заявки, инженеры, строки плана, линии."""
+    async def _build_export(self, plan: Plan, *, only_planned: bool = False) -> PlanExportResponse:
+        """Вид версии плана по текущим данным БД: заявки, инженеры, строки плана, линии.
+
+        `only_planned` — для снимка версии: только заявки, у которых в ней есть строка.
+        Заявка, добавленная уже после расчёта версии, в её историю не входит.
+        """
         assert plan.plan_id is not None
         region_id, day = plan.region_id, plan.date
         region = await self._repo.get_region(region_id)
@@ -832,6 +864,8 @@ class PlanningService:
         # Версия плана — история: заявка, которую потом отменили или закрыли, в ней остаётся
         # такой, какой была. Иначе старые версии задним числом теряли бы строки.
         in_plan = {row.request_id for row in rows}
+        planned_ids = {str(request_id) for request_id in in_plan}
+        cancelled = {str(r.request_id) for r in requests if is_cancelled(r)}
         # Окно, с которым версия считалась; у планов до миграции 0015 его нет — окно заявки
         saved_windows = {
             str(row.request_id): (row.window_start, row.window_end)
@@ -870,6 +904,7 @@ class PlanningService:
                 equipment=sorted(r.required_equipment),
             )
             for r in scenario.requests
+            if not only_planned or r.id in planned_ids
         ]
         known = {r.id for r in scenario.requests}
         engineers_out = [
@@ -996,6 +1031,7 @@ class PlanningService:
                     point=lunch.get("point") or starts[engineer_id],
                     detour=bool(lunch.get("detour")),
                     locked=bool(lunch.get("locked")),
+                    shifted=bool(lunch.get("shifted")),
                     geometryRange=lunch_range if real else None,
                     transit=[leg.get("title", "") for leg in (lunch.get("path") or {}).get("transit", [])],
                 )
@@ -1024,7 +1060,8 @@ class PlanningService:
                         waitingMinutes=r.waiting_minutes or 0.0,
                         idleMinutes=r.idle_minutes or 0.0,
                         geometryRange=ranges[i] if real else None,
-                        explanation=r.explanation or "",
+                        explanation=_CANCELLED_EN_ROUTE if str(r.request_id) in cancelled else r.explanation or "",
+                        cancelled=str(r.request_id) in cancelled,
                         transit=[
                             leg.get("title", "")
                             for leg in (paths.get(r.assignment_id) or {}).get("transit", [])

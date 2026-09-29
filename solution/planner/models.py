@@ -482,6 +482,11 @@ class Settings:
     max_local_search_rounds: int = 30
     or_opt_max_segment: int = 3
     ejection_depth: int = 3
+    emergency_lunch_shift_minutes: int = 120
+    """На сколько авария может сдвинуть обед за его окно — раньше или позже, в пределах
+    смены. Обед 13–14 при аварии с окном 12–14 на 80 минут иначе не даёт её взять никому:
+    до обеда работа не успевает, а после обеда окно клиента уже закрыто. 0 — не сдвигать.
+    """
 
     # --- перепланирование ---
     stabilize_after_replan: bool = True
@@ -522,6 +527,7 @@ class Settings:
             max_local_search_rounds=self.max_local_search_rounds,
             or_opt_max_segment=self.or_opt_max_segment,
             ejection_depth=self.ejection_depth,
+            emergency_lunch_shift_minutes=self.emergency_lunch_shift_minutes,
             stabilize_after_replan=self.stabilize_after_replan,
             replan_scope=ReplanScope(self.replan_scope),
             global_replan_time_share=self.global_replan_time_share,
@@ -546,6 +552,7 @@ class Settings:
             "max_local_search_rounds": self.max_local_search_rounds,
             "or_opt_max_segment": self.or_opt_max_segment,
             "ejection_depth": self.ejection_depth,
+            "emergency_lunch_shift_minutes": self.emergency_lunch_shift_minutes,
             "stabilize_after_replan": self.stabilize_after_replan,
             "replan_scope": ReplanScope(self.replan_scope).value,
             "global_replan_time_share": self.global_replan_time_share,

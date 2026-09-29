@@ -61,6 +61,7 @@ def minimize_fleet(
 
             snapshot = solution.clone()
             assigned_before = solution.assigned_count()
+            emergency_before = solution.emergency_start_minutes
             moved = list(target.stops)
             engineer_name = target.engineer.name
 
@@ -76,7 +77,12 @@ def minimize_fleet(
                 record_failures=False,
             )
 
-            if rejected or solution.assigned_count() != assigned_before:
+            if (
+                rejected
+                or solution.assigned_count() != assigned_before
+                # Освободить человека ценой более поздней аварии нельзя
+                or solution.emergency_start_minutes > emergency_before + 0.5
+            ):
                 solution.restore_from(snapshot)
                 continue
 

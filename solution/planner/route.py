@@ -21,7 +21,7 @@ from typing import Iterable, NamedTuple, Sequence
 
 from .context import PlanContext
 from .cost import InsertionCost
-from .enums import ReasonCode
+from .enums import Priority, ReasonCode
 from .feasibility import FeasibilityResult, check_static
 from .models import Engineer, GeoPoint, Request
 from .textutil import plural
@@ -44,6 +44,9 @@ _EPS = 1e-6
 """Допуск сравнения минут: больше, чем дают минуты↔время с микросекундами в БД (1.7e-8),
 иначе визит на самом краю окна после перезагрузки плана «выпадал» из него."""
 _SECOND = 1 / 60
+_EMERGENCY_DELAY = 0.5
+"""Насколько (мин) обычная заявка может отодвинуть аварию при автоматической вставке:
+только на шум округления. Ручной ход диспетчера это правило не проверяет."""
 """Допуск для времени по профилю rRAPTOR: он хранит целые секунды, а расписание — минуты."""
 _NEG_INF = -math.inf
 
@@ -182,11 +185,14 @@ class RouteState:
         "_lunch",
         "_lunch_point",
         "_lunch_latest",
+        "lunch_shift_allowed",
         "feasible",
         "distance_km",
         "travel_minutes",
         "service_minutes",
         "waiting_minutes",
+        "emergency_minutes",
+        "_last_emergency",
     )
 
     def __init__(
@@ -218,6 +224,10 @@ class RouteState:
         self.lunch_fact: tuple[float, float, float, float, float, float, float] | None = None
         """Обед, который уже начался: (выезд, прибытие, начало, конец, ожидание, минуты
         в пути, км). Как и начатые визиты, он факт и не пересчитывается."""
+        self.lunch_shift_allowed = False
+        """Может ли авария сдвинуть обед за окно. Только когда без сдвига её не поставить
+        (`construct.place_shifting_lunch`), в сохранённом плане со сдвигом и на Ганте:
+        иначе оптимизатор раздвигал бы обеды ради пары лишних обычных заявок."""
         self.recompute()
 
     # ------------------------------------------------------------------ допуск инженера
@@ -265,11 +275,14 @@ class RouteState:
         copy._lunch = self._lunch
         copy._lunch_point = self._lunch_point
         copy._lunch_latest = self._lunch_latest
+        copy.lunch_shift_allowed = self.lunch_shift_allowed
         copy.feasible = self.feasible
         copy.distance_km = self.distance_km
         copy.travel_minutes = self.travel_minutes
         copy.service_minutes = self.service_minutes
         copy.waiting_minutes = self.waiting_minutes
+        copy.emergency_minutes = self.emergency_minutes
+        copy._last_emergency = self._last_emergency
         return copy
 
     @property
@@ -306,6 +319,32 @@ class RouteState:
 
     def recompute(self, lunch_gap: int | None = None) -> bool:
         """Пересчитывает расписание с нуля. Возвращает допустимость маршрута.
+
+        Обед — в своём окне. Только если с ним маршрут не сходится, а в маршруте есть
+        авария, окно обеда раздвигается (`PlanContext.lunch_shifted`): авария важнее обеда
+        по расписанию. Сдвиг не держится — каждый пересчёт сначала пробует обычное окно.
+        """
+        lunch = self.lunch
+        if lunch is not None and lunch.shifted:
+            lunch = self.lunch = self.ctx.lunch(self.engineer)
+        if self._recompute(lunch_gap):
+            return True
+        if lunch is None or self.lunch_fact is not None or not self.lunch_shift_allowed:
+            return False
+        if not any(r.priority is Priority.EMERGENCY for r in self.stops):
+            return False
+        shifted = self.ctx.lunch_shifted(self.engineer)
+        if shifted is None:
+            return False
+        self.lunch = shifted
+        if self._recompute(lunch_gap):
+            return True
+        self.lunch = lunch
+        self._recompute(lunch_gap)
+        return False
+
+    def _recompute(self, lunch_gap: int | None = None) -> bool:
+        """`recompute` с тем обедом, что сейчас в `self.lunch`.
 
         Обед — не заявка и в `stops` не входит: операторы поиска его не видят и увезти
         к другому инженеру не могут. Место обеда выбирается здесь, при каждом пересчёте:
@@ -345,6 +384,11 @@ class RouteState:
                 self._recompute_slack()
                 self.feasible = True
                 return True
+            if lunch.shifted:
+                # Сдвинутый обед — только вплотную к аварии: авария его и сдвинула. Иначе
+                # оптимизатор раздвигал бы обед ради обычных заявок маршрута
+                near = {i for i, r in enumerate(self.stops) if r.priority is Priority.EMERGENCY}
+                gaps = [[g for g in group if g in near or g - 1 in near] for group in gaps]
             chosen = None
             # Сохранённое место — первым и вне конкурса: иначе при равных вариантах версия
             # плана восстанавливалась бы с обедом в другом месте и визитами в другое время
@@ -360,6 +404,9 @@ class RouteState:
                     lunch_leg = tail[1]
                     finish = max(legs[-1][3], lunch_leg[3])
                     score = (
+                        self.lunch_shift_minutes(lunch_leg[2]),
+                        # Обед не встаёт перед аварией, если может встать после неё
+                        self._emergency_starts(legs),
                         sum(leg[6] for leg in legs) + lunch_leg[6],
                         finish,
                         sum(leg[2] for leg in legs),
@@ -392,6 +439,20 @@ class RouteState:
         self.feasible = True
         return True
 
+    def lunch_shift_minutes(self, start: float) -> float:
+        """На сколько минут начало обеда ушло за его обычное окно: 0 без сдвига аварией.
+
+        Сдвинутый обед ставится как можно ближе к своему окну, а не туда, где короче день.
+        """
+        if self.lunch is None:
+            return 0.0
+        # По обычному окну, а не по тому, с которым считали: начатый обед (факт) после
+        # сдвига аварией тоже вне окна, хотя пересчитывается уже без сдвига
+        normal = self.ctx.lunch(self.engineer)
+        if normal is None:
+            return 0.0
+        return max(0.0, normal.timing.window_start - start, start - normal.timing.window_end)
+
     def _store(self, legs) -> None:
         """Расписание визитов — в массивы маршрута, и итоги по нему."""
         self._dep = [leg[0] for leg in legs]
@@ -408,6 +469,16 @@ class RouteState:
         self.waiting_minutes = sum(self._wait)
         timing = self.ctx.timing
         self.service_minutes = sum(timing(r).duration for r in self.stops[: len(legs)])
+        self.emergency_minutes = self._emergency_starts(legs)
+        self._last_emergency = max(
+            (i for i, r in enumerate(self.stops[: len(legs)]) if r.priority is Priority.EMERGENCY),
+            default=-1,
+        )
+
+    def _emergency_starts(self, legs) -> float:
+        """Сумма начал аварий маршрута, минуты: чем меньше, тем раньше их устраняют."""
+        stops = self.stops
+        return sum(leg[2] for i, leg in enumerate(legs) if stops[i].priority is Priority.EMERGENCY)
 
     def _forward(self, begin: int, cursor: float, point: GeoPoint, lunch_gap: int | None):
         """Прямой проход с визита `begin`: инженер свободен с `cursor` в точке `point`.
@@ -658,11 +729,22 @@ class RouteState:
             return None
         if not self.feasible or not self.accepts(request):
             return None
-        if self.lunch is not None and (self.is_empty or position == self.lunch_gap):
-            return self._evaluate_exact(request, position)
-        return self._evaluate_between(
-            request, position, self._point_before(position), self._time_before(position)
-        )
+        if (self.lunch is not None and (self.is_empty or position == self.lunch_gap)) or (
+            position <= self._last_emergency
+        ):
+            # Перед аварией — полным пересчётом: сдвиг доходит до неё через весь хвост
+            cost = self._evaluate_exact(request, position)
+        else:
+            cost = self._evaluate_between(
+                request, position, self._point_before(position), self._time_before(position)
+            )
+        if (
+            cost is not None
+            and request.priority is not Priority.EMERGENCY
+            and cost.delta_emergency_minutes > _EMERGENCY_DELAY
+        ):
+            return None  # обычная работа аварию не отодвигает
+        return cost
 
     def _evaluate_between(
         self, request: Request, position: int, prev_point: GeoPoint, cursor: float
@@ -691,6 +773,7 @@ class RouteState:
         if timed is not None:
             in_min = leg[6]
 
+        emergency = service_start if request.priority is Priority.EMERGENCY else 0.0
         if position == len(self.stops):
             out_km = out_min = 0.0
             removed_km = removed_min = 0.0
@@ -722,19 +805,22 @@ class RouteState:
             delta_travel_minutes=in_min + out_min - removed_min,
             delta_distance_km=in_km + out_km - removed_km,
             delta_waiting_minutes=delta_wait,
+            delta_emergency_minutes=emergency,
         )
 
     def _evaluate_exact(self, request: Request, position: int) -> InsertionCost | None:
         """Оценка вставки полным пересчётом; маршрут после неё остаётся ровно прежним."""
         saved = self._save()
         opens = 1 if self.is_empty else 0
-        travel_before, km_before, wait_before = (
-            self.travel_minutes, self.distance_km, self.waiting_minutes
+        travel_before, km_before, wait_before, emergency_before = (
+            self.travel_minutes, self.distance_km, self.waiting_minutes, self.emergency_minutes
         )
         self.stops.insert(position, request)
         try:
             ok = self.recompute()
-            after = (self.travel_minutes, self.distance_km, self.waiting_minutes)
+            after = (
+                self.travel_minutes, self.distance_km, self.waiting_minutes, self.emergency_minutes
+            )
         finally:
             self.stops.pop(position)
             self._restore(saved)
@@ -745,6 +831,7 @@ class RouteState:
             delta_travel_minutes=after[0] - travel_before,
             delta_distance_km=after[1] - km_before,
             delta_waiting_minutes=after[2] - wait_before,
+            delta_emergency_minutes=after[3] - emergency_before,
         )
 
     def _save(self) -> tuple:
@@ -754,6 +841,8 @@ class RouteState:
             self._leg_minutes, self._leg_km, self._latest, self.feasible,
             self.distance_km, self.travel_minutes, self.service_minutes, self.waiting_minutes,
             self.lunch_gap, self._lunch, self._lunch_point, self._lunch_latest,
+            # Пробный пересчёт мог сменить окно обеда (сдвиг аварией) — оно тоже часть состояния
+            self.lunch, self.emergency_minutes, self._last_emergency,
         )
 
     def _restore(self, saved: tuple) -> None:
@@ -762,6 +851,7 @@ class RouteState:
             self._leg_minutes, self._leg_km, self._latest, self.feasible,
             self.distance_km, self.travel_minutes, self.service_minutes, self.waiting_minutes,
             self.lunch_gap, self._lunch, self._lunch_point, self._lunch_latest,
+            self.lunch, self.emergency_minutes, self._last_emergency,
         ) = saved
 
     def best_insertion(self, request: Request) -> tuple[InsertionCost, int] | None:
@@ -1100,6 +1190,17 @@ class RouteState:
         if not self.stops:
             return FeasibilityResult(False, ReasonCode.TIME_CONFLICT, self._solo_detail(request))
         free_at = self._end[-1]
+        if timing.window_end + _EPS < free_at:
+            # Окно клиента закрывается раньше, чем кончается день инженера: про «освобождается
+            # в 21:32» говорить нечестно — мешает то, чем он занят именно в это окно
+            busy = self._busy_text(timing.window_start, cal.add_m(timing.window_end, timing.duration))
+            if busy:
+                return FeasibilityResult(
+                    False,
+                    ReasonCode.TIME_CONFLICT,
+                    f"в окне {ctx.to_datetime(timing.window_start):%H:%M}–"
+                    f"{ctx.to_datetime(timing.window_end):%H:%M} {name} занят: {busy}",
+                )
         departure = cal.first_m(free_at)
         minutes = self._minutes_from(self.stops[-1].point, request.point, departure)
         arrival = cal.add_m(departure, minutes) if departure is not None else None
@@ -1127,6 +1228,27 @@ class RouteState:
             f"в {self._end_time_text()}) не остаётся {int(timing.duration)} мин в смене",
         )
 
+    def _busy_text(self, since: float, until: float | None) -> str:
+        """Что занимает инженера между `since` и `until`: работы (с дорогой к ним) и обед."""
+        until = until if until is not None else math.inf
+        ctx = self.ctx
+        items: list[tuple[float, str]] = []
+        for i, stop in enumerate(self.stops):
+            if self._dep[i] < until - _EPS and self._end[i] > since + _EPS:
+                items.append((
+                    self._start[i],
+                    f"заявка {stop.id} {ctx.to_datetime(self._start[i]):%H:%M}–"
+                    f"{ctx.to_datetime(self._end[i]):%H:%M}",
+                ))
+        if self._lunch is not None and self._lunch[0] < until - _EPS and self._lunch[3] > since + _EPS:
+            items.append((
+                self._lunch[2],
+                f"обед {ctx.to_datetime(self._lunch[2]):%H:%M}–{ctx.to_datetime(self._lunch[3]):%H:%M}",
+            ))
+        items.sort()
+        text = ", ".join(label for _, label in items[:3])
+        return text + (" и другие" if len(items) > 3 else "")
+
     def _solo_detail(self, request: Request) -> str:
         cal = self.cal
         ctx = self.ctx
@@ -1144,6 +1266,15 @@ class RouteState:
             return (
                 f"{self.engineer.name} доедет только к {arr_dt:%H:%M}, "
                 f"а окно закрывается в {end_dt:%H:%M}"
+            )
+        if self.lunch is not None:
+            # Доехать успевает, смены хватает — значит, мешает обед
+            lunch = self.lunch.timing
+            return (
+                f"у {self.engineer.name} обед {ctx.to_datetime(lunch.window_start):%H:%M}–"
+                f"{ctx.to_datetime(lunch.window_end + lunch.duration):%H:%M}: работа "
+                f"{int(timing.duration)} мин с окном {ctx.to_datetime(timing.window_start):%H:%M}–"
+                f"{ctx.to_datetime(timing.window_end):%H:%M} не помещается ни до, ни после него"
             )
         return (
             f"работа длительностью {int(timing.duration)} мин не помещается "

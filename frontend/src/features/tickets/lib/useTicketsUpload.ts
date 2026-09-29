@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { createElement, useState } from 'react'
 import { toast } from '@heroui/react'
 
 import { formatWait } from '@/shared/lib/format'
@@ -59,11 +59,27 @@ export function useTicketsUpload(onUploaded?: (result: UploadTicketsResult) => v
     setUploading(true)
     try {
       const result = await uploadTickets(body).unwrap()
+      const unchanged = result.created === 0 && result.updated === 0
       toast.success('Загрузка заявок завершена', {
         description:
           `Добавлено ${result.created} ${pluralRu(result.created, ['заявка', 'заявки', 'заявок'])}, обновлено: ${result.updated}` +
-          (result.planning ? `. ${planningNote(result.planning_eta_seconds)}` : ''),
+          (result.planning
+            ? `. ${planningNote(result.planning_eta_seconds)}`
+            : unchanged
+              ? '. Изменений нет — план остался прежним'
+              : ''),
       })
+      if (result.warnings?.length) {
+        // Строки с ошибками пропущены, неточные адреса — в плане по району: диспетчер должен это видеть
+        toast.warning('Не всё из файла удалось взять', {
+          description: createElement(
+            'ul',
+            { className: 'list-disc pl-4' },
+            result.warnings.map((line) => createElement('li', { key: line }, line)),
+          ),
+          timeout: 0,
+        })
+      }
       onUploaded?.(result)
       return true
     } catch (error) {

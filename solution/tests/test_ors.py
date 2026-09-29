@@ -36,9 +36,12 @@ from planner.ors import (
     RoutingCache,
     attach_route_geometry,
     collect_points,
+    covers,
     departure_moment,
     fetch_matrix,
+    fetch_missing,
     point_key,
+    reach_groups,
     scenario_departure,
     scenario_modes,
     setup_routing,
@@ -365,6 +368,56 @@ def test_collect_points_and_modes_describe_the_scenario():
         scenario.requests[0].point,
     )
     assert scenario_modes(scenario) == (TransportMode.CAR,)
+
+
+def test_collect_points_include_the_lunch_place():
+    """Дорога к обеду «в своей точке» — из матрицы, а не по координатам."""
+    from dataclasses import replace
+
+    from factories import t
+    from planner import Lunch
+
+    scenario = two_point_scenario()
+    spot = gp((55.73, 37.62))
+    engineer = replace(
+        scenario.engineers[0],
+        lunch=Lunch(window_start=t("12:00"), window_end=t("14:00"), point=spot, place="point"),
+    )
+    scenario = replace(scenario, engineers=(engineer,))
+    assert collect_points(scenario) == (engineer.start_point, spot, scenario.requests[0].point)
+
+
+MOSCOW = [gp((55.70 + i / 100, 37.60)) for i in range(6)]
+KASHIRA = [gp((54.84, 38.19)), gp((54.843, 38.24))]
+
+
+def test_walking_matrix_is_split_into_islands():
+    """Кашира в 100 км от Москвы: пешком между ними ORS не ищет — лимит обхода графа
+    кончался на одной строке, и матрица собиралась минутами."""
+    points = MOSCOW[:3] + KASHIRA[:1] + MOSCOW[3:] + KASHIRA[1:]
+    assert reach_groups("foot-walking", points) == [[0, 1, 2, 4, 5, 6], [3, 7]]
+    assert reach_groups("driving-car", points) == [list(range(8))]
+
+    fake = FakeOrs()
+    table = fetch_missing(client(fake), "foot-walking", points, {})
+    far = {point_key(p) for p in KASHIRA}
+    for _url, payload in fake.calls:
+        keys = {point_key(gp((lat, lon))) for lon, lat in payload["locations"]}
+        assert not keys & far or keys <= far, "запрос смешал острова"
+    assert len(table) == 6 * 5 + 2 * 1
+    assert (point_key(MOSCOW[0]), point_key(KASHIRA[0])) not in table
+    assert covers(table, points, "foot-walking")
+    assert not covers(table, points, "driving-car")
+    # Всё нужное уже в таблице — второго похода в сервис нет
+    fake.calls.clear()
+    assert fetch_missing(client(fake), "foot-walking", points, table) == {}
+    assert fake.calls == []
+
+
+def test_car_matrix_keeps_distant_points_together():
+    fake = FakeOrs()
+    table = fetch_missing(client(fake), "driving-car", MOSCOW[:2] + KASHIRA[:1], {})
+    assert len(table) == 3 * 2
 
 
 def test_for_scenario_requests_only_the_modes_in_use():

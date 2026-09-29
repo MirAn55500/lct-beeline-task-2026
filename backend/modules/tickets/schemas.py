@@ -20,6 +20,8 @@ class UploadTicketsResult(BaseModel):
     """План на даты из файла поставлен в расчёт; готовность — `planning` в обзоре дня."""
     planning_eta_seconds: int | None = None
     """Примерно сколько секунд считаться плану на `date` — вместе с днями перед ним в очереди."""
+    warnings: list[str] = Field(default_factory=list)
+    """Пропущенные строки с ошибками и адреса без точной точки — первые несколько."""
 
 
 class CreateTicketRequest(BaseModel):

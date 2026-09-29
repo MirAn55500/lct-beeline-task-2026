@@ -72,7 +72,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 from .enums import TRANSPORT_TITLES, TransportMode
 from .models import Engineer, GeoPoint, Scenario, Settings
 from .result import PlanResult, RouteResult, TransitLeg, Visit
-from .travel import HaversineTravelModel, TravelModel
+from .travel import HaversineTravelModel, TravelModel, haversine_km
 
 __all__ = [
     "DEFAULT_BASE_URL",
@@ -88,6 +88,8 @@ __all__ = [
     "setup_routing",
     "attach_route_geometry",
     "collect_points",
+    "covers",
+    "reach_groups",
     "scenario_modes",
     "fetch_transit_legs",
     "scenario_departure",
@@ -800,7 +802,10 @@ class RoutingCache:
 
 
 def collect_points(scenario: Scenario, *, include_inactive: bool = False) -> tuple[GeoPoint, ...]:
-    """Все уникальные точки расчёта: старты инженеров и адреса заявок.
+    """Все уникальные точки расчёта: старты инженеров, места обеда и адреса заявок.
+
+    Место обеда («в офисе», «своё место») — такая же точка маршрута: без него в
+    матрице дорога к обеду и от него считалась бы по координатам.
 
     Порядок стабилен (первое появление), потому что от него зависит и состав запроса
     к сервису, и содержимое кэша — а значит, воспроизводимость расчёта.
@@ -809,8 +814,13 @@ def collect_points(scenario: Scenario, *, include_inactive: bool = False) -> tup
     engineers: Iterable[Engineer] = (
         scenario.engineers if include_inactive else scenario.active_engineers()
     )
+    engineers = tuple(engineers)
     for engineer in engineers:
         seen.setdefault(point_key(engineer.start_point), engineer.start_point)
+    for engineer in engineers:
+        lunch = engineer.lunch.point if engineer.lunch is not None else None
+        if lunch is not None:
+            seen.setdefault(point_key(lunch), lunch)
     for request in scenario.planning_requests():
         seen.setdefault(point_key(request.point), request.point)
     return tuple(seen.values())
@@ -949,7 +959,7 @@ class OrsTravelModel:
             if profile in NO_MATRIX_PROFILES:
                 continue
             table = {} if refresh else (cache.legs_of(sections[mode]) if cache else {})
-            if not _covers(table, points):
+            if not covers(table, points, profile):
                 queue = search_pool if profile in SEARCH_PROFILES else pool
                 prefetch[mode] = queue.submit(fetch_missing, client, profile, points, table)
         pool.shutdown(wait=False)
@@ -981,7 +991,7 @@ class OrsTravelModel:
                     if table:
                         legs[section] = table
                     continue
-                if _covers(table, points):
+                if covers(table, points):
                     legs[section] = table
                     continue
                 fetched, failures = fetch_transit_legs(
@@ -991,7 +1001,7 @@ class OrsTravelModel:
                 )
                 warnings.extend(failures.notes(mode, moment_title(departure, offset)))
             else:
-                if _covers(table, points):
+                if covers(table, points, profile):
                     legs[section] = table
                     continue
                 try:
@@ -1289,15 +1299,20 @@ def _table(
     return table if isinstance(table, LegTable) else dict(table)
 
 
-def _covers(table: Mapping[tuple[str, str], tuple[float, float]], points: Sequence[GeoPoint]) -> bool:
-    """Есть ли в таблице все пары точек сценария. Одной дырки хватает, чтобы идти в сервис."""
-    if not table:
-        return not points
-    keys = [point_key(p) for p in points]
-    for ka in keys:
-        for kb in keys:
-            if ka != kb and (ka, kb) not in table:
-                return False
+def covers(
+    table: Mapping[tuple[str, str], tuple[float, float]],
+    points: Sequence[GeoPoint],
+    profile: str | None = None,
+) -> bool:
+    """Есть ли в таблице все нужные пары точек сценария. Одной дырки хватает, чтобы идти
+    в сервис. С `profile` нужны только пары внутри его групп (`reach_groups`)."""
+    groups = reach_groups(profile, points) if profile else [range(len(points))]
+    for group in groups:
+        keys = [point_key(points[i]) for i in group]
+        for ka in keys:
+            for kb in keys:
+                if ka != kb and (ka, kb) not in table:
+                    return False
     return True
 
 
@@ -1308,6 +1323,47 @@ SEARCH_PROFILES: frozenset[str] = frozenset({"foot-walking", "cycling-regular"})
 проходят, 8 — отказ 6020 по `maximum_visited_nodes` через те же 13 с. Поэтому блок
 сразу маленький, а не 250 строк, из которых нащупывать предел пришлось бы отказами.
 """
+
+SEARCH_LINK_KM = 10.0
+"""Дальше этого по прямой от всех остальных точка — отдельный «остров» для пешехода и
+велосипеда: пути между островами у ORS не спрашиваются.
+
+Поиск без contraction hierarchies обходит граф во все стороны, пока не дойдёт до самой
+далёкой цели. Одна заявка в Кашире (100 км от Москвы) в строке пешехода — и лимит
+`maximum_visited_nodes` кончается уже на одном источнике: блоки дробятся до строки, и
+выгрузка Юго-востока с Каширой, Ступино и Домодедово (77 адресов) считалась 250–290 с
+вместо 35 (замер 29.09, локальный ORS). По островам те же пешие и велосипедные матрицы
+легли за 2–3 с. Пешком и на велосипеде между островами — от 10 км и 2 часов пути: там
+хватает расчёта по координатам, а Москва с плотной сеткой адресов остаётся одним островом.
+"""
+
+
+def reach_groups(profile: str | None, points: Sequence[GeoPoint]) -> list[list[int]]:
+    """Индексы точек, внутри которых профилю нужна матрица «все со всеми».
+
+    Для `SEARCH_PROFILES` — острова: точки, связанные цепочкой шагов не длиннее
+    `SEARCH_LINK_KM`. Для остальных профилей — все точки одной группой. Порядок групп и
+    точек в них — порядок `points`: от него зависит состав запросов к сервису.
+    """
+    count = len(points)
+    if profile not in SEARCH_PROFILES or count < 2:
+        return [list(range(count))]
+    parent = list(range(count))
+
+    def root(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(count):
+        for j in range(i + 1, count):
+            if haversine_km(points[i], points[j]) <= SEARCH_LINK_KM:
+                parent[root(j)] = root(i)
+    groups: dict[int, list[int]] = {}
+    for i in range(count):
+        groups.setdefault(root(i), []).append(i)
+    return sorted(groups.values(), key=lambda group: group[0])
 
 SEARCH_BLOCK_ROWS = 5
 """Стартовый блок источников для `SEARCH_PROFILES`; дальше — `OrsClient.block_rows`."""
@@ -1364,7 +1420,27 @@ def fetch_missing(
     пересчёт «все со всеми» из-за одной точки стоит десятки секунд на пеших и
     велосипедных профилях. Пары, которые сервис построить не может (точка вне графа),
     в кэш не попадают, поэтому их точки дозапрашиваются каждый раз — но это единицы.
+
+    Пешком и на велосипеде матрица собирается по островам (`reach_groups`): пары между
+    островами не запрашиваются и остаются расчёту по координатам.
     """
+    groups = reach_groups(profile, points)
+    if len(groups) == 1:
+        return _fetch_missing_in(client, profile, points, table)
+    fetched: dict[tuple[str, str], tuple[float, float]] = {}
+    for group in groups:
+        if len(group) > 1:
+            fetched.update(_fetch_missing_in(client, profile, [points[i] for i in group], table))
+    return fetched
+
+
+def _fetch_missing_in(
+    client: OrsClient,
+    profile: str,
+    points: Sequence[GeoPoint],
+    table: Mapping[tuple[str, str], tuple[float, float]],
+) -> dict[tuple[str, str], tuple[float, float]]:
+    """`fetch_missing` для одной группы точек: нужны все её пары."""
     missing = _missing_points(table, points)
     if not missing:
         return {}

@@ -36,6 +36,7 @@ from planner.ors import (  # noqa: E402
     NO_MATRIX_PROFILES,
     collect_points,
     point_key,
+    reach_groups,
     scenario_modes,
 )
 
@@ -63,6 +64,15 @@ _rate = {"base": 10.0, "point": 1.2}
 на стенде (известные адреса ~8 с, сотня новых — полторы-три минуты), дальше по факту."""
 _LEARN = 0.5
 """Вес последнего замера: план с тем же набором адресов считается почти одинаково."""
+_LEARN_POINTS = 5
+"""С меньшим числом новых адресов цена адреса не учится: у ручной аварии один новый адрес
+и «Свободный» пересчёт дня, и 15 с на «адрес» раздували оценку следующей загрузки
+в 6 раз (237 с при 36 на деле, замер 29.09)."""
+
+
+def busy() -> bool:
+    """Идёт или ждёт своей очереди фоновый расчёт плана хоть одного дня."""
+    return bool(_pending)
 
 
 def new_points(scenario: Scenario) -> int:
@@ -76,11 +86,12 @@ def new_points(scenario: Scenario) -> int:
     if not profiles or len(points) < 2:
         return 0
     cache = routing_cache.shared()
-    keys = [point_key(p) for p in points]
     fresh = 0
     for profile in profiles:
         known = {a for a, _ in cache.legs_of(profile)}
-        fresh = max(fresh, sum(key not in known for key in keys))
+        # Точка-«остров» пешехода и велосипеда (Кашира от Москвы) пар в матрице не ждёт
+        grouped = [i for group in reach_groups(profile, points) if len(group) > 1 for i in group]
+        fresh = max(fresh, sum(point_key(points[i]) not in known for i in grouped))
     return fresh
 
 
@@ -151,10 +162,10 @@ def status(region_id: int, day: date) -> tuple[bool, str | None, int | None]:
 def _learn(key: Key, elapsed: float) -> None:
     """Подстроить оценку под то, сколько расчёт шёл на деле."""
     _, fresh = _estimate.get(key, (0.0, 0))
-    if fresh > 0:
+    if fresh >= _LEARN_POINTS:
         per_point = (elapsed - _rate["base"]) / fresh
         _rate["point"] = (1 - _LEARN) * _rate["point"] + _LEARN * min(max(per_point, 0.2), 10.0)
-    else:
+    elif fresh == 0:
         _rate["base"] = (1 - _LEARN) * _rate["base"] + _LEARN * min(max(elapsed, 2.0), 120.0)
 
 

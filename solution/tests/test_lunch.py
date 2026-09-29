@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import timedelta
 
 from planner import Lunch, plan, rebuild_unstarted
+from planner.enums import Priority
 from planner.dispatch import Board, StoredLunch, StoredVisit
 
 from factories import (
@@ -586,3 +587,100 @@ def test_started_lunch_survives_when_engineer_loses_all_visits():
     assert board.move("R1", owner.engineer_id, commit=True).ok
     back = board.result().route_of(owner.engineer_id)
     assert back.lunch.locked and back.lunch.start_at == started
+
+
+# --------------------------------------------------------------------------
+# Авария сдвигает обед
+# --------------------------------------------------------------------------
+
+
+def lunch_blocks_the_window(skill="emergency", priority="emergency", **settings):
+    """Обед ровно 13–14, заявка 80 мин с окном прибытия 12–14: до обеда не успеть, после
+    обеда окно клиента уже закрыто. Так было на выгрузке Югоцентра 28.09."""
+    return sc(
+        [req("E", window=("12:00", "14:00"), dur=80, at=A, skill=skill, priority=priority)],
+        [lunched(eng("E1", at=HOME, skills=[skill]), window=("13:00", "14:00"))],
+        **settings,
+    )
+
+
+def test_emergency_shifts_the_lunch_out_of_its_window():
+    scenario = lunch_blocks_the_window()
+    result = plan_optimized(scenario)
+    assert assigned_ids(result) == {"E"}
+    route = result.routes[0]
+    lunch = route.lunch
+    assert lunch is not None and lunch.shifted
+    assert abs(lunch.minutes - 60) < 1e-6
+    visit = route.visits[0]
+    assert visit.service_end_at <= lunch.start_at or visit.service_start_at >= lunch.end_at
+    # Обед рядом со своим окном: сразу после аварии, а не с утра
+    assert lunch.start_at == visit.service_end_at
+    assert validate_plan(result, scenario) == []
+
+
+def test_ordinary_request_does_not_shift_the_lunch():
+    scenario = lunch_blocks_the_window(skill="connection", priority="connection")
+    result = plan_optimized(scenario)
+    assert assigned_ids(result) == set()
+    [unassigned] = result.unassigned
+    assert "обед 13:00–14:00" in unassigned.explanation, unassigned.explanation
+
+
+def test_lunch_shift_can_be_switched_off():
+    scenario = lunch_blocks_the_window(emergency_lunch_shift_minutes=0)
+    result = plan_optimized(scenario)
+    assert assigned_ids(result) == set()
+
+
+def test_verifier_rejects_a_shifted_lunch_without_an_emergency():
+    scenario = lunch_blocks_the_window()
+    result = plan_optimized(scenario)
+    ordinary = replace(
+        scenario,
+        requests=tuple(replace(r, priority=Priority.CONNECTION) for r in scenario.requests),
+    )
+    assert any("не рядом с аварией" in p for p in validate_plan(result, ordinary))
+
+
+def test_shifted_lunch_is_next_to_the_emergency_only():
+    """Сдвиг — ради аварии, а не ради обычных заявок того же маршрута."""
+    scenario = sc(
+        [
+            req("E", window=("12:00", "14:00"), dur=80, at=A, skill="emergency", priority="emergency"),
+            req("L1", window=("15:00", "16:00"), dur=30, at=B, skill="emergency", priority="repair_or_addon"),
+            req("L2", window=("16:30", "17:30"), dur=30, at=C, skill="emergency", priority="repair_or_addon"),
+        ],
+        [lunched(eng("E1", at=HOME, skills=["emergency"]), window=("13:00", "14:00"))],
+    )
+    result = plan_optimized(scenario)
+    route = result.routes[0]
+    assert route.lunch.shifted
+    order = [v.request_id for v in route.visits]
+    around = order[max(0, route.lunch.after_position - 1) : route.lunch.after_position + 1]
+    assert "E" in around
+    assert validate_plan(result, scenario) == []
+
+
+def test_replan_keeps_the_lunch_an_emergency_shifted():
+    from factories import event, scenario_after
+    from planner import replan
+    from planner.enums import EventType
+
+    scenario = sc(
+        [
+            req("E", window=("12:00", "14:00"), dur=80, at=A, skill="emergency", priority="emergency"),
+            req("R", window=("10:00", "12:00"), dur=30, at=B),
+        ],
+        [
+            lunched(eng("E1", at=HOME, skills=["emergency"]), window=("13:00", "14:00")),
+            eng("E2", at=HOME),
+        ],
+    )
+    before = plan_optimized(scenario)
+    assert next(r for r in before.routes if r.engineer_id == "E1").lunch.shifted
+    ev = event(EventType.CANCEL_REQUEST, "09:00", request_id="R")
+    after = replan(before, scenario, ev)
+    route = next(r for r in after.routes if r.engineer_id == "E1")
+    assert [v.request_id for v in route.visits] == ["E"] and route.lunch.shifted
+    assert validate_plan(after, scenario_after(scenario, before, ev)) == []

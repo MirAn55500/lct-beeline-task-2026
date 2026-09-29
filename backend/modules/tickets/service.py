@@ -15,7 +15,7 @@ from modules.geocoding.geocoder import DISTRICT, HOUSE, REGION_BBOX, SETTLED, Ad
 from modules.planning.models.assignment import Assignment
 from modules.planning import background
 from modules.planning.schemas import RemakeLevel
-from modules.tickets.importer import WORK_TYPE_BK, ParsedTicket, manual_ticket, parse_upload
+from modules.tickets.importer import MAX_NOTES, WORK_TYPE_BK, ParsedTicket, manual_ticket, parse_upload
 from modules.tickets.models.request import Request
 from modules.tickets.repository import TicketsRepository
 from modules.tickets.schemas import (
@@ -39,6 +39,9 @@ _STATUS_LABEL = {
     "completed": "Выполнена",
     "cancelled": "Отменена",
 }
+
+
+_CANCELLED = {"cancelled", "отменена"}
 
 
 def _status_label(value: str | None) -> str:
@@ -84,6 +87,18 @@ def _matches_query(
         engineer or "",
     ]
     return any(needle in (item or "").lower() for item in haystacks)
+
+
+def _rough_addresses(tickets: list[ParsedTicket]) -> list[str]:
+    """Адреса, которые геокодер нашёл только до района или города: инженер поедет в
+    примерную точку — диспетчеру надо о них знать. В уведомлении — первые несколько."""
+    rough = list(dict.fromkeys(
+        t.address for t in tickets if t.geo_precision is not None and t.geo_precision not in SETTLED
+    ))
+    notes = [f"адрес «{address}» не найден точно — точка по району" for address in rough[:MAX_NOTES]]
+    if len(rough) > MAX_NOTES:
+        notes.append(f"…и ещё {len(rough) - MAX_NOTES} адресов без точной точки")
+    return notes
 
 
 class TicketsService:
@@ -132,7 +147,12 @@ class TicketsService:
         for request in requests:
             assert request.request_id is not None
             assignment = assignment_by_request.get(request.request_id)
-            assigned = assignment is not None and assignment.engineer_id is not None
+            # Отменённая заявка не назначена и не ждёт инженера: её нет ни в одном из
+            # фильтров, даже если в версии остался визит (отменили, когда инженер уже ехал)
+            cancelled = request.status is not None and request.status.value.strip().lower() in _CANCELLED
+            assigned = not cancelled and assignment is not None and assignment.engineer_id is not None
+            if query.assignment is not TicketAssignmentFilter.ALL and cancelled:
+                continue
             if query.assignment is TicketAssignmentFilter.ASSIGNED and not assigned:
                 continue
             if query.assignment is TicketAssignmentFilter.UNASSIGNED and assigned:
@@ -142,7 +162,7 @@ class TicketsService:
             engineer = None
             if assigned and assignment is not None and assignment.engineer is not None:
                 engineer = assignment.engineer.name
-            elif assignment is not None and assignment.unassigned_reason is not None:
+            elif not cancelled and assignment is not None and assignment.unassigned_reason is not None:
                 reason_raw = assignment.unassigned_reason.value
 
             reason = reason_label(reason_raw)
@@ -224,11 +244,14 @@ class TicketsService:
             raise AppError("Файл пустой")
 
         try:
-            tickets, skipped = parse_upload(raw, filename, day)
-        except (ValueError, json.JSONDecodeError) as exc:
+            parsed = parse_upload(raw, filename, day)
+        except json.JSONDecodeError as exc:
+            raise AppError(f"Не удалось прочитать JSON: {exc}") from exc
+        except ValueError as exc:
             raise AppError(str(exc)) from exc
 
-        tickets = await self._geocode(region_id, tickets)
+        tickets = await self._geocode(region_id, parsed.tickets)
+        notes = parsed.notes + _rough_addresses(tickets)
 
         file_type = "json" if filename.lower().endswith(".json") else "csv"
         created, updated, skipped, touched = await self._repo.save_upload(
@@ -236,13 +259,16 @@ class TicketsService:
             filename=filename or "upload.csv",
             file_type=file_type,
             tickets=tickets,
-            skipped=skipped,
+            skipped=parsed.skipped,
         )
         return UploadTicketsResult(
             created=created,
             updated=updated,
             skipped=skipped,
-            **await self._plan_after(region_id, tickets, remake_level, touched),
+            warnings=notes,
+            **await self._plan_after(
+                region_id, tickets, remake_level, touched, unchanged_known=True
+            ),
         )
 
     async def create(self, body: CreateTicketRequest) -> CreateTicketResult:
@@ -315,11 +341,22 @@ class TicketsService:
         tickets: list[ParsedTicket],
         remake_level: RemakeLevel,
         touched: list[int],
+        *,
+        unchanged_known: bool = False,
     ) -> dict:
-        """Расчёт плана на дни записанных заявок — в фоне: с сотней новых адресов это минуты."""
+        """Расчёт плана на дни записанных заявок — в фоне: с сотней новых адресов это минуты.
+
+        `unchanged_known` — файл ничего не поменял (повторная загрузка): день, у которого
+        план уже есть, не пересчитывается, иначе появлялась бы версия-копия.
+        """
         counts = Counter(ticket.window_start.date() for ticket in tickets)
         primary = counts.most_common(1)[0][0] if counts else None
         days = sorted(counts)
+        if unchanged_known and not touched:
+            days = [
+                d for d in days
+                if await self._repo.find_latest_plan_id(region_id=region_id, day=d) is None
+            ]
         background.schedule(
             region_id,
             days,
@@ -329,8 +366,8 @@ class TicketsService:
         )
         return dict(
             date=primary,
-            planning=bool(counts),
-            planning_eta_seconds=background.status(region_id, primary)[2] if primary else None,
+            planning=bool(days),
+            planning_eta_seconds=background.status(region_id, primary)[2] if primary in days else None,
         )
 
     async def _geocode(self, region_id: int, tickets: list[ParsedTicket]) -> list[ParsedTicket]:

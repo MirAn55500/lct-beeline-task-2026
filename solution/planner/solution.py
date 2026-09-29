@@ -16,7 +16,7 @@ from .route import RouteState
 
 __all__ = ["Solution", "QualityKey"]
 
-QualityKey = tuple[int, int, int, int, float, float]
+QualityKey = tuple[int, float, int, int, int, float, float]
 _ROUND = 6
 
 
@@ -102,17 +102,24 @@ class Solution:
     def used_engineer_count(self) -> int:
         return sum(1 for route in self if route.stops)
 
+    @property
+    def emergency_start_minutes(self) -> float:
+        """Сумма начал аварий по всем маршрутам: чем меньше, тем раньше их устраняют."""
+        return sum(route.emergency_minutes for route in self)
+
     def unassigned_of(self, priority: Priority) -> int:
         return sum(1 for r in self.unassigned.values() if r.priority is priority)
 
     def quality_key(self) -> QualityKey:
         """Лексикографический ключ качества плана: меньше — лучше.
 
-        Порядок: авария → подключение → общий объём → число людей → время в пути → пробег.
-        Ремонт и дозаказ входят в общий объём; отдельный ключ для них не нужен.
+        Порядок: авария → как рано начинаются аварии → подключение → общий объём → число
+        людей → время в пути → пробег. Ремонт и дозаказ входят в общий объём; отдельный
+        ключ для них не нужен.
         """
         return (
             self.unassigned_of(Priority.EMERGENCY),
+            round(self.emergency_start_minutes, _ROUND),
             self.unassigned_of(Priority.CONNECTION),
             len(self.unassigned),
             self.used_engineer_count,

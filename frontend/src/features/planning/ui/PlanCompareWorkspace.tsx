@@ -12,7 +12,7 @@ import { cn } from '@/shared/lib/cn'
 import { AppPanel, SegmentedControl, type SegmentedOption } from '@/shared/ui'
 
 import { planHours } from '../lib/planHours'
-import { avgDistance, avgLoad, formatKm, totalDistance } from '../lib/planMetrics'
+import { avgDistance, avgLoad, formatKm, planVisits, totalDistance } from '../lib/planMetrics'
 import { useDayOverview } from '../lib/useDayOverview'
 import { useGetPlanExportQuery, type PlanExportResponse } from '../planApi'
 import type { PlanVersion } from '../types'
@@ -45,7 +45,7 @@ function metricsFromPlan(
   engineersTotal: number,
 ): PlanMetrics | null {
   if (!plan) return null
-  const assigned = plan.routes.reduce((acc, route) => acc + route.visits.length, 0)
+  const assigned = planVisits(plan).length
   const engineersEngaged = plan.routes.filter((route) => route.visits.length > 0).length
   const load = avgLoad(plan) ?? 0
   return {
