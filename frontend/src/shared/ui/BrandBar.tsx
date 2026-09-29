@@ -5,9 +5,12 @@ import {
   type ComponentPropsWithoutRef,
 } from 'react'
 import { RiFunctionLine } from '@remixicon/react'
+import { Link, useSearchParams } from 'react-router'
 
 import beelineLogotype from '@/shared/assets/beeline-logotype.svg'
+import { routes } from '@/shared/config/routes'
 import { cn } from '@/shared/lib/cn'
+import { preservedContextSearch } from '@/shared/lib/sessionContext'
 import { AppNavMenu } from '@/shared/ui/AppNavMenu'
 import { AppPanel } from '@/shared/ui/AppPanel'
 
@@ -22,6 +25,9 @@ export function BrandBar({
 }: BrandBarProps) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
+  const [params] = useSearchParams()
+  const search = preservedContextSearch(params)
+  const overviewUrl = search ? `${routes.overview}${search}` : routes.overview
 
   useEffect(() => {
     if (!open) return
@@ -54,13 +60,20 @@ export function BrandBar({
       )}
       {...props}
     >
-      <img
-        src={beelineLogotype}
-        alt="билайн маршруты"
-        width={272}
-        height={36}
-        className="h-9 w-[272px] min-w-0 shrink object-cover object-left"
-      />
+      <Link
+        to={overviewUrl}
+        aria-label="На главную"
+        className="min-w-0 shrink cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        style={{ borderRadius: 4 }}
+      >
+        <img
+          src={beelineLogotype}
+          alt="билайн маршруты"
+          width={272}
+          height={36}
+          className="h-9 w-[272px] min-w-0 object-cover object-left"
+        />
+      </Link>
 
       {showMenu ? (
         <>
