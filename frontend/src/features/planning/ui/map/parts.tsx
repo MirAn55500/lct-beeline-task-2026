@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from 'react'
 import { Popover, Tooltip } from '@heroui/react'
-import { RiErrorWarningLine, RiQuestionLine, RiRouterLine, RiTimeLine, RiTvLine } from '@remixicon/react'
+import { RiErrorWarningLine, RiQuestionLine, RiRouterLine, RiTimeLine, RiToolsFill, RiTvLine } from '@remixicon/react'
 
 import { cn } from '@/shared/lib/cn'
 import { getInitials } from '@/shared/lib'
@@ -27,9 +27,9 @@ export function EngineerAvatar({
 }) {
   const TransportIcon = TRANSPORT_FILL_ICON[engineer.transport]
   return (
-    <div className="relative h-12 w-11 shrink-0">
+    <div className="relative size-10 shrink-0">
       <span
-        className="absolute top-0.5 left-0 flex size-11 items-center justify-center bg-surface-tertiary text-xs leading-5 font-medium text-foreground"
+        className="flex size-10 items-center justify-center bg-surface-tertiary text-xs leading-5 font-medium text-foreground"
         style={{ borderRadius: 8 }}
       >
         {getInitials(engineer.name.replace(/^Бригада\s+/, ''))}
@@ -53,16 +53,16 @@ function loadColor(load: number) {
 }
 
 export function LoadRing({ value, trackColor = 'var(--surface-tertiary)' }: { value: number; trackColor?: string }) {
-  const radius = 7
+  const radius = 6.5
   const length = 2 * Math.PI * radius
   return (
     <span className="flex items-center gap-1">
-      <span className="text-sm leading-6 font-medium text-foreground">{value}%</span>
-      <svg width={20} height={20} viewBox="0 0 20 20" aria-hidden className="-rotate-90">
-        <circle cx={10} cy={10} r={radius} fill="none" stroke={trackColor} strokeWidth={2} />
+      <span className="text-xs leading-4 font-semibold text-foreground">{value}%</span>
+      <svg width={16} height={16} viewBox="0 0 16 16" aria-hidden className="-rotate-90">
+        <circle cx={8} cy={8} r={radius} fill="none" stroke={trackColor} strokeWidth={2} />
         <circle
-          cx={10}
-          cy={10}
+          cx={8}
+          cy={8}
           r={radius}
           fill="none"
           stroke={loadColor(value)}
@@ -72,6 +72,45 @@ export function LoadRing({ value, trackColor = 'var(--surface-tertiary)' }: { va
         />
       </svg>
     </span>
+  )
+}
+
+/** Одинаковое компактное содержимое строки инженера для карты и Ганта. */
+export function EngineerSummary({
+  engineer,
+  muted = false,
+  className,
+}: {
+  engineer: MapEngineer
+  muted?: boolean
+  className?: string
+}) {
+  return (
+    <div className={cn('flex min-w-0 items-center gap-2', className)}>
+      <EngineerAvatar engineer={engineer} muted={muted} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="min-w-0 flex-1 truncate text-sm leading-5 font-semibold text-foreground">
+            {engineer.name}
+          </span>
+          <LoadRing
+            value={engineer.load}
+            trackColor={muted ? 'var(--surface)' : 'var(--surface-tertiary)'}
+          />
+        </div>
+        <div className="flex min-w-0 items-center gap-2 text-xs leading-4 text-muted">
+          <span className="flex min-w-0 items-center gap-0.5">
+            <RiToolsFill size={12} className="shrink-0" />
+            <span className="truncate">{engineer.qualification}</span>
+          </span>
+          <MetaSeparator />
+          <span className="flex shrink-0 items-center gap-0.5">
+            <RiTimeLine size={12} />
+            {engineer.routeFrom ? `${engineer.routeFrom}-${engineer.routeTo}` : engineer.shift}
+          </span>
+        </div>
+      </div>
+    </div>
   )
 }
 

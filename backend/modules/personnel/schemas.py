@@ -132,6 +132,7 @@ class EngineerResponse(BaseModel):
     position: str | None = None
     qualification_hint: str | None = None
     is_lead: bool = False
+    planning_enabled: bool = True
     start_work: time | None = None
     end_work: time | None = None
     own_schedule: bool = False
@@ -193,6 +194,12 @@ class CreateEngineerRequest(EngineerFields):
 
 class UpdateEngineerRequest(EngineerFields):
     """Карточка инженера целиком: не переданные часы и дни — как у бригады."""
+
+
+class UpdateEngineerPlanningRequest(BaseModel):
+    """Постоянный допуск инженера к автоматическому планированию."""
+
+    planning_enabled: bool
 
 
 class UploadEngineersResult(BaseModel):

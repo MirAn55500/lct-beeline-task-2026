@@ -18,6 +18,7 @@ from modules.personnel.schemas import (
     UpdateBrigadeRequest,
     UpdateBrigadeResponse,
     UpdateEngineerRequest,
+    UpdateEngineerPlanningRequest,
     UploadEngineersResult,
 )
 from modules.personnel.service import PersonnelService
@@ -166,6 +167,18 @@ async def update_engineer(
 ) -> EngineerResponse:
     """Карточка инженера: не переданные часы и рабочие дни — как у бригады."""
     response = await service.update_engineer(engineer_id, body)
+    plan_boards.clear()
+    return response
+
+
+@router.patch("/engineers/{engineer_id}/planning", response_model=EngineerResponse)
+async def update_engineer_planning(
+    service: PersonnelServiceDep,
+    engineer_id: int,
+    body: UpdateEngineerPlanningRequest,
+) -> EngineerResponse:
+    """Включить или исключить инженера из следующих расчётов плана."""
+    response = await service.update_engineer_planning(engineer_id, body)
     plan_boards.clear()
     return response
 

@@ -265,6 +265,7 @@ def build_scenario(
                 equipment=equipment,
                 input_order=index,
                 lunch=_lunch(day, engineer, office),
+                active=engineer.planning_enabled,
             )
         )
         transport_by_engineer[engineer.engineer_id] = engineer.transport_id
@@ -294,7 +295,13 @@ def restrict_availability(scenario: Scenario, cutoffs: dict[str, datetime]) -> S
             for interval in engineer.work_intervals
             if interval.start < cutoff and min(interval.end, cutoff) > interval.start
         )
-        engineers.append(replace(engineer, work_intervals=trimmed, active=bool(trimmed)))
+        engineers.append(
+            replace(
+                engineer,
+                work_intervals=trimmed,
+                active=engineer.active and bool(trimmed),
+            )
+        )
     return replace(scenario, engineers=tuple(engineers))
 
 
