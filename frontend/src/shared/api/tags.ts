@@ -4,6 +4,8 @@ export const apiTagTypes = [
   'Engineer',
   'Brigade',
   'Plan',
+  /** Выгрузка дня для Ганта/карты — отдельно от day-overview, чтобы не зациклить опрос. */
+  'PlanExport',
   'Assignment',
   'Catalog',
 ] as const

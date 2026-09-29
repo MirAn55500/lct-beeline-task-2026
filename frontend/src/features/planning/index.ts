@@ -1,4 +1,5 @@
 export {
+  markPlanningDay,
   planningApi,
   useGetDayOverviewQuery,
   useGetPlanningHealthQuery,

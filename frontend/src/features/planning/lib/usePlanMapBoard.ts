@@ -49,7 +49,9 @@ export function usePlanMapBoard(
   /** `readOnly` — старая версия плана или прошедший день: руками не правится. */
   options?: { onSaved?: (planId: number) => void; readOnly?: boolean },
 ) {
-  const query = useGetPlanExportQuery(regionId != null ? { regionId, date, planId } : skipToken)
+  const query = useGetPlanExportQuery(regionId != null ? { regionId, date, planId } : skipToken, {
+    refetchOnMountOrArgChange: true,
+  })
   const offline = isOfflineError(query.isError, query.error)
   // Пока грузится другая версия, держим прежние маршруты, а не мигаем пустой картой.
   const plan = query.currentData ?? (query.isFetching ? query.data : undefined)

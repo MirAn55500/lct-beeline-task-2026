@@ -1,6 +1,7 @@
 import { baseApi } from '@/shared/api/baseApi'
 import type { ModuleHealth } from '@/shared/types'
 import type { RebuildLevel } from '@/shared/ui'
+import { markPlanningDay } from '@/features/planning/api'
 
 export type TicketAssignment = 'all' | 'assigned' | 'unassigned'
 
@@ -97,7 +98,38 @@ export const ticketsApi = baseApi.injectEndpoints({
         method: 'POST',
         body,
       }),
-      invalidatesTags: ['Ticket', 'Plan'],
+      invalidatesTags: (_result, _error, body) => {
+        const regionId = body.get('region_id')
+        const date = body.get('date')
+        const day =
+          typeof regionId === 'string' && typeof date === 'string'
+            ? `${regionId}:${date}`
+            : null
+        return [
+          'Ticket',
+          'Plan',
+          'PlanExport',
+          ...(day
+            ? [
+                { type: 'Plan' as const, id: day },
+                { type: 'PlanExport' as const, id: day },
+              ]
+            : []),
+        ]
+      },
+      async onQueryStarted(body, { queryFulfilled }) {
+        try {
+          const { data } = await queryFulfilled
+          if (!data.planning) return
+          const regionId = Number(body.get('region_id'))
+          const date = body.get('date')
+          if (Number.isInteger(regionId) && regionId > 0 && typeof date === 'string') {
+            markPlanningDay(regionId, date)
+          }
+        } catch {
+          // тост покажет useTicketsUpload
+        }
+      },
     }),
     createTicket: build.mutation<CreateTicketResult, CreateTicketBody>({
       query: (body) => ({
@@ -105,7 +137,22 @@ export const ticketsApi = baseApi.injectEndpoints({
         method: 'POST',
         body,
       }),
-      invalidatesTags: ['Ticket', 'Plan'],
+      invalidatesTags: (_result, _error, body) => [
+        'Ticket',
+        'Plan',
+        'PlanExport',
+        { type: 'Plan', id: `${body.region_id}:${body.date}` },
+        { type: 'PlanExport', id: `${body.region_id}:${body.date}` },
+      ],
+      async onQueryStarted(body, { queryFulfilled }) {
+        try {
+          const { data } = await queryFulfilled
+          if (!data.planning) return
+          markPlanningDay(body.region_id, body.date)
+        } catch {
+          // тост покажет useTicketCreate
+        }
+      },
     }),
   }),
 })

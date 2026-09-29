@@ -90,7 +90,10 @@ export const planExportApi = baseApi.injectEndpoints({
           ...(baseline ? { baseline: true } : {}),
         },
       }),
-      providesTags: ['Plan'],
+      providesTags: (_result, _error, arg) => [
+        'PlanExport',
+        { type: 'PlanExport', id: `${arg.regionId}:${arg.date}` },
+      ],
     }),
     // Версия плана не меняется — ход создаёт новую, поэтому окна не инвалидируются по тегу.
     getPlanSlots: build.query<PlanSlotsResponse, number>({
@@ -99,7 +102,8 @@ export const planExportApi = baseApi.injectEndpoints({
     movePlanRequest: build.mutation<PlanMoveResponse, PlanMoveArgs>({
       query: ({ planId, ...body }) => ({ url: `/api/planning/plan/${planId}/move`, method: 'POST', body }),
       // Проверка план не меняет; сохранённый ход — новая версия в списке и на ленте.
-      invalidatesTags: (result, _error, args) => (args.commit && result?.ok ? ['Plan'] : []),
+      invalidatesTags: (result, _error, args) =>
+        args.commit && result?.ok ? ['Plan', 'PlanExport'] : [],
     }),
   }),
 })

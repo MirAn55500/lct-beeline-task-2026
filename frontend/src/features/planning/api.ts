@@ -18,6 +18,11 @@ import type {
  */
 const planningDays = new Set<string>()
 
+/** Пометить день как «считается в фоне» — после upload, пока day-overview ещё не ответил. */
+export function markPlanningDay(regionId: number, date: string) {
+  planningDays.add(`${regionId}:${date}`)
+}
+
 export const planningApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
     getPlanningHealth: build.query<ModuleHealth, void>({
@@ -35,19 +40,36 @@ export const planningApi = baseApi.injectEndpoints({
           ...(planId != null ? { plan_id: planId } : {}),
         },
       }),
-      providesTags: ['Plan'],
+      providesTags: (_result, _error, arg) => [
+        'Plan',
+        { type: 'Plan', id: `${arg.regionId}:${arg.date}` },
+      ],
       // Фоновый расчёт после загрузки закончился — обновить план, карту, Гант и заявки
       async onQueryStarted(args, { dispatch, getCacheEntry, queryFulfilled }) {
         const day = `${args.regionId}:${args.date}`
-        if (getCacheEntry().data?.planning) planningDays.add(day)
+        const prev = getCacheEntry().data
+        if (prev?.planning) planningDays.add(day)
         try {
           const { data } = await queryFulfilled
           if (data.planning) {
             planningDays.add(day)
             return
           }
-          if (!planningDays.delete(day)) return
-          dispatch(planningApi.util.invalidateTags(['Plan', 'Ticket']))
+          const finishedPlanning = planningDays.delete(day)
+          const planAppeared =
+            Boolean(data.has_plan && data.plan_id) &&
+            (!prev?.has_plan || prev.plan_id !== data.plan_id)
+          // PlanExport — отдельно: иначе invalidate 'Plan' снова дергает day-overview.
+          if (finishedPlanning || planAppeared) {
+            dispatch(
+              baseApi.util.invalidateTags([
+                'PlanExport',
+                { type: 'PlanExport', id: day },
+                'Ticket',
+              ]),
+            )
+          }
+          if (!finishedPlanning) return
           if (data.planning_error) {
             toast.danger('План работ не составлен', { description: data.planning_error })
             return
@@ -89,7 +111,13 @@ export const planningApi = baseApi.injectEndpoints({
           ...(compare ? { compare: true } : {}),
         },
       }),
-      invalidatesTags: ['Plan', 'Ticket'],
+      invalidatesTags: (_result, _error, arg) => [
+        'Plan',
+        'PlanExport',
+        'Ticket',
+        { type: 'Plan', id: `${arg.regionId}:${arg.date}` },
+        { type: 'PlanExport', id: `${arg.regionId}:${arg.date}` },
+      ],
     }),
     applyPlanEvent: build.mutation<
       PlanEventResult,
@@ -113,7 +141,13 @@ export const planningApi = baseApi.injectEndpoints({
           ...(at != null ? { at } : {}),
         },
       }),
-      invalidatesTags: ['Plan', 'Ticket'],
+      invalidatesTags: (_result, _error, arg) => [
+        'Plan',
+        'PlanExport',
+        'Ticket',
+        { type: 'Plan', id: `${arg.regionId}:${arg.date}` },
+        { type: 'PlanExport', id: `${arg.regionId}:${arg.date}` },
+      ],
     }),
   }),
 })

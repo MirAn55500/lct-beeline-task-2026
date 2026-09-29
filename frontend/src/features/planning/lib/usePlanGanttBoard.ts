@@ -163,7 +163,10 @@ export function usePlanGanttBoard(
   /** `readOnly` — старая версия плана или прошедший день: заявки не перетаскиваются вовсе. */
   { onSaved, readOnly = false }: { onSaved?: (planId: number) => void; readOnly?: boolean } = {},
 ) {
-  const query = useGetPlanExportQuery(regionId != null ? { regionId, date, planId } : skipToken)
+  const query = useGetPlanExportQuery(regionId != null ? { regionId, date, planId } : skipToken, {
+    // После загрузки заявок кэш пустого дня иначе остаётся при возврате на Гант.
+    refetchOnMountOrArgChange: true,
+  })
   // Ошибка без статуса ответа — backend не поднят, остаёмся на моках.
   const offline = isOfflineError(query.isError, query.error)
   // Пока грузится другая версия, держим прежнюю ленту, а не мигаем пустой.
