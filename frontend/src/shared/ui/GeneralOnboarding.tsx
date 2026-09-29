@@ -1,5 +1,5 @@
 import { Button, Popover } from '@heroui/react'
-import { useEffect, useLayoutEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router'
 
@@ -93,6 +93,7 @@ export function GeneralOnboarding() {
     localStorage.getItem(STORAGE_KEY) ? null : 0,
   )
   const [anchor, setAnchor] = useState<AnchorRect | null>(null)
+  const targetRef = useRef<Element | null>(null)
 
   const step = stepIndex === null ? null : steps[stepIndex]
 
@@ -116,6 +117,7 @@ export function GeneralOnboarding() {
 
   useLayoutEffect(() => {
     if (!step?.target) {
+      targetRef.current = null
       setAnchor(null)
       return
     }
@@ -125,9 +127,12 @@ export function GeneralOnboarding() {
     )
 
     if (!element) {
+      targetRef.current = null
       setAnchor(null)
       return
     }
+
+    targetRef.current = element
 
     element.scrollIntoView({ block: 'nearest', inline: 'nearest' })
 
@@ -185,20 +190,6 @@ export function GeneralOnboarding() {
 
   if (!step || stepIndex === null) return null
 
-  const triggerStyle = anchor
-    ? {
-        top: anchor.top,
-        left: anchor.left,
-        width: anchor.width,
-        height: anchor.height,
-      }
-    : {
-        top: '50%',
-        left: '50%',
-        width: 1,
-        height: 1,
-      }
-
   return createPortal(
     <>
       {anchor ? (
@@ -224,12 +215,13 @@ export function GeneralOnboarding() {
         <Popover.Trigger
           aria-hidden="true"
           className="pointer-events-none fixed z-[81]"
-          style={triggerStyle}
+          style={{ top: '50%', left: '50%', width: 1, height: 1 }}
         />
         <Popover.Content
           className="z-[90] w-80 p-0"
           offset={12}
           placement={step.placement ?? 'bottom'}
+          triggerRef={anchor ? targetRef : undefined}
         >
           {anchor ? <Popover.Arrow /> : null}
           <Popover.Dialog className="flex flex-col gap-3 p-4">
